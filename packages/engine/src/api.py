@@ -42,7 +42,7 @@ app = FastAPI(title="DevProfile Engine", version=VERSION, lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "version": VERSION}
+    return {"ok": True, "version": VERSION}
 
 
 @app.post("/process")
@@ -116,7 +116,10 @@ def profile_summary() -> dict:
 
 @app.get("/insights")
 def insights() -> dict:
-    return insights_gen.generate()
+    try:
+        return insights_gen.generate()
+    except Exception:
+        return {"insights": [], "generated_at": None}
 
 
 @app.get("/export")

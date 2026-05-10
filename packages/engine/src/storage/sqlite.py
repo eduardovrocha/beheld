@@ -6,9 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
+import os
+
 from models import Scores, Session, Signal
 
-DB_PATH = Path.home() / ".devprofile" / "profile.db"
+_DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
+DB_PATH = _DATA_HOME / ".devprofile" / "profile.db"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -77,7 +80,19 @@ class DevProfileDB:
         return self._conn
 
     def init_schema(self) -> None:
-        self.connect().executescript(SCHEMA_SQL)
+        try:
+            self.connect().executescript(SCHEMA_SQL)
+        except sqlite3.DatabaseError:
+            # DB is corrupted — close, delete, and recreate
+            if self._conn:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+            if not self._in_memory and self.db_path.exists():
+                self.db_path.unlink()
+            self.connect().executescript(SCHEMA_SQL)
 
     def close(self) -> None:
         if self._conn:

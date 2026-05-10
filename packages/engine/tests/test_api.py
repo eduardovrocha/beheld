@@ -38,7 +38,7 @@ def client(test_db: DevProfileDB):
 def test_health_ok(client: TestClient) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    assert resp.json()["ok"] is True
 
 
 def test_health_version(client: TestClient) -> None:

@@ -7,12 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import os
+
 from models import DevProfileEvent, Session
 
 logger = logging.getLogger(__name__)
 
-SESSIONS_DIR = Path.home() / ".devprofile" / "sessions"
-CURSOR_FILE = Path.home() / ".devprofile" / ".cursor"
+_DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
+SESSIONS_DIR = _DATA_HOME / ".devprofile" / "sessions"
+CURSOR_FILE = _DATA_HOME / ".devprofile" / ".cursor"
 
 
 def _parse_ts(ts: str) -> datetime:

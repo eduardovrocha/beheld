@@ -117,6 +117,12 @@ export async function removeClaudeCodeHooks(
       );
     }
     cfg.hooks = hooks;
+    // Also clean up legacy mcpServers entry written by older versions
+    const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
+    if ("devprofile" in mcpServers) {
+      delete mcpServers["devprofile"];
+      cfg.mcpServers = mcpServers;
+    }
     writeJson(settingsFile, cfg);
   } catch {
     restoreBackup(settingsFile);
@@ -197,13 +203,15 @@ export function claudeJsonPath(base = homedir()): string {
 
 export async function installClaudeMcpServer(
   claudeJson = claudeJsonPath(),
+  base = homedir(),
 ): Promise<void> {
   const cfg = readJson(claudeJson);
   const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
   if (!mcpServers["devprofile"]) {
     mcpServers["devprofile"] = {
-      type: "http",
-      url: "http://127.0.0.1:7337/mcp",
+      type: "stdio",
+      command: join(base, ".local", "bin", "devprofile"),
+      args: ["server"],
     };
     cfg.mcpServers = mcpServers;
     writeJson(claudeJson, cfg);

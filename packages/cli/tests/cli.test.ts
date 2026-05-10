@@ -264,11 +264,14 @@ describe("hooks idempotency", () => {
     expect(cfg.mcpServers?.devprofile).toBeUndefined();
   });
 
-  test("installClaudeMcpServer adds devprofile to ~/.claude.json", async () => {
+  test("installClaudeMcpServer adds devprofile to ~/.claude.json with stdio", async () => {
     await installClaudeMcpServer(claudeJson);
     const cfg = JSON.parse(readFileSync(claudeJson, "utf8"));
-    expect(cfg.mcpServers?.devprofile?.type).toBe("http");
-    expect(cfg.mcpServers?.devprofile?.url).toBe("http://127.0.0.1:7337/mcp");
+    const entry = cfg.mcpServers?.devprofile;
+    expect(entry?.type).toBe("stdio");
+    expect(entry?.command).toContain(".local/bin/devprofile");
+    expect(entry?.args).toEqual(["server"]);
+    expect(entry?.url).toBeUndefined();
   });
 
   test("installClaudeMcpServer is idempotent", async () => {

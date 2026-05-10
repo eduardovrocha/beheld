@@ -56,7 +56,7 @@ function makeHook(endpoint: string): HookMatcher {
     hooks: [
       {
         type: "command",
-        command: `curl -s -X POST http://localhost:7337/hook/${endpoint} -H 'Content-Type: application/json' -d @-`,
+        command: `curl -s -X POST http://127.0.0.1:7337/hook/${endpoint} -H 'Content-Type: application/json' -d @-`,
       },
     ],
   };
@@ -97,8 +97,7 @@ export async function installClaudeCodeHooks(
   const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
   if (!mcpServers["devprofile"]) {
     mcpServers["devprofile"] = {
-      type: "http",
-      url: "http://localhost:7337/mcp",
+      url: "http://127.0.0.1:7337/mcp",
     };
   }
   cfg.mcpServers = mcpServers;
@@ -155,7 +154,7 @@ export async function installContinueDevMcp(
   if (!servers.some((s) => s.name === "devprofile")) {
     servers.push({
       name: "devprofile",
-      transport: { type: "http", url: "http://localhost:7337/mcp" },
+      transport: { type: "http", url: "http://127.0.0.1:7337/mcp" },
     });
   }
   cfg.mcpServers = servers;
@@ -176,12 +175,41 @@ export async function removeContinueDevMcp(
   }
 }
 
+// ── Claude Code slash commands ────────────────────────────────────────────────
+
+export function claudeCommandPath(base = homedir()): string {
+  return join(base, ".claude", "commands", "devprofile.md");
+}
+
+const SLASH_COMMAND_CONTENT = `Use the devprofile MCP tool with view="$ARGUMENTS" (use "summary" if no argument given) and display the result exactly as returned, without adding any commentary.
+`;
+
+export async function installClaudeSlashCommand(
+  commandFile = claudeCommandPath(),
+): Promise<void> {
+  mkdirSync(dirname(commandFile), { recursive: true });
+  if (!existsSync(commandFile)) {
+    writeFileSync(commandFile, SLASH_COMMAND_CONTENT);
+  }
+}
+
+export async function removeClaudeSlashCommand(
+  commandFile = claudeCommandPath(),
+): Promise<void> {
+  if (existsSync(commandFile)) {
+    const { unlinkSync } = await import("node:fs");
+    try { unlinkSync(commandFile); } catch { /* ignore */ }
+  }
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
 
 export async function removeAllHooks(
   settingsFile = claudeSettingsPath(),
   configFile = continueConfigPath(),
+  commandFile = claudeCommandPath(),
 ): Promise<void> {
   await removeClaudeCodeHooks(settingsFile);
   await removeContinueDevMcp(configFile);
+  await removeClaudeSlashCommand(commandFile);
 }

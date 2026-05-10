@@ -23,4 +23,6 @@ export interface ClaudeCodeHookPayload {
   tool_response?: unknown;
   timestamp?: string;
   total_turns?: number;
+  cwd?: string;
+  hook_event_name?: string;
 }

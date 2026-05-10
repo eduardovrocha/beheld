@@ -1,6 +1,19 @@
+import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
-from main import app, VERSION
+from api import VERSION, app
+from storage.sqlite import DevProfileDB
+
+
+@pytest.fixture(autouse=True)
+def isolated_db(db_path):
+    tmp = DevProfileDB(db_path)
+    tmp.init_schema()
+    with patch("api.db", tmp):
+        yield
+    tmp.close()
+
 
 client = TestClient(app)
 
@@ -35,6 +48,8 @@ def test_scores_current_returns_four_dimensions():
 
 
 def test_process_endpoint():
-    response = client.post("/process")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    from unittest.mock import patch
+    with patch("api.read_all_events", return_value=[]):
+        response = client.post("/process")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"

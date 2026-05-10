@@ -1,30 +1,24 @@
 import { test, expect, describe } from "bun:test";
-import {
-  handlePreTool,
-  handlePostTool,
-  handleStop,
-} from "../src/hooks/claude-code";
+import { handlePreToolUse, handlePostToolUse, handleStop } from "../src/hooks/claude-code";
+import { createHash } from "crypto";
 
-describe("handlePreTool", () => {
+describe("handlePreToolUse", () => {
   test("creates pre_tool_use event from Bash tool", () => {
-    const event = handlePreTool({
+    const event = handlePreToolUse({
       session_id: "sess-1",
       tool_name: "Bash",
-      tool_input: { command: "npm test" },
+      tool_input: { command: "npm run build" },
       timestamp: "2026-05-10T12:00:00Z",
     });
     expect(event.event_type).toBe("pre_tool_use");
     expect(event.session_id).toBe("sess-1");
     expect(event.tool_name).toBe("Bash");
     expect(event.source).toBe("claude-code");
-    expect(event.command_sanitized).toContain("npm test");
-    expect(event.event_id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
+    expect(event.event_id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  test("detects test context from rspec command", () => {
-    const event = handlePreTool({
+  test("detects has_test_context when command contains rspec", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Bash",
       tool_input: { command: "rspec spec/models/user_spec.rb" },
@@ -32,35 +26,62 @@ describe("handlePreTool", () => {
     expect(event.has_test_context).toBe(true);
   });
 
-  test("detects test context from pytest command", () => {
-    const event = handlePreTool({
+  test("detects has_test_context when command contains jest", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Bash",
-      tool_input: { command: "pytest tests/" },
+      tool_input: { command: "jest --watch" },
     });
     expect(event.has_test_context).toBe(true);
   });
 
-  test("detects test context from spec file path in Read tool", () => {
-    const event = handlePreTool({
+  test("detects has_test_context when command contains pytest", () => {
+    const event = handlePreToolUse({
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "pytest tests/ -v" },
+    });
+    expect(event.has_test_context).toBe(true);
+  });
+
+  test("detects has_test_context when command contains playwright", () => {
+    const event = handlePreToolUse({
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "npx playwright test" },
+    });
+    expect(event.has_test_context).toBe(true);
+  });
+
+  test("detects has_test_context when command contains vitest", () => {
+    const event = handlePreToolUse({
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "vitest run" },
+    });
+    expect(event.has_test_context).toBe(true);
+  });
+
+  test("has_test_context is false for non-test commands", () => {
+    const event = handlePreToolUse({
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "git status" },
+    });
+    expect(event.has_test_context).toBe(false);
+  });
+
+  test("has_test_context is undefined for non-Bash tools", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Read",
-      tool_input: { file_path: "/project/spec/user_spec.rb" },
+      tool_input: { file_path: "/project/src/app.ts" },
     });
-    expect(event.has_test_context).toBe(true);
+    expect(event.has_test_context).toBeUndefined();
   });
 
-  test("detects test context from .test. file extension", () => {
-    const event = handlePreTool({
-      session_id: "s1",
-      tool_name: "Write",
-      tool_input: { file_path: "/project/src/utils.test.ts" },
-    });
-    expect(event.has_test_context).toBe(true);
-  });
-
-  test("extracts ts file extension from Read tool", () => {
-    const event = handlePreTool({
+  test("extracts file_extension from Read tool path", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Read",
       tool_input: { file_path: "/project/src/app.ts" },
@@ -68,17 +89,26 @@ describe("handlePreTool", () => {
     expect(event.file_extension).toBe("ts");
   });
 
-  test("extracts rb file extension", () => {
-    const event = handlePreTool({
+  test("extracts file_extension from Write tool path", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
-      tool_name: "Read",
-      tool_input: { file_path: "/project/app/models/user.rb" },
+      tool_name: "Write",
+      tool_input: { file_path: "/project/src/models/user.rb" },
     });
     expect(event.file_extension).toBe("rb");
   });
 
-  test("no command_sanitized for non-Bash tools", () => {
-    const event = handlePreTool({
+  test("command_sanitized is set for Bash tools", () => {
+    const event = handlePreToolUse({
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+    });
+    expect(event.command_sanitized).toContain("npm test");
+  });
+
+  test("command_sanitized is undefined for non-Bash tools", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Read",
       tool_input: { file_path: "/project/src/app.ts" },
@@ -86,48 +116,49 @@ describe("handlePreTool", () => {
     expect(event.command_sanitized).toBeUndefined();
   });
 
-  test("sanitizes API keys in bash commands", () => {
-    const event = handlePreTool({
+  test("cwd_hash is SHA256 hex of cwd", () => {
+    const cwd = "/Users/john/secret-project";
+    const expected = createHash("sha256").update(cwd).digest("hex");
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Bash",
-      tool_input: {
-        command:
-          "curl -H 'Authorization: Bearer sk-abc12345678901234567890123456789012345' api.example.com",
-      },
+      tool_input: { command: "ls" },
+      cwd,
     });
-    expect(event.command_sanitized).not.toContain("sk-abc");
-    expect(event.command_sanitized).toContain("[REDACTED]");
+    expect(event.cwd_hash).toBe(expected);
   });
 
-  test("hashes cwd without revealing path", () => {
-    const event = handlePreTool({
+  test("cwd_hash does not contain the raw path", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Bash",
       tool_input: { command: "ls" },
       cwd: "/Users/john/secret-project",
     });
-    expect(event.cwd_hash).toBeTruthy();
     expect(event.cwd_hash).not.toContain("john");
-    expect(event.cwd_hash).not.toContain("secret-project");
+    expect(event.cwd_hash).not.toContain("secret");
   });
 
-  test("no test context for non-test code", () => {
-    const event = handlePreTool({
+  test("sanitizes API keys embedded in tool_input before storing", () => {
+    const event = handlePreToolUse({
       session_id: "s1",
       tool_name: "Bash",
-      tool_input: { command: "git status" },
+      tool_input: {
+        command: "echo ok",
+        env: "ANTHROPIC_API_KEY=sk-testABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+      },
     });
-    expect(event.has_test_context).toBe(false);
+    expect(JSON.stringify(event.metadata)).not.toContain("sk-test");
   });
 });
 
-describe("handlePostTool", () => {
+describe("handlePostToolUse", () => {
   test("creates post_tool_use event", () => {
-    const event = handlePostTool({
+    const event = handlePostToolUse({
       session_id: "s1",
       tool_name: "Bash",
       duration_ms: 1234,
-    } as Parameters<typeof handlePostTool>[0] & { duration_ms: number });
+    });
     expect(event.event_type).toBe("post_tool_use");
     expect(event.tool_name).toBe("Bash");
     expect(event.duration_ms).toBe(1234);
@@ -135,7 +166,7 @@ describe("handlePostTool", () => {
   });
 
   test("duration_ms is optional", () => {
-    const event = handlePostTool({ session_id: "s1", tool_name: "Read" });
+    const event = handlePostToolUse({ session_id: "s1", tool_name: "Read" });
     expect(event.duration_ms).toBeUndefined();
   });
 });
@@ -153,9 +184,10 @@ describe("handleStop", () => {
     expect(event.timestamp).toBe("2026-05-10T12:30:00Z");
   });
 
-  test("uses current timestamp when not provided", () => {
-    const before = new Date().toISOString();
+  test("uses current timestamp when none provided", () => {
+    const before = Date.now();
     const event = handleStop({ session_id: "s1" });
-    expect(event.timestamp >= before).toBe(true);
+    const ts = new Date(event.timestamp).getTime();
+    expect(ts).toBeGreaterThanOrEqual(before);
   });
 });

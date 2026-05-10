@@ -2,112 +2,141 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { writeEvent, getSessionsInfo } from "../src/writers/jsonl";
+import { JsonlWriter } from "../src/writers/jsonl";
 import type { DevProfileEvent } from "../src/types";
 
 let tmpDir: string;
+let baseDir: string;
+let writer: JsonlWriter;
 
-function makeEvent(id: string): DevProfileEvent {
+function makeEvent(id: string, sessionId = "session-A", timestamp?: string): DevProfileEvent {
   return {
     event_id: id,
-    session_id: "s1",
+    session_id: sessionId,
     source: "claude-code",
     event_type: "pre_tool_use",
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp ?? new Date().toISOString(),
     metadata: {},
   };
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-jsonl-test-"));
-  process.env.DEVPROFILE_DATA_DIR = tmpDir;
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-jsonl-"));
+  baseDir = path.join(tmpDir, ".devprofile");
+  writer = new JsonlWriter(baseDir);
 });
 
 afterEach(() => {
-  delete process.env.DEVPROFILE_DATA_DIR;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("writeEvent", () => {
-  test("creates .devprofile directory with 700 permissions", () => {
-    writeEvent(makeEvent("e1"));
-    const dir = path.join(tmpDir, ".devprofile");
-    expect(fs.existsSync(dir)).toBe(true);
-    const stat = fs.statSync(dir);
+describe("JsonlWriter", () => {
+  test("creates .devprofile directory with 700 permissions", async () => {
+    await writer.write(makeEvent("e1"));
+    const stat = fs.statSync(baseDir);
     expect(stat.mode & 0o777).toBe(0o700);
   });
 
-  test("creates sessions subdirectory", () => {
-    writeEvent(makeEvent("e1"));
-    expect(fs.existsSync(path.join(tmpDir, ".devprofile", "sessions"))).toBe(true);
+  test("creates sessions subdirectory", async () => {
+    await writer.write(makeEvent("e1"));
+    expect(fs.existsSync(path.join(baseDir, "sessions"))).toBe(true);
   });
 
-  test("writes event as JSON line to JSONL file", () => {
-    const event = makeEvent("event-abc");
-    writeEvent(event);
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
-    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
-    expect(files.length).toBe(1);
-    const content = fs.readFileSync(path.join(sessionsDir, files[0]), "utf8");
-    const parsed = JSON.parse(content.trim()) as DevProfileEvent;
-    expect(parsed.event_id).toBe("event-abc");
-    expect(parsed.source).toBe("claude-code");
-  });
-
-  test("JSONL file name contains today's date", () => {
-    writeEvent(makeEvent("e1"));
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
-    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+  test("file is named YYYY-MM-DD_<session-id>.jsonl", async () => {
+    const event = makeEvent("e1", "my-session-uuid");
+    await writer.write(event);
     const today = new Date().toISOString().slice(0, 10);
-    expect(files[0]).toStartWith(today);
-  });
-
-  test("multiple events append to the same file on the same day", () => {
-    writeEvent(makeEvent("e1"));
-    writeEvent(makeEvent("e2"));
-    writeEvent(makeEvent("e3"));
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = path.join(baseDir, "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     expect(files.length).toBe(1);
-    const content = fs.readFileSync(path.join(sessionsDir, files[0]), "utf8");
-    const lines = content.trim().split("\n").filter(Boolean);
+    expect(files[0]).toStartWith(today);
+    expect(files[0]).toContain("my-session-uuid");
+  });
+
+  test("multiple events with the same session_id go to the same file", async () => {
+    await writer.write(makeEvent("e1", "sess-X"));
+    await writer.write(makeEvent("e2", "sess-X"));
+    await writer.write(makeEvent("e3", "sess-X"));
+
+    const sessionsDir = path.join(baseDir, "sessions");
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    expect(files.length).toBe(1);
+
+    const lines = fs.readFileSync(path.join(sessionsDir, files[0]), "utf8")
+      .trim().split("\n").filter(Boolean);
     expect(lines.length).toBe(3);
-    const ids = lines.map((l) => (JSON.parse(l) as DevProfileEvent).event_id);
-    expect(ids).toEqual(["e1", "e2", "e3"]);
   });
 
-  test("creates index.json with file entry", () => {
-    writeEvent(makeEvent("e1"));
-    const indexPath = path.join(tmpDir, ".devprofile", "sessions", "index.json");
-    expect(fs.existsSync(indexPath)).toBe(true);
-    const index = JSON.parse(fs.readFileSync(indexPath, "utf8")) as {
-      files: Array<{ date: string; path: string; event_count: number }>;
-    };
-    expect(index.files).toHaveLength(1);
-    expect(index.files[0].date).toBe(new Date().toISOString().slice(0, 10));
+  test("events with different session_ids go to different files", async () => {
+    await writer.write(makeEvent("e1", "sess-A"));
+    await writer.write(makeEvent("e2", "sess-B"));
+
+    const sessionsDir = path.join(baseDir, "sessions");
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    expect(files.length).toBe(2);
   });
 
-  test("index.json event_count increments per write", () => {
-    writeEvent(makeEvent("e1"));
-    writeEvent(makeEvent("e2"));
-    const indexPath = path.join(tmpDir, ".devprofile", "sessions", "index.json");
-    const index = JSON.parse(fs.readFileSync(indexPath, "utf8")) as {
-      files: Array<{ event_count: number }>;
-    };
-    expect(index.files[0].event_count).toBe(2);
+  test("file is append-only — never overwrites", async () => {
+    await writer.write(makeEvent("e1", "sess-A"));
+    // Re-create writer to simulate restart (no in-memory cache)
+    const writer2 = new JsonlWriter(baseDir);
+    await writer2.write(makeEvent("e2", "sess-A"));
+
+    const sessionsDir = path.join(baseDir, "sessions");
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    const content = fs.readFileSync(path.join(sessionsDir, files[0]), "utf8");
+    const ids = content.trim().split("\n").filter(Boolean)
+      .map((l) => (JSON.parse(l) as DevProfileEvent).event_id);
+    expect(ids).toContain("e1");
+    expect(ids).toContain("e2");
   });
 
-  test("getSessionsInfo returns index data", () => {
-    writeEvent(makeEvent("e1"));
-    const info = getSessionsInfo();
-    expect(info.files).toHaveLength(1);
-    expect(info.files[0].event_count).toBe(1);
+  test("events on different days use different filenames", async () => {
+    // Day 1 event
+    const day1 = makeEvent("e1", "sess-A", "2026-05-09T10:00:00Z");
+    await writer.write(day1);
+
+    // Manually simulate the session file being from the previous day
+    // by writing a day2 event with a fresh writer (no in-memory cache)
+    const writer2 = new JsonlWriter(baseDir);
+    const day2 = makeEvent("e2", "sess-A", "2026-05-10T10:00:00Z");
+    await writer2.write(day2);
+
+    const sessionsDir = path.join(baseDir, "sessions");
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    // Each event went to its own day-file
+    const dates = files.map((f) => f.slice(0, 10));
+    expect(dates).toContain("2026-05-09");
+    expect(dates).toContain("2026-05-10");
   });
 
-  test("stores all event fields correctly", () => {
+  test("creates index.json with correct entry", async () => {
+    await writer.write(makeEvent("e1", "sess-A"));
+    const idx = await writer.index();
+    expect(idx.files).toHaveLength(1);
+    expect(idx.files[0].session_id).toBe("sess-A");
+    expect(idx.files[0].events).toBe(1);
+  });
+
+  test("index event_count increments per write", async () => {
+    await writer.write(makeEvent("e1", "sess-A"));
+    await writer.write(makeEvent("e2", "sess-A"));
+    const idx = await writer.index();
+    expect(idx.files[0].events).toBe(2);
+  });
+
+  test("index size_bytes reflects actual file size", async () => {
+    await writer.write(makeEvent("e1", "sess-A"));
+    const idx = await writer.index();
+    const fp = idx.files[0].path;
+    const actualSize = fs.statSync(fp).size;
+    expect(idx.files[0].size_bytes).toBe(actualSize);
+  });
+
+  test("stored JSON line contains all event fields", async () => {
     const event: DevProfileEvent = {
-      event_id: "full-event",
-      session_id: "sess-xyz",
+      event_id: "full-e",
+      session_id: "sess-full",
       source: "claude-code",
       event_type: "pre_tool_use",
       timestamp: "2026-05-10T12:00:00Z",
@@ -118,8 +147,8 @@ describe("writeEvent", () => {
       cwd_hash: "abc12345",
       metadata: { extra: true },
     };
-    writeEvent(event);
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    await writer.write(event);
+    const sessionsDir = path.join(baseDir, "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const parsed = JSON.parse(
       fs.readFileSync(path.join(sessionsDir, files[0]), "utf8").trim(),

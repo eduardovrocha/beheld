@@ -1,126 +1,113 @@
 import * as fs from "fs";
 import * as path from "path";
-import { randomUUID } from "crypto";
+import { gzipSync } from "zlib";
 import type { DevProfileEvent } from "../types";
-import { getDevProfileDir } from "../daemon";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
-interface SessionFileEntry {
+export interface SessionFile {
+  session_id: string;
   date: string;
   path: string;
-  event_count: number;
+  events: number;
+  size_bytes: number;
 }
 
-interface SessionIndex {
-  files: SessionFileEntry[];
+export interface SessionIndex {
+  files: SessionFile[];
+  updated_at: string;
 }
 
-// Module-level cache: reset when base dir changes (test isolation)
-let _cachedDir: string | null = null;
-let _currentFile: string | null = null;
-let _currentDate: string | null = null;
-
-function getSessionsDir(): string {
-  const dir = getDevProfileDir();
-  if (dir !== _cachedDir) {
-    _cachedDir = dir;
-    _currentFile = null;
-    _currentDate = null;
-  }
-  return path.join(dir, "sessions");
+function sanitizeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9\-_]/g, "-").slice(0, 64);
 }
 
-function getIndexFile(): string {
-  return path.join(getSessionsDir(), "index.json");
+function dateOf(timestamp?: string): string {
+  return (timestamp ? new Date(timestamp) : new Date()).toISOString().slice(0, 10);
 }
 
-function ensureDirs(): void {
-  const base = getDevProfileDir();
-  if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true, mode: 0o700 });
-  const sessions = getSessionsDir();
-  if (!fs.existsSync(sessions)) fs.mkdirSync(sessions, { recursive: true });
-}
+export class JsonlWriter {
+  private sessionsDir: string;
+  private indexPath: string;
+  // session_id → current file path on disk
+  private sessionFiles = new Map<string, string>();
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function loadIndex(): SessionIndex {
-  const f = getIndexFile();
-  if (!fs.existsSync(f)) return { files: [] };
-  try {
-    return JSON.parse(fs.readFileSync(f, "utf8")) as SessionIndex;
-  } catch {
-    return { files: [] };
-  }
-}
-
-function saveIndex(index: SessionIndex): void {
-  fs.writeFileSync(getIndexFile(), JSON.stringify(index, null, 2));
-}
-
-function createNewFile(): string {
-  const date = today();
-  const uuid = randomUUID().slice(0, 8);
-  const filePath = path.join(getSessionsDir(), `${date}_${uuid}.jsonl`);
-  fs.writeFileSync(filePath, "");
-
-  const index = loadIndex();
-  index.files.push({ date, path: filePath, event_count: 0 });
-  saveIndex(index);
-
-  _currentFile = filePath;
-  _currentDate = date;
-  return filePath;
-}
-
-function getActiveFile(): string {
-  ensureDirs();
-  const date = today();
-
-  // Rotate on new day
-  if (_currentDate !== date) {
-    return createNewFile();
+  constructor(baseDir: string) {
+    this.sessionsDir = path.join(baseDir, "sessions");
+    this.indexPath = path.join(this.sessionsDir, "index.json");
+    this.ensureDirs(baseDir);
   }
 
-  // Rotate on size limit
-  if (_currentFile && fs.existsSync(_currentFile)) {
-    const { size } = fs.statSync(_currentFile);
-    if (size >= MAX_FILE_SIZE) return createNewFile();
-    return _currentFile;
-  }
-
-  // Resume existing file for today from index
-  const index = loadIndex();
-  const todayFiles = index.files.filter((f) => f.date === date);
-  if (todayFiles.length > 0) {
-    const last = todayFiles[todayFiles.length - 1];
-    if (fs.existsSync(last.path)) {
-      const { size } = fs.statSync(last.path);
-      if (size < MAX_FILE_SIZE) {
-        _currentFile = last.path;
-        _currentDate = date;
-        return last.path;
-      }
+  private ensureDirs(baseDir: string): void {
+    if (!fs.existsSync(baseDir)) {
+      fs.mkdirSync(baseDir, { recursive: true, mode: 0o700 });
+    }
+    if (!fs.existsSync(this.sessionsDir)) {
+      fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
   }
 
-  return createNewFile();
-}
-
-export function writeEvent(event: DevProfileEvent): void {
-  const filePath = getActiveFile();
-  fs.appendFileSync(filePath, JSON.stringify(event) + "\n");
-
-  const index = loadIndex();
-  const entry = index.files.find((f) => f.path === filePath);
-  if (entry) {
-    entry.event_count++;
-    saveIndex(index);
+  private filePath(sessionId: string, date: string): string {
+    return path.join(this.sessionsDir, `${date}_${sanitizeId(sessionId)}.jsonl`);
   }
-}
 
-export function getSessionsInfo(): { files: SessionFileEntry[] } {
-  return loadIndex();
+  private loadIndex(): SessionIndex {
+    if (!fs.existsSync(this.indexPath)) {
+      return { files: [], updated_at: new Date().toISOString() };
+    }
+    try {
+      return JSON.parse(fs.readFileSync(this.indexPath, "utf8")) as SessionIndex;
+    } catch {
+      return { files: [], updated_at: new Date().toISOString() };
+    }
+  }
+
+  private saveIndex(idx: SessionIndex): void {
+    idx.updated_at = new Date().toISOString();
+    fs.writeFileSync(this.indexPath, JSON.stringify(idx, null, 2));
+  }
+
+  private compressAndRotate(filePath: string): void {
+    const data = fs.readFileSync(filePath);
+    fs.writeFileSync(`${filePath}.gz`, gzipSync(data));
+    fs.unlinkSync(filePath);
+  }
+
+  async write(event: DevProfileEvent): Promise<void> {
+    const { session_id, timestamp } = event;
+    const date = dateOf(timestamp);
+
+    let fp = this.sessionFiles.get(session_id) ?? this.filePath(session_id, date);
+
+    // Rotate on size limit
+    if (fs.existsSync(fp) && fs.statSync(fp).size >= MAX_FILE_SIZE) {
+      this.compressAndRotate(fp);
+      fp = this.filePath(session_id, date);
+    }
+
+    this.sessionFiles.set(session_id, fp);
+    fs.appendFileSync(fp, JSON.stringify(event) + "\n");
+
+    // Update index
+    const idx = this.loadIndex();
+    let entry = idx.files.find((f) => f.path === fp);
+    if (!entry) {
+      entry = { session_id, date, path: fp, events: 0, size_bytes: 0 };
+      idx.files.push(entry);
+    }
+    entry.events++;
+    entry.size_bytes = fs.existsSync(fp) ? fs.statSync(fp).size : 0;
+    this.saveIndex(idx);
+  }
+
+  async index(): Promise<SessionIndex> {
+    const idx = this.loadIndex();
+    // Sync size_bytes from disk in case files were modified outside this process
+    for (const entry of idx.files) {
+      if (fs.existsSync(entry.path)) {
+        entry.size_bytes = fs.statSync(entry.path).size;
+      }
+    }
+    return idx;
+  }
 }

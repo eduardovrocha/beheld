@@ -1,7 +1,10 @@
-import { handlePreTool, handlePostTool, handleStop } from "./hooks/claude-code";
+import * as os from "os";
+import * as path from "path";
+import { handlePreToolUse, handlePostToolUse, handleStop } from "./hooks/claude-code";
 import { handleMcpRequest } from "./hooks/continue";
-import { writeEvent } from "./writers/jsonl";
-import { writePid, clearPid, rotateLogs } from "./daemon";
+import { sanitize } from "./sanitizer";
+import { JsonlWriter } from "./writers/jsonl";
+import { writePid, clearPid, rotateLogs, getDevProfileDir } from "./daemon";
 import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import type { DevProfileEvent } from "./types";
@@ -10,6 +13,11 @@ import type { McpTool } from "./tools/types";
 const PORT = parseInt(process.env.DEVPROFILE_PORT ?? "7337", 10);
 const VERSION = "0.1.0";
 const TOOLS: McpTool[] = [devprofileTool, statusTool];
+const startedAt = Date.now();
+
+const writer = new JsonlWriter(getDevProfileDir());
+
+// ─── In-memory session state ────────────────────────────────────────────────
 
 interface SessionMeta {
   session_id: string;
@@ -21,11 +29,10 @@ interface SessionMeta {
 }
 
 const sessions = new Map<string, SessionMeta>();
-let totalEventsToday = 0;
-let totalSessionsToday = 0;
-const startedAt = new Date().toISOString();
+let eventsToday = 0;
+let sessionsToday = 0;
 
-function updateSession(event: DevProfileEvent): void {
+function trackEvent(event: DevProfileEvent): void {
   if (!sessions.has(event.session_id)) {
     sessions.set(event.session_id, {
       session_id: event.session_id,
@@ -34,41 +41,89 @@ function updateSession(event: DevProfileEvent): void {
       tools_seen: new Set(),
       has_test_context: false,
     });
-    totalSessionsToday++;
+    sessionsToday++;
   }
   const s = sessions.get(event.session_id)!;
   s.event_count++;
-  if (event.tool_name) {
-    s.last_tool = event.tool_name;
-    s.tools_seen.add(event.tool_name);
-  }
+  if (event.tool_name) { s.last_tool = event.tool_name; s.tools_seen.add(event.tool_name); }
   if (event.has_test_context) s.has_test_context = true;
-  totalEventsToday++;
+  eventsToday++;
 }
 
-function detectWorkflow(s: SessionMeta): string {
-  const tools = [...s.tools_seen];
-  if (s.has_test_context && tools.includes("Bash")) return "debug-driven";
-  if (s.has_test_context) return "test-after";
-  if (tools.includes("Bash") && tools.some((t) => t.includes("Edit") || t.includes("Write")))
-    return "iterative";
-  return "exploratory";
-}
-
-function getLatestSession(): SessionMeta | null {
+function latestSession(): SessionMeta | null {
   const vals = [...sessions.values()];
   return vals.length > 0 ? vals[vals.length - 1] : null;
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
+// ─── MCP protocol responses for Continue.dev ─────────────────────────────────
+
+async function mcpResponse(body: unknown): Promise<unknown> {
+  const req = body as { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
+  const id = req.id ?? null;
+
+  if (req.method === "initialize") {
+    return {
+      jsonrpc: "2.0", id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "devprofile", version: VERSION },
+      },
+    };
+  }
+
+  if (req.method === "tools/list") {
+    return {
+      jsonrpc: "2.0", id,
+      result: {
+        tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+      },
+    };
+  }
+
+  if (req.method === "tools/call") {
+    const params = req.params as Record<string, unknown> | undefined ?? {};
+    const toolName = params.name as string;
+    const args = (params.arguments as Record<string, unknown>) ?? {};
+    const tool = TOOLS.find((t) => t.name === toolName);
+    if (!tool) {
+      return { jsonrpc: "2.0", id, error: { code: -32601, message: `Tool not found: ${toolName}` } };
+    }
+    try {
+      const result = await tool.handler(args);
+      return {
+        jsonrpc: "2.0", id,
+        result: { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] },
+      };
+    } catch (err) {
+      return { jsonrpc: "2.0", id, error: { code: -32603, message: "Internal tool error" } };
+    }
+  }
+
+  if (typeof req.method === "string" && req.method.startsWith("notifications/")) {
+    return { jsonrpc: "2.0", id, result: null };
+  }
+
+  return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${req.method}` } };
+}
+
+// ─── HTTP helpers ─────────────────────────────────────────────────────────────
+
+function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
   });
 }
 
+function badRequest(msg: string): Response {
+  return json({ error: msg }, 400);
+}
+
+// ─── Server ───────────────────────────────────────────────────────────────────
+
 export function startServer(): ReturnType<typeof Bun.serve> {
-  const server = Bun.serve({
+  return Bun.serve({
     port: PORT,
     hostname: "127.0.0.1",
 
@@ -76,125 +131,112 @@ export function startServer(): ReturnType<typeof Bun.serve> {
       const url = new URL(req.url);
       const method = req.method;
 
-      // ─── Health ───────────────────────────────────────────────────────────
       if (method === "GET" && url.pathname === "/health") {
-        return jsonResponse({ status: "ok", version: VERSION, port: PORT });
+        return json({ ok: true, version: VERSION, uptime_seconds: Math.floor((Date.now() - startedAt) / 1000) });
       }
 
-      // ─── Daemon status ────────────────────────────────────────────────────
       if (method === "GET" && url.pathname === "/status") {
-        const current = getLatestSession();
-        return jsonResponse({
-          status: "running",
-          version: VERSION,
+        const current = latestSession();
+        return json({
+          running: true,
+          session_active: current !== null,
+          events_today: eventsToday,
+          sessions_today: sessionsToday,
           pid: process.pid,
-          started_at: startedAt,
-          port: PORT,
-          sessions_today: totalSessionsToday,
-          events_today: totalEventsToday,
-          current_session: current
-            ? {
-                session_id: current.session_id,
-                event_count: current.event_count,
-                workflow: detectWorkflow(current),
-              }
-            : null,
         });
       }
 
-      // ─── Session metrics ──────────────────────────────────────────────────
       if (method === "GET" && url.pathname === "/session/current") {
-        const current = getLatestSession();
-        if (!current) return jsonResponse({ active: false });
+        const current = latestSession();
+        if (!current) return json({ active: false });
         const durationMs = Date.now() - new Date(current.started_at).getTime();
-        return jsonResponse({
+        return json({
           active: true,
           session_id: current.session_id,
           duration_minutes: Math.round(durationMs / 60_000),
           event_count: current.event_count,
           tools_used: [...current.tools_seen],
-          workflow: detectWorkflow(current),
           has_test_context: current.has_test_context,
         });
       }
 
-      // ─── Claude Code hooks ────────────────────────────────────────────────
       if (method === "POST" && url.pathname === "/hook/pre-tool") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
         try {
-          const payload = await req.json();
-          const event = handlePreTool(payload);
-          writeEvent(event);
-          updateSession(event);
-          return jsonResponse({ ok: true });
+          const event = handlePreToolUse(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
         } catch (err) {
-          return jsonResponse({ ok: false, error: String(err) }, 400);
+          console.error("[pre-tool]", err);
+          return json({ error: "Processing failed" }, 500);
         }
       }
 
       if (method === "POST" && url.pathname === "/hook/post-tool") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
         try {
-          const payload = await req.json();
-          const event = handlePostTool(payload);
-          writeEvent(event);
-          updateSession(event);
-          return jsonResponse({ ok: true });
+          const event = handlePostToolUse(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
         } catch (err) {
-          return jsonResponse({ ok: false, error: String(err) }, 400);
+          console.error("[post-tool]", err);
+          return json({ error: "Processing failed" }, 500);
         }
       }
 
       if (method === "POST" && url.pathname === "/hook/stop") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
         try {
-          const payload = await req.json();
-          const event = handleStop(payload);
-          writeEvent(event);
+          const event = handleStop(body);
+          await writer.write(event);
           sessions.delete(event.session_id);
-          return jsonResponse({ ok: true });
+          return json({ ok: true });
         } catch (err) {
-          return jsonResponse({ ok: false, error: String(err) }, 400);
+          console.error("[stop]", err);
+          return json({ error: "Processing failed" }, 500);
         }
       }
 
-      // ─── MCP endpoint for Continue.dev ────────────────────────────────────
       if (url.pathname === "/mcp") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+
+        // Capture a DevProfileEvent if the body is a Continue.dev event
+        const event = handleMcpRequest(body);
+        if (event) {
+          const safe = sanitize(event) as DevProfileEvent;
+          await writer.write(safe);
+          trackEvent(safe);
+        }
+
+        // Always return a proper MCP protocol response
         try {
-          const body = await req.json();
-          const response = await handleMcpRequest(body, TOOLS, (event) => {
-            writeEvent(event);
-          });
-          return jsonResponse(response);
-        } catch {
-          return jsonResponse(
-            {
-              jsonrpc: "2.0",
-              id: null,
-              error: { code: -32700, message: "Parse error" },
-            },
-            400,
-          );
+          const response = await mcpResponse(body);
+          return json(response);
+        } catch (err) {
+          console.error("[mcp]", err);
+          return json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }, 500);
         }
       }
 
       return new Response("Not Found", { status: 404 });
     },
   });
-
-  return server;
 }
 
-// Run as daemon when invoked directly
+// ─── Daemon entry point ───────────────────────────────────────────────────────
+
 if (import.meta.main) {
   rotateLogs();
   writePid(process.pid);
 
-  process.on("SIGTERM", () => {
-    clearPid();
-    process.exit(0);
-  });
-  process.on("SIGINT", () => {
-    clearPid();
-    process.exit(0);
-  });
+  process.on("SIGTERM", () => { clearPid(); process.exit(0); });
+  process.on("SIGINT",  () => { clearPid(); process.exit(0); });
 
   const server = startServer();
   console.log(`DevProfile MCP server listening on http://127.0.0.1:${server.port}`);

@@ -1,121 +1,141 @@
 import { test, expect, describe } from "bun:test";
 import { handleMcpRequest } from "../src/hooks/continue";
-import type { McpTool } from "../src/tools/types";
-import type { McpRequest } from "../src/hooks/continue";
 
-const echoTool: McpTool = {
-  name: "echo",
-  description: "Echo the input",
-  inputSchema: {
-    type: "object",
-    properties: { message: { type: "string" } },
-  },
-  async handler(args) {
-    return (args.message as string) ?? "no message";
-  },
-};
-
-const failTool: McpTool = {
-  name: "fail",
-  description: "Always throws",
-  inputSchema: { type: "object", properties: {} },
-  async handler() {
-    throw new Error("intentional failure");
-  },
-};
-
-function req(method: string, params?: Record<string, unknown>): McpRequest {
-  return { jsonrpc: "2.0", id: 1, method, params };
-}
-
-describe("handleMcpRequest", () => {
-  test("initialize returns server info and capabilities", async () => {
-    const res = await handleMcpRequest(req("initialize"), []);
-    expect(res.error).toBeUndefined();
-    const result = res.result as Record<string, unknown>;
-    expect(result.protocolVersion).toBe("2024-11-05");
-    expect((result.serverInfo as Record<string, unknown>).name).toBe("devprofile");
+describe("handleMcpRequest — Continue.dev event extraction", () => {
+  test("returns null for MCP initialize (protocol message)", () => {
+    const result = handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "initialize" });
+    expect(result).toBeNull();
   });
 
-  test("tools/list returns registered tools", async () => {
-    const res = await handleMcpRequest(req("tools/list"), [echoTool]);
-    const result = res.result as { tools: Array<{ name: string }> };
-    expect(result.tools).toHaveLength(1);
-    expect(result.tools[0].name).toBe("echo");
+  test("returns null for tools/list", () => {
+    expect(handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toBeNull();
   });
 
-  test("tools/list returns empty array with no tools", async () => {
-    const res = await handleMcpRequest(req("tools/list"), []);
-    const result = res.result as { tools: unknown[] };
-    expect(result.tools).toHaveLength(0);
+  test("returns null for tools/call", () => {
+    expect(
+      handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "devprofile" } }),
+    ).toBeNull();
   });
 
-  test("tools/call invokes tool and returns text content", async () => {
-    const res = await handleMcpRequest(
-      req("tools/call", { name: "echo", arguments: { message: "hello world" } }),
-      [echoTool],
-    );
-    expect(res.error).toBeUndefined();
-    const result = res.result as { content: Array<{ type: string; text: string }> };
-    expect(result.content[0].type).toBe("text");
-    expect(result.content[0].text).toBe("hello world");
+  test("returns null for unknown event type", () => {
+    expect(handleMcpRequest({ event_type: "unknown_event" })).toBeNull();
   });
 
-  test("tools/call returns error for unknown tool", async () => {
-    const res = await handleMcpRequest(
-      req("tools/call", { name: "nonexistent", arguments: {} }),
-      [echoTool],
-    );
-    expect(res.error).toBeDefined();
-    expect(res.error!.code).toBe(-32601);
-    expect(res.error!.message).toContain("nonexistent");
+  test("returns null for non-object input", () => {
+    expect(handleMcpRequest(null)).toBeNull();
+    expect(handleMcpRequest("string")).toBeNull();
+    expect(handleMcpRequest(42)).toBeNull();
   });
 
-  test("tools/call returns error when tool throws", async () => {
-    const res = await handleMcpRequest(
-      req("tools/call", { name: "fail", arguments: {} }),
-      [failTool],
-    );
-    expect(res.error).toBeDefined();
-    expect(res.error!.code).toBe(-32603);
+  describe("chat_request", () => {
+    test("extracts prompt_length from text length", () => {
+      const event = handleMcpRequest({
+        event_type: "chat_request",
+        params: { text: "hello world", session_id: "s1" },
+      });
+      expect(event).not.toBeNull();
+      expect(event!.event_type).toBe("chat_request");
+      expect(event!.prompt_length).toBe(11);
+      expect(event!.source).toBe("continue-vscode");
+    });
+
+    test("has_code_context is true when file_context is present", () => {
+      const event = handleMcpRequest({
+        event_type: "chat_request",
+        params: {
+          text: "explain this",
+          session_id: "s1",
+          file_context: { path: "/project/src/main.ts" },
+        },
+      });
+      expect(event!.metadata.has_code_context).toBe(true);
+    });
+
+    test("has_code_context is false when no file_context", () => {
+      const event = handleMcpRequest({
+        event_type: "chat_request",
+        params: { text: "hello", session_id: "s1" },
+      });
+      expect(event!.metadata.has_code_context).toBe(false);
+    });
+
+    test("extracts file_extension from file_context.path", () => {
+      const event = handleMcpRequest({
+        event_type: "chat_request",
+        params: {
+          text: "explain",
+          session_id: "s1",
+          file_context: { path: "/project/models/user.rb" },
+        },
+      });
+      expect(event!.file_extension).toBe("rb");
+    });
   });
 
-  test("unknown method returns -32601 error", async () => {
-    const res = await handleMcpRequest(req("unknown/method"), []);
-    expect(res.error).toBeDefined();
-    expect(res.error!.code).toBe(-32601);
+  describe("chat_response", () => {
+    test("extracts duration_ms and response_length", () => {
+      const event = handleMcpRequest({
+        event_type: "chat_response",
+        params: {
+          text: "Here is the answer.",
+          session_id: "s1",
+          duration_ms: 1500,
+          model: "claude-sonnet-4-6",
+        },
+      });
+      expect(event).not.toBeNull();
+      expect(event!.event_type).toBe("chat_response");
+      expect(event!.duration_ms).toBe(1500);
+      expect(event!.metadata.response_length).toBe(19);
+      expect(event!.metadata.model).toBe("claude-sonnet-4-6");
+    });
   });
 
-  test("notifications/initialized returns null result", async () => {
-    const res = await handleMcpRequest(req("notifications/initialized"), []);
-    expect(res.error).toBeUndefined();
-    expect(res.result).toBeNull();
+  describe("edit_apply", () => {
+    test("extracts file_extension and lines_changed", () => {
+      const event = handleMcpRequest({
+        event_type: "edit_apply",
+        params: {
+          file_path: "/project/src/service.py",
+          lines_changed: 12,
+          session_id: "s1",
+        },
+      });
+      expect(event).not.toBeNull();
+      expect(event!.event_type).toBe("edit_apply");
+      expect(event!.file_extension).toBe("py");
+      expect(event!.metadata.lines_changed).toBe(12);
+    });
   });
 
-  test("arbitrary notifications return null result", async () => {
-    const res = await handleMcpRequest(req("notifications/something"), []);
-    expect(res.result).toBeNull();
-  });
+  describe("command_run", () => {
+    test("extracts sanitized command, exit_code, duration_ms", () => {
+      const event = handleMcpRequest({
+        event_type: "command_run",
+        params: {
+          command: "npm test",
+          exit_code: 0,
+          duration_ms: 800,
+          session_id: "s1",
+        },
+      });
+      expect(event).not.toBeNull();
+      expect(event!.event_type).toBe("command_run");
+      expect(event!.command_sanitized).toContain("npm test");
+      expect(event!.metadata.exit_code).toBe(0);
+      expect(event!.duration_ms).toBe(800);
+    });
 
-  test("tools/call triggers onEvent callback", async () => {
-    const events: string[] = [];
-    await handleMcpRequest(
-      req("tools/call", { name: "echo", arguments: { message: "x" } }),
-      [echoTool],
-      (e) => events.push(e.tool_name ?? ""),
-    );
-    expect(events).toContain("echo");
-  });
-
-  test("response preserves request id", async () => {
-    const r: McpRequest = { jsonrpc: "2.0", id: 42, method: "initialize" };
-    const res = await handleMcpRequest(r, []);
-    expect(res.id).toBe(42);
-  });
-
-  test("response preserves string request id", async () => {
-    const r: McpRequest = { jsonrpc: "2.0", id: "req-abc", method: "tools/list" };
-    const res = await handleMcpRequest(r, []);
-    expect(res.id).toBe("req-abc");
+    test("command_sanitized does not contain secrets", () => {
+      const event = handleMcpRequest({
+        event_type: "command_run",
+        params: {
+          command: "curl -H 'Authorization: Bearer sk-abc1234567890123456789012345678901234' api.com",
+          session_id: "s1",
+        },
+      });
+      expect(event!.command_sanitized).toContain("<redacted>");
+      expect(event!.command_sanitized).not.toContain("sk-abc");
+    });
   });
 });

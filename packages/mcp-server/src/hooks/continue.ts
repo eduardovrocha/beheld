@@ -1,114 +1,107 @@
 import { randomUUID } from "crypto";
+import { sanitize, sanitizeCommand } from "../sanitizer";
 import type { DevProfileEvent } from "../types";
-import type { McpTool } from "../tools/types";
 
-export interface McpRequest {
-  jsonrpc: "2.0";
-  id: string | number | null;
-  method: string;
+interface McpBody {
+  method?: string;
   params?: Record<string, unknown>;
+  event_type?: string;
 }
 
-export interface McpResponse {
-  jsonrpc: "2.0";
-  id: string | number | null;
-  result?: unknown;
-  error?: { code: number; message: string };
+function parseBody(body: unknown): McpBody | null {
+  if (!body || typeof body !== "object") return null;
+  return body as McpBody;
 }
 
-export async function handleMcpRequest(
-  req: McpRequest,
-  tools: McpTool[],
-  onEvent?: (event: DevProfileEvent) => void,
-): Promise<McpResponse> {
-  const { id, method, params } = req;
+function extractExt(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const parts = value.split(".");
+  if (parts.length < 2) return undefined;
+  const ext = parts[parts.length - 1];
+  return ext.length > 0 && ext.length < 12 ? ext : undefined;
+}
 
-  if (method === "initialize") {
-    return {
-      jsonrpc: "2.0",
-      id,
-      result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "devprofile", version: "0.1.0" },
-      },
-    };
-  }
+/**
+ * Maps a Continue.dev MCP request to a DevProfileEvent.
+ * Returns null for protocol messages (initialize, tools/list, tools/call)
+ * or events that carry no useful signal.
+ */
+export function handleMcpRequest(body: unknown): DevProfileEvent | null {
+  const parsed = parseBody(body);
+  if (!parsed) return null;
 
-  if (method === "notifications/initialized") {
-    return { jsonrpc: "2.0", id, result: null };
-  }
+  const eventType = parsed.event_type ?? parsed.method ?? "";
+  const params = parsed.params ?? {};
 
-  if (method === "tools/list") {
-    return {
-      jsonrpc: "2.0",
-      id,
-      result: {
-        tools: tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
-      },
-    };
-  }
-
-  if (method === "tools/call") {
-    const toolName = (params as Record<string, unknown>)?.name as string;
-    const toolArgs =
-      ((params as Record<string, unknown>)?.arguments as Record<string, unknown>) ?? {};
-
-    const tool = tools.find((t) => t.name === toolName);
-    if (!tool) {
+  switch (eventType) {
+    case "chat_request": {
+      const text = typeof params.text === "string" ? params.text : "";
+      const fileCtx = params.file_context as Record<string, unknown> | undefined;
       return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32601, message: `Tool not found: ${toolName}` },
-      };
-    }
-
-    if (onEvent) {
-      onEvent({
         event_id: randomUUID(),
-        session_id: "continue-dev",
+        session_id: (params.session_id as string) ?? "continue-dev",
         source: "continue-vscode",
-        event_type: "tool_call",
+        event_type: "chat_request",
         timestamp: new Date().toISOString(),
-        tool_name: toolName,
-        metadata: {},
-      });
-    }
-
-    try {
-      const result = await tool.handler(toolArgs);
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: typeof result === "string" ? result : JSON.stringify(result),
-            },
-          ],
+        prompt_length: text.length,
+        has_test_context: typeof fileCtx?.path === "string"
+          ? /\.(test|spec)\.|\/spec\/|\/tests?\//.test(fileCtx.path as string)
+          : undefined,
+        file_extension: fileCtx ? extractExt(fileCtx.path) : undefined,
+        metadata: {
+          has_code_context: fileCtx != null,
+          model: params.model,
         },
       };
-    } catch (err) {
+    }
+
+    case "chat_response": {
+      const text = typeof params.text === "string" ? params.text : "";
       return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32603, message: String(err) },
+        event_id: randomUUID(),
+        session_id: (params.session_id as string) ?? "continue-dev",
+        source: "continue-vscode",
+        event_type: "chat_response",
+        timestamp: new Date().toISOString(),
+        duration_ms: typeof params.duration_ms === "number" ? params.duration_ms : undefined,
+        metadata: {
+          response_length: text.length,
+          model: params.model,
+        },
       };
     }
-  }
 
-  if (method.startsWith("notifications/")) {
-    return { jsonrpc: "2.0", id, result: null };
-  }
+    case "edit_apply": {
+      return {
+        event_id: randomUUID(),
+        session_id: (params.session_id as string) ?? "continue-dev",
+        source: "continue-vscode",
+        event_type: "edit_apply",
+        timestamp: new Date().toISOString(),
+        file_extension: extractExt(params.file_path),
+        metadata: {
+          lines_changed: params.lines_changed,
+        },
+      };
+    }
 
-  return {
-    jsonrpc: "2.0",
-    id,
-    error: { code: -32601, message: `Method not found: ${method}` },
-  };
+    case "command_run": {
+      const raw = typeof params.command === "string" ? params.command : "";
+      return {
+        event_id: randomUUID(),
+        session_id: (params.session_id as string) ?? "continue-dev",
+        source: "continue-vscode",
+        event_type: "command_run",
+        timestamp: new Date().toISOString(),
+        duration_ms: typeof params.duration_ms === "number" ? params.duration_ms : undefined,
+        command_sanitized: sanitizeCommand(raw.slice(0, 500)),
+        metadata: {
+          exit_code: params.exit_code,
+        },
+      };
+    }
+
+    default:
+      return null;
+  }
 }

@@ -7,10 +7,10 @@ import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getDevProfileDir } from "./daemon";
 import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
+import { notificationService } from "./notifications";
 import type { DevProfileEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
-const PORT = parseInt(process.env.DEVPROFILE_PORT ?? "7337", 10);
 const VERSION = "0.1.0";
 const TOOLS: McpTool[] = [devprofileTool, statusTool];
 const startedAt = Date.now();
@@ -123,8 +123,9 @@ function badRequest(msg: string): Response {
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 export function startServer(): ReturnType<typeof Bun.serve> {
+  const port = parseInt(process.env.DEVPROFILE_PORT ?? "7337", 10);
   return Bun.serve({
-    port: PORT,
+    port,
     hostname: "127.0.0.1",
 
     async fetch(req: Request): Promise<Response> {
@@ -195,6 +196,8 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           const event = handleStop(body);
           await writer.write(event);
           sessions.delete(event.session_id);
+          // Fire-and-forget: daily score notification after session ends
+          notificationService.checkDailyScore().catch(() => {});
           return json({ ok: true });
         } catch (err) {
           console.error("[stop]", err);

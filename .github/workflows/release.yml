@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            name: devprofile-darwin-arm64
+            engine_platform: darwin
+
+          - os: macos-13
+            target: bun-darwin-x64
+            name: devprofile-darwin-x64
+            engine_platform: darwin
+
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            name: devprofile-linux-x64
+            engine_platform: linux
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies and PyInstaller
+        run: pip install -e packages/engine pyinstaller
+
+      - name: Build engine binary
+        run: |
+          cd packages/engine
+          pyinstaller \
+            --onefile \
+            --name devprofile-engine \
+            --distpath dist \
+            src/main.py
+
+      - name: Copy engine to CLI assets
+        run: cp packages/engine/dist/devprofile-engine packages/cli/assets/devprofile-engine
+
+      - name: Install Bun dependencies
+        run: bun install
+
+      - name: Build CLI binary
+        run: |
+          bun build packages/cli/src/index.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile dist/${{ matrix.name }}
+
+      - name: Generate SHA256 checksum
+        run: |
+          cd dist
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum ${{ matrix.name }} > ${{ matrix.name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.name }} > ${{ matrix.name }}.sha256
+          fi
+
+      - name: Sign binary with GPG
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --detach-sign dist/${{ matrix.name }}
+
+      - name: Smoke test (native target only)
+        if: matrix.os != 'macos-13' || runner.arch == 'X64'
+        run: |
+          chmod +x dist/${{ matrix.name }}
+          dist/${{ matrix.name }} --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}*
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact directories
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec mv {} dist/ \;
+
+      - name: List release artifacts
+        run: ls -lh dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

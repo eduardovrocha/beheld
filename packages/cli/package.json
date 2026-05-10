@@ -1,0 +1,13 @@
+{
+  "name": "@devprofile/cli",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build src/index.ts --compile --outfile ../../dist/devprofile"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

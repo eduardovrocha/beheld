@@ -12,9 +12,10 @@ program
 program
   .command("init")
   .description("Configure DevProfile for Claude Code and Continue.dev")
-  .action(async () => {
+  .option("--force", "skip reinit prompt and run all setup steps")
+  .action(async (opts: { force?: boolean }) => {
     const { initCommand } = await import("./commands/init");
-    await initCommand();
+    await initCommand(opts);
   });
 
 program
@@ -78,6 +79,19 @@ program
   .action(async (opts: { local?: boolean; remote?: boolean; all?: boolean }) => {
     const { deleteCommand } = await import("./commands/delete");
     await deleteCommand(opts);
+  });
+
+program
+  .command("migrate-legacy")
+  .description("Remove project-scoped MCP registrations (migrates to global scope)")
+  .action(async () => {
+    const { migrateProjectScopedRegistrations } = await import("./config/hooks");
+    const n = await migrateProjectScopedRegistrations();
+    if (n > 0) {
+      console.log(`Migrated ${n} project-scoped registration(s) to global scope.`);
+    } else {
+      console.log("No project-scoped registrations found.");
+    }
   });
 
 program

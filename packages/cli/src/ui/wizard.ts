@@ -150,6 +150,7 @@ async function screen3(
 // ── Tela 4 — Progresso ───────────────────────────────────────────────────────
 
 export interface SetupActions {
+  migrateProjectScoped?: () => Promise<number>;
   installClaudeHooks?: () => Promise<void>;
   installContinueMcp?: () => Promise<void>;
   extractEngine?: () => Promise<string>;
@@ -168,14 +169,23 @@ async function screen4(
   async function step(label: string, fn: () => Promise<unknown>): Promise<void> {
     process.stdout.write(`  ${dim("…")}  ${label}`);
     try {
-      await fn();
-      process.stdout.write(`\r  ${green("✓")}  ${label}\n`);
+      const result = await fn();
+      const finalLabel = typeof result === "string" ? result : label;
+      process.stdout.write(`\r  ${green("✓")}  ${finalLabel}\n`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\r  \x1b[31m✗\x1b[0m  ${label}  ${dim(msg)}\n`);
     }
   }
 
+  if (actions.migrateProjectScoped) {
+    await step("Verificando registros de projetos", async () => {
+      const n = await actions.migrateProjectScoped!();
+      return n > 0
+        ? `${n} registro(s) de projeto migrado(s)`
+        : "Nenhum registro residual de projeto";
+    });
+  }
   if (environments.claudeCode && actions.installClaudeHooks) {
     await step("Instalando hooks no Claude Code", actions.installClaudeHooks);
   }

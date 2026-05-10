@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { runWizard } from "../ui/wizard";
-import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand, installClaudeMcpServer } from "../config/hooks";
+import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand, installClaudeMcpServer, migrateProjectScopedRegistrations } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
 import type { DevProfileConfig } from "../types";
 
@@ -33,9 +33,9 @@ async function askReinit(): Promise<boolean> {
   });
 }
 
-export async function initCommand(): Promise<void> {
+export async function initCommand(opts: { force?: boolean } = {}): Promise<void> {
   const existing = readConfig();
-  if (existing) {
+  if (existing && !opts.force) {
     const reinit = await askReinit();
     if (!reinit) {
       console.log("Abortado.");
@@ -45,6 +45,7 @@ export async function initCommand(): Promise<void> {
 
   const result = await runWizard(
     {
+      migrateProjectScoped: () => migrateProjectScopedRegistrations(),
       installClaudeHooks: async () => {
         await installClaudeCodeHooks();
         await installClaudeMcpServer();

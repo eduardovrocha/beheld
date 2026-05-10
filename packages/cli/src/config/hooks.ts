@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -75,6 +75,22 @@ function hasDevprofileHook(matchers: unknown[]): boolean {
 export async function installClaudeCodeHooks(
   settingsFile = claudeSettingsPath(),
 ): Promise<void> {
+  const home = homedir();
+  const cwd = process.cwd();
+  const protectedTargets = [
+    claudeSettingsPath(home),
+    claudeJsonPath(home),
+    claudeCommandPath(home),
+  ];
+  for (const target of protectedTargets) {
+    if (!target.startsWith(home)) {
+      throw new Error(`Segurança: tentativa de escrita fora do home: ${target}`);
+    }
+    if (cwd !== home && target.startsWith(cwd + "/")) {
+      throw new Error(`Segurança: tentativa de escrita dentro do projeto atual: ${target}`);
+    }
+  }
+
   backup(settingsFile);
   const cfg = readJson(settingsFile);
 
@@ -231,6 +247,47 @@ export async function removeClaudeMcpServer(
       writeJson(claudeJson, cfg);
     }
   } catch { /* ignore */ }
+}
+
+// ── Project-scoped registration migration ────────────────────────────────────
+
+export async function migrateProjectScopedRegistrations(
+  projectsDir = join(homedir(), ".claude", "projects"),
+): Promise<number> {
+  if (!existsSync(projectsDir)) return 0;
+
+  let migrated = 0;
+  const entries = readdirSync(projectsDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const settingsPath = join(projectsDir, entry.name, "settings.json");
+    if (!existsSync(settingsPath)) continue;
+
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    } catch {
+      continue;
+    }
+
+    const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
+    if (!("devprofile" in servers)) continue;
+
+    copyFileSync(settingsPath, `${settingsPath}.bak`);
+    delete servers["devprofile"];
+
+    if (Object.keys(servers).length === 0) {
+      delete config.mcpServers;
+    } else {
+      config.mcpServers = servers;
+    }
+
+    writeFileSync(settingsPath, JSON.stringify(config, null, 2), "utf-8");
+    migrated++;
+  }
+
+  return migrated;
 }
 
 // ── Combined ──────────────────────────────────────────────────────────────────

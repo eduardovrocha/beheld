@@ -1,58 +1,93 @@
+import { Command } from "commander";
+
 export const VERSION = "0.1.0";
 
-const COMMANDS = ["init", "start", "stop", "restart", "status", "view", "update", "delete"] as const;
-type Command = (typeof COMMANDS)[number];
+const program = new Command();
 
-function printHelp(): void {
-  console.log(`devprofile ${VERSION}
+program
+  .name("devprofile")
+  .description("Privacy-first developer profiling for Claude Code and Continue.dev")
+  .version(VERSION, "-v, --version");
 
-Usage: devprofile <command> [options]
+program
+  .command("init")
+  .description("Configure DevProfile for Claude Code and Continue.dev")
+  .action(async () => {
+    const { initCommand } = await import("./commands/init");
+    await initCommand();
+  });
 
-Commands:
-  init     Configure DevProfile for Claude Code and Continue.dev
-  start    Start the DevProfile daemon
-  stop     Stop the DevProfile daemon
-  restart  Restart the DevProfile daemon
-  status   Show daemon and session status
-  view     Display your developer profile
-  update   Update DevProfile to the latest version
-  delete   Remove DevProfile data
+program
+  .command("start")
+  .description("Start the DevProfile daemon")
+  .action(async () => {
+    const { startCommand } = await import("./commands/start");
+    await startCommand();
+  });
 
-Options:
-  -v, --version  Show version number
-  -h, --help     Show this help message
+program
+  .command("stop")
+  .description("Stop the DevProfile daemon")
+  .action(async () => {
+    const { stopCommand } = await import("./commands/stop");
+    await stopCommand();
+  });
 
-Run 'devprofile <command> --help' for command-specific options.`);
+program
+  .command("restart")
+  .description("Restart the DevProfile daemon")
+  .action(async () => {
+    const { stopCommand } = await import("./commands/stop");
+    const { startCommand } = await import("./commands/start");
+    await stopCommand();
+    await startCommand();
+  });
+
+program
+  .command("status")
+  .description("Show daemon and session status")
+  .action(async () => {
+    const { statusCommand } = await import("./commands/status");
+    await statusCommand();
+  });
+
+program
+  .command("view")
+  .description("Display your developer profile")
+  .option("--json", "Output as JSON")
+  .option("--scores-only", "Output scores as space-separated numbers")
+  .action(async (opts: { json?: boolean; scoresOnly?: boolean }) => {
+    const { viewCommand } = await import("./commands/view");
+    await viewCommand(opts);
+  });
+
+program
+  .command("update")
+  .description("Update DevProfile to the latest version")
+  .action(async () => {
+    const { updateCommand } = await import("./commands/update");
+    await updateCommand();
+  });
+
+program
+  .command("delete")
+  .description("Remove DevProfile data")
+  .option("--local", "Delete local data (~/.devprofile/)")
+  .option("--remote", "Delete remote account and data")
+  .option("--all", "Delete everything (local + remote + hooks)")
+  .action(async (opts: { local?: boolean; remote?: boolean; all?: boolean }) => {
+    const { deleteCommand } = await import("./commands/delete");
+    await deleteCommand(opts);
+  });
+
+program
+  .command("server")
+  .description("Start the MCP server (internal)")
+  .action(async () => {
+    const { startServer } = await import("../../mcp-server/src/server");
+    await startServer();
+  });
+
+if (import.meta.main) {
+  program.parse(process.argv);
 }
-
-function isCommand(arg: string): arg is Command {
-  return (COMMANDS as readonly string[]).includes(arg);
-}
-
-function main(): void {
-  const args = process.argv.slice(2);
-
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
-    printHelp();
-    process.exit(0);
-  }
-
-  if (args.includes("--version") || args.includes("-v")) {
-    console.log(`devprofile ${VERSION}`);
-    process.exit(0);
-  }
-
-  const [command] = args;
-
-  if (!isCommand(command)) {
-    console.error(`devprofile: unknown command '${command}'`);
-    console.error("Run 'devprofile --help' for usage.");
-    process.exit(1);
-  }
-
-  console.error(`devprofile: '${command}' is not yet implemented.`);
-  console.error("Check https://github.com/devprofile/devprofile for the latest release.");
-  process.exit(1);
-}
-
-main();

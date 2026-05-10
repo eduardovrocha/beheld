@@ -1,105 +1,158 @@
 from __future__ import annotations
 
-from collections import Counter
+import os
+
+from models import ProjectClassification, TechnicalSignals
 
 PROJECT_CATEGORIES = [
-    "saas_b2b",
     "api_backend",
-    "financial_data",
+    "cli_tool",
     "mobile",
     "web3_blockchain",
     "automation_ai",
     "library_sdk",
-    "cli_tool",
+    "saas_b2b",
+    "financial_data",
 ]
 
-# Signals (command fragments, ecosystem names, tool names, file extensions)
-# that indicate each project category.
-CATEGORY_SIGNALS: dict[str, list[str]] = {
-    "cli_tool": ["argparse", "click ", "commander", "cobra", "clap", "argv", "subcommand", ".sh"],
-    "api_backend": [
-        "fastapi",
-        "flask",
-        "django",
-        "rails",
-        "express",
-        "nestjs",
-        "gin ",
-        "actix",
-        "sinatra",
-        "hapi",
-        "fiber",
-    ],
-    "mobile": ["flutter", "react-native", "reactnative", ".swift", ".kt", "xcodebuild", "pod install", "gradle"],
-    "web3_blockchain": ["solidity", "hardhat", "foundry", "ethers", "web3", "anchor ", "truffle", ".sol"],
-    "automation_ai": [
-        "openai",
-        "anthropic",
-        "langchain",
-        "huggingface",
-        "transformers",
-        "torch",
-        "tensorflow",
-        "keras",
-        "sklearn",
-    ],
-    "library_sdk": [
-        "npm publish",
-        "gem push",
-        "pypi",
-        "pip publish",
-        "crates.io",
-        "setup.py",
-        "pyproject.toml",
-        "cargo publish",
-    ],
-    "saas_b2b": ["stripe", "auth0", "oauth", "tenant", "subscription", "billing", "multitenancy"],
-    "financial_data": [
-        "pandas",
-        "numpy",
-        "matplotlib",
-        "jupyter",
-        ".csv",
-        ".parquet",
-        "dbt ",
-        "airflow",
-        "spark",
-        "pyspark",
-    ],
+# Vote mappings: signal key → category
+_ECOSYSTEM_VOTES: dict[str, str] = {
+    "rails": "api_backend",
+    "node": "api_backend",
+    "react": "api_backend",
+    "python": "api_backend",
+    "go": "api_backend",
+    "rust": "library_sdk",
+    "java": "api_backend",
+    "dotnet": "api_backend",
+    "php": "api_backend",
+    "elixir": "api_backend",
+    "flutter": "mobile",
+    "swift": "mobile",
+    "blockchain": "web3_blockchain",
+    "devops": "api_backend",
 }
 
+_LANGUAGE_VOTES: dict[str, str] = {
+    "solidity": "web3_blockchain",
+    "dart": "mobile",
+    "swift": "mobile",
+    "kotlin": "mobile",
+    "r": "financial_data",
+}
 
-def classify_project_type(
-    commands: list[str],
-    ecosystems: list[str],
-    tools_used: list[str],
-    file_extensions: Counter,
-) -> tuple[str, float]:
-    """Rule-based project type classification. Returns (category, confidence)."""
-    scores: dict[str, int] = {cat: 0 for cat in PROJECT_CATEGORIES}
+_PLATFORM_VOTES: dict[str, str] = {
+    "mobile": "mobile",
+    "blockchain": "web3_blockchain",
+    "database": "api_backend",
+    "docker": "api_backend",
+    "cloud_infra": "api_backend",
+    "testing": "api_backend",
+    "ci_cd": "api_backend",
+    "github": "api_backend",
+}
 
-    all_text = (
-        " ".join(commands).lower()
-        + " " + " ".join(ecosystems).lower()
-        + " " + " ".join(tools_used).lower()
-        + " " + " ".join(file_extensions.keys()).lower()
-    )
+BUSINESS_DOMAIN_TERMS = frozenset([
+    "revenue", "customer", "sales", "marketing", "invoice", "employee",
+    "payroll", "crm", "erp", "accounting", "insurance", "healthcare",
+    "legal", "compliance", "tax", "audit", "billing", "subscription",
+])
 
-    for category, signals in CATEGORY_SIGNALS.items():
-        for signal in signals:
-            if signal.lower() in all_text:
-                scores[category] += 1
 
-    if not any(scores.values()):
-        return "unknown", 0.0
+def _heuristic(signals: TechnicalSignals) -> tuple[str, float, list[str]]:
+    votes: dict[str, int] = {c: 0 for c in PROJECT_CATEGORIES}
+    matched: list[str] = []
 
-    best_category = max(scores, key=lambda k: scores[k])
-    best_score = scores[best_category]
+    for eco in signals.ecosystems:
+        if eco in _ECOSYSTEM_VOTES:
+            votes[_ECOSYSTEM_VOTES[eco]] += 1
+            matched.append(f"ecosystem:{eco}")
 
-    # 3 matching signals → confidence 1.0
-    confidence = min(best_score / 3.0, 1.0)
+    for lang in signals.languages:
+        if lang in _LANGUAGE_VOTES:
+            votes[_LANGUAGE_VOTES[lang]] += 1
+            matched.append(f"language:{lang}")
+
+    for platform in signals.platforms:
+        if platform in _PLATFORM_VOTES:
+            votes[_PLATFORM_VOTES[platform]] += 1
+            matched.append(f"platform:{platform}")
+
+    if not any(votes.values()):
+        return "unknown", 0.0, []
+
+    best = max(votes, key=lambda k: votes[k])
+    # 3 distinct signals → confidence 1.0
+    confidence = min(votes[best] / 3.0, 1.0)
 
     if confidence < 0.30:
-        return "unknown", confidence
+        return "unknown", confidence, []
 
-    return best_category, confidence
+    return best, confidence, matched
+
+
+def _sanitize_ok(text: str) -> bool:
+    lower = text.lower()
+    return not any(term in lower for term in BUSINESS_DOMAIN_TERMS)
+
+
+def _classify_with_anthropic(signals: TechnicalSignals) -> str:
+    import anthropic  # lazy import — optional dependency
+
+    signal_desc = ", ".join(
+        list(signals.ecosystems.keys())[:5]
+        + list(signals.languages.keys())[:3]
+        + list(signals.platforms.keys())[:3]
+    )
+    prompt = (
+        f"Based on these technical signals: {signal_desc}\n"
+        f"Classify the project type. Reply with ONLY one of these exact words:\n"
+        f"{', '.join(PROJECT_CATEGORIES)}\nNo explanation, just the category name."
+    )
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=20,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip().lower()
+
+
+def _classify_with_ollama(signals: TechnicalSignals) -> str:
+    import json
+    import urllib.request
+
+    signal_desc = ", ".join(
+        list(signals.ecosystems.keys())[:5] + list(signals.languages.keys())[:3]
+    )
+    prompt = f"Technical signals: {signal_desc}\nReply with ONE word from: {', '.join(PROJECT_CATEGORIES)}"
+    data = json.dumps(
+        {"model": "qwen2.5-coder:14b", "prompt": prompt, "stream": False}
+    ).encode()
+    req = urllib.request.Request(
+        "http://localhost:11434/api/generate",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        result = json.loads(resp.read())
+    return result.get("response", "").strip().lower()
+
+
+def classify(signals: TechnicalSignals) -> ProjectClassification:
+    """Two-step classifier: local heuristics first, AI fallback when confidence < 0.70."""
+    category, confidence, signals_used = _heuristic(signals)
+
+    if confidence >= 0.70:
+        return ProjectClassification(category, confidence, signals_used)
+
+    # AI step
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    try:
+        raw = _classify_with_anthropic(signals) if api_key else _classify_with_ollama(signals)
+        if raw in PROJECT_CATEGORIES and _sanitize_ok(raw):
+            return ProjectClassification(raw, 0.65, signals_used + [f"ai:{raw}"])
+    except Exception:
+        pass
+
+    return ProjectClassification(category, confidence, signals_used)

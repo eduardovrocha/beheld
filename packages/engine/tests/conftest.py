@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from models import DevProfileEvent, Session
+from reader.jsonl_reader import JsonlReader
 
 # ── raw event dicts ───────────────────────────────────────────────────────────
 
@@ -146,6 +146,16 @@ def sessions_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def cursor_file(tmp_path: Path) -> Path:
+    return tmp_path / ".cursor"
+
+
+@pytest.fixture
+def jsonl_reader(sessions_dir: Path, cursor_file: Path) -> JsonlReader:
+    return JsonlReader(sessions_dir, cursor_file)
+
+
+@pytest.fixture
 def sample_session_1() -> Session:
     events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
     return Session(
@@ -180,6 +190,9 @@ def sample_session_2() -> Session:
         cwd_hash="def456",
         total_turns=0,
         has_test_context=False,
+        avg_prompt_length=350.0,
+        has_code_context_ratio=1.0,
+        event_count=4,
     )
 
 

@@ -1,155 +1,250 @@
 from __future__ import annotations
 
-from collections import Counter
-
 import pytest
 
-from extractors.commands import extract_platforms, has_advanced_tools
-from extractors.files import (
-    compute_test_file_ratio,
-    extract_ecosystems,
-    extract_languages,
-    has_test_files,
-)
-from extractors.timing import classify_session_length, compute_session_duration
-from extractors.tools import count_distinct_tools, detect_workflow
-from models import DevProfileEvent
-from tests.conftest import EVENTS_SESSION_1, EVENTS_SESSION_2
+from extractors.commands import detect_platforms
+from extractors.files import detect_ecosystems, detect_languages, is_test_path
+from extractors.timing import analyze_timing
+from extractors.tools import build_tool_sequence, detect_workflow
+from tests.conftest import EVENTS_SESSION_1
 
 
-# ── commands ──────────────────────────────────────────────────────────────────
+# ── commands / detect_platforms ───────────────────────────────────────────────
 
 
-def test_extract_platforms_docker() -> None:
-    platforms = extract_platforms(["docker build .", "docker-compose up"])
-    assert "docker" in platforms
+def test_detect_platforms_docker() -> None:
+    result = detect_platforms(["docker build .", "docker-compose up"])
+    assert "docker" in result
+    assert result["docker"] >= 1
 
 
-def test_extract_platforms_github() -> None:
-    platforms = extract_platforms(["git push origin main"])
-    assert "github" in platforms
+def test_detect_platforms_github() -> None:
+    result = detect_platforms(["git push origin main"])
+    assert "github" in result
 
 
-def test_extract_platforms_testing() -> None:
-    platforms = extract_platforms(["pytest tests/"])
-    assert "testing" in platforms
+def test_detect_platforms_testing() -> None:
+    result = detect_platforms(["pytest tests/"])
+    assert "testing" in result
 
 
-def test_extract_platforms_multiple() -> None:
-    cmds = ["docker build .", "git push origin main", "aws s3 ls"]
-    platforms = extract_platforms(cmds)
-    assert "docker" in platforms
-    assert "github" in platforms
-    assert "cloud_infra" in platforms
+def test_detect_platforms_multiple() -> None:
+    result = detect_platforms(["docker build .", "git push origin main", "aws s3 ls"])
+    assert "docker" in result
+    assert "github" in result
+    assert "cloud_infra" in result
 
 
-def test_extract_platforms_empty() -> None:
-    assert extract_platforms([]) == []
+def test_detect_platforms_empty() -> None:
+    assert detect_platforms([]) == {}
 
 
-def test_extract_platforms_no_match() -> None:
-    assert extract_platforms(["echo hello"]) == []
+def test_detect_platforms_no_match() -> None:
+    assert detect_platforms(["echo hello"]) == {}
 
 
-def test_has_advanced_tools_false() -> None:
-    assert not has_advanced_tools(["Read", "Write", "Bash"])
+def test_detect_platforms_returns_dict() -> None:
+    result = detect_platforms(["docker build ."])
+    assert isinstance(result, dict)
 
 
-def test_has_advanced_tools_true() -> None:
-    assert has_advanced_tools(["computer_use", "Read"])
+# ── files / detect_ecosystems ─────────────────────────────────────────────────
 
 
-# ── files ─────────────────────────────────────────────────────────────────────
+def test_detect_ecosystems_rails() -> None:
+    result = detect_ecosystems(["app/models/user.rb"])
+    assert "rails" in result
 
 
-def test_extract_languages_python() -> None:
-    langs = extract_languages(Counter({".py": 5}))
-    assert "python" in langs
+def test_detect_ecosystems_node() -> None:
+    result = detect_ecosystems(["index.ts", "server.js"])
+    assert "node" in result or "react" in result  # ts→node, tsx→react
 
 
-def test_extract_languages_typescript() -> None:
-    langs = extract_languages(Counter({".ts": 3, ".tsx": 2}))
-    assert "typescript" in langs
+def test_detect_ecosystems_react() -> None:
+    result = detect_ecosystems(["app.tsx", "component.tsx"])
+    assert "react" in result
 
 
-def test_extract_languages_multiple() -> None:
-    langs = extract_languages(Counter({".py": 1, ".rb": 1, ".go": 1}))
-    assert set(langs) >= {"python", "ruby", "go"}
+def test_detect_ecosystems_python() -> None:
+    result = detect_ecosystems(["main.py", "setup.py"])
+    assert "python" in result
 
 
-def test_extract_languages_unknown_ext() -> None:
-    langs = extract_languages(Counter({".xyz": 3}))
-    assert langs == []
+def test_detect_ecosystems_blockchain() -> None:
+    result = detect_ecosystems(["token.sol", "contract.sol"])
+    assert "blockchain" in result
 
 
-def test_extract_ecosystems_react() -> None:
-    ecos = extract_ecosystems(Counter({".tsx": 5}))
-    assert "react" in ecos
+def test_detect_ecosystems_empty() -> None:
+    assert detect_ecosystems([]) == {}
 
 
-def test_extract_ecosystems_ruby() -> None:
-    ecos = extract_ecosystems(Counter({".rb": 3}))
-    assert "ruby" in ecos
+def test_detect_ecosystems_by_filename() -> None:
+    result = detect_ecosystems(["Gemfile"])
+    assert "rails" in result
 
 
-def test_has_test_files_spec() -> None:
-    assert has_test_files(Counter({".spec.ts": 1}))
+def test_detect_ecosystems_returns_dict() -> None:
+    result = detect_ecosystems(["app.py"])
+    assert isinstance(result, dict)
 
 
-def test_has_test_files_test() -> None:
-    assert has_test_files(Counter({".test.js": 1}))
+# ── files / detect_languages ─────────────────────────────────────────────────
 
 
-def test_has_test_files_false() -> None:
-    assert not has_test_files(Counter({".ts": 5, ".rb": 3}))
+def test_detect_languages_python() -> None:
+    result = detect_languages(["main.py", "util.py"])
+    assert "python" in result
 
 
-def test_compute_test_file_ratio_partial() -> None:
-    ratio = compute_test_file_ratio(Counter({".spec.ts": 2, ".ts": 8}))
-    assert abs(ratio - 0.2) < 0.01
+def test_detect_languages_typescript() -> None:
+    result = detect_languages(["server.ts", "types.tsx"])
+    assert "typescript" in result
 
 
-def test_compute_test_file_ratio_empty() -> None:
-    assert compute_test_file_ratio(Counter()) == 0.0
+def test_detect_languages_multiple() -> None:
+    result = detect_languages(["main.py", "app.rb", "service.go"])
+    assert set(result) >= {"python", "ruby", "go"}
 
 
-# ── timing ────────────────────────────────────────────────────────────────────
+def test_detect_languages_unknown_ext() -> None:
+    result = detect_languages(["file.xyz"])
+    assert result == {}
 
 
-def test_classify_brief() -> None:
-    assert classify_session_length(3.0) == "brief"
+# ── files / is_test_path ──────────────────────────────────────────────────────
 
 
-def test_classify_medium() -> None:
-    assert classify_session_length(15.0) == "medium"
+def test_is_test_path_spec() -> None:
+    assert is_test_path("user.spec.ts")
 
 
-def test_classify_long() -> None:
-    assert classify_session_length(60.0) == "long"
+def test_is_test_path_test() -> None:
+    assert is_test_path("user.test.js")
 
 
-def test_classify_extended() -> None:
-    assert classify_session_length(120.0) == "extended"
+def test_is_test_path_underscore() -> None:
+    assert is_test_path("user_spec.rb")
 
 
-# ── tools ─────────────────────────────────────────────────────────────────────
+def test_is_test_path_false() -> None:
+    assert not is_test_path("user.ts")
+
+
+# ── timing / analyze_timing ───────────────────────────────────────────────────
+
+
+def test_analyze_timing_empty() -> None:
+    result = analyze_timing([])
+    assert result["peak_hours"] == []
+    assert result["avg_duration_minutes"] == 0.0
+    assert result["work_mode"] == "solo"
+    assert result["rhythm"] == "continuous"
+
+
+def test_analyze_timing_returns_keys() -> None:
+    result = analyze_timing(["2026-05-10T10:00:00Z", "2026-05-10T11:00:00Z"])
+    for key in ("peak_hours", "avg_duration_minutes", "work_mode", "rhythm"):
+        assert key in result
+
+
+def test_analyze_timing_peak_hours() -> None:
+    timestamps = [
+        "2026-05-10T10:00:00Z",
+        "2026-05-10T10:30:00Z",
+        "2026-05-10T14:00:00Z",
+    ]
+    result = analyze_timing(timestamps)
+    assert 10 in result["peak_hours"]
+
+
+def test_analyze_timing_rhythm_continuous() -> None:
+    # Two timestamps 30 min apart → avg gap < 1440 → continuous
+    result = analyze_timing(["2026-05-10T10:00:00Z", "2026-05-10T10:30:00Z"])
+    assert result["rhythm"] == "continuous"
+
+
+def test_analyze_timing_rhythm_project_by_project() -> None:
+    # Two timestamps 2 days apart → avg gap > 1440 → project-by-project
+    result = analyze_timing(["2026-05-08T10:00:00Z", "2026-05-10T10:00:00Z"])
+    assert result["rhythm"] == "project-by-project"
+
+
+# ── tools / detect_workflow ───────────────────────────────────────────────────
+
+
+def test_detect_workflow_tdd() -> None:
+    # Test write before impl write, then bash
+    seq = ["Write_test", "Write", "Bash"]
+    assert detect_workflow(seq) == "tdd"
+
+
+def test_detect_workflow_test_after() -> None:
+    # Impl write before test write (no bash or bash doesn't matter)
+    seq = ["Write", "Write_test"]
+    assert detect_workflow(seq) == "test-after"
 
 
 def test_detect_workflow_debug_driven() -> None:
-    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_2]
-    # sess-2 has: Write → Bash → Read → no test context → debug_driven pattern
-    result = detect_workflow(events)
-    assert result in ("debug_driven", "unknown")  # depends on ratio
+    seq = ["Bash", "Read", "Edit", "Bash", "Read", "Edit", "Bash"]
+    assert detect_workflow(seq) == "debug-driven"
 
 
-def test_detect_workflow_tdd(sample_session_1) -> None:
-    result = detect_workflow(sample_session_1.events)
-    assert result in ("tdd", "test_after", "debug_driven")  # has test context + bash after write
+def test_detect_workflow_refactor() -> None:
+    seq = ["Edit", "Edit", "Edit"]
+    assert detect_workflow(seq) == "refactor"
+
+
+def test_detect_workflow_exploratory() -> None:
+    seq = ["Read", "Read", "Read", "Read", "Write"]
+    assert detect_workflow(seq) == "exploratory"
 
 
 def test_detect_workflow_unknown_empty() -> None:
     assert detect_workflow([]) == "unknown"
 
 
-def test_count_distinct_tools() -> None:
-    assert count_distinct_tools(["Read", "Write", "Bash", "Read"]) == 3
+def test_detect_workflow_unknown_single_tool() -> None:
+    assert detect_workflow(["Bash"]) == "unknown"
+
+
+# ── tools / build_tool_sequence ───────────────────────────────────────────────
+
+
+def test_build_tool_sequence_includes_test_suffix() -> None:
+    from models import DevProfileEvent, Session
+    from datetime import datetime, timezone
+
+    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
+    session = Session(
+        session_id="s",
+        source="claude-code",
+        started_at=datetime(2026, 5, 10, 10, 0, 0, tzinfo=timezone.utc),
+        ended_at=None,
+        duration_minutes=0,
+        events=events,
+    )
+    seq = build_tool_sequence(session)
+    # evt-4: Write + .spec.rb → Write_test
+    assert "Write_test" in seq
+    # evt-1: Bash + has_test_context=True → Bash_test
+    assert "Bash_test" in seq
+
+
+def test_build_tool_sequence_skips_non_pre_tool_use() -> None:
+    from models import DevProfileEvent, Session
+    from datetime import datetime, timezone
+
+    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
+    session = Session(
+        session_id="s",
+        source="claude-code",
+        started_at=datetime(2026, 5, 10, 10, 0, 0, tzinfo=timezone.utc),
+        ended_at=None,
+        duration_minutes=0,
+        events=events,
+    )
+    seq = build_tool_sequence(session)
+    # Only pre_tool_use events should appear; stop/post_tool_use skipped
+    assert len(seq) == 4  # evt-1, evt-3, evt-4, evt-5

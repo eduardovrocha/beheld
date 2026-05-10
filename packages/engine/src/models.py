@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Optional
 
 
+# ── raw event from JSONL ──────────────────────────────────────────────────────
+
 @dataclass
 class DevProfileEvent:
     event_id: str
@@ -41,6 +43,8 @@ class DevProfileEvent:
         )
 
 
+# ── aggregated session ────────────────────────────────────────────────────────
+
 @dataclass
 class Session:
     session_id: str
@@ -48,17 +52,35 @@ class Session:
     started_at: datetime
     ended_at: Optional[datetime]
     duration_minutes: float
-    events: list[DevProfileEvent]
-    tools_used: list[str]
-    file_extensions: Counter
-    commands: list[str]
-    cwd_hash: str
-    total_turns: int
-    has_test_context: bool
+    # Raw event list (populated from JSONL; empty for DB-reconstructed sessions)
+    events: list[DevProfileEvent] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=list)
+    file_extensions: Counter = field(default_factory=Counter)
+    commands: list[str] = field(default_factory=list)
+    cwd_hash: str = ""
+    total_turns: int = 0
+    has_test_context: bool = False
+    # Classifier output (set by Processor)
+    project_category: str = "unknown"
+    project_confidence: float = 0.0
+    workflow_pattern: str = "unknown"
+    # Pre-computed aggregates (set by Processor; used by scorers for DB sessions)
+    avg_prompt_length: float = 0.0
+    has_code_context_ratio: float = 0.0
+    event_count: int = 0
+
+
+# ── storage types ─────────────────────────────────────────────────────────────
+
+@dataclass
+class Signal:
+    signal_type: str   # "platform" | "ecosystem" | "language" | "tool" | "workflow"
+    signal_value: str
+    occurrences: int = 1
 
 
 @dataclass
-class DailyScores:
+class Scores:
     date: str
     prompt_quality: int
     test_maturity: int
@@ -66,3 +88,22 @@ class DailyScores:
     growth_rate: int
     overall: int
     sessions_analyzed: int
+
+
+# ── classification / extraction ───────────────────────────────────────────────
+
+@dataclass
+class TechnicalSignals:
+    platforms: dict[str, int] = field(default_factory=dict)
+    ecosystems: dict[str, int] = field(default_factory=dict)
+    languages: dict[str, int] = field(default_factory=dict)
+    tools: dict[str, int] = field(default_factory=dict)
+    workflow_pattern: str = "unknown"
+    tool_sequence: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProjectClassification:
+    category: str
+    confidence: float
+    signals_used: list[str] = field(default_factory=list)

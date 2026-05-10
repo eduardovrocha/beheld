@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from extractors.commands import extract_platforms
+from extractors.commands import detect_platforms
 
 
-def classify_platforms(commands: list[str]) -> list[str]:
-    return extract_platforms(commands)
+def classify_platforms(commands: list[str]) -> dict[str, int]:
+    return detect_platforms(commands)

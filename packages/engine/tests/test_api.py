@@ -6,8 +6,9 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import api
 from api import VERSION, app
+from models import Scores, Signal
+from processor import ProcessResult
 from storage.sqlite import DevProfileDB
 
 
@@ -21,8 +22,12 @@ def test_db(db_path: Path) -> DevProfileDB:
 
 @pytest.fixture
 def client(test_db: DevProfileDB):
-    """TestClient with a fresh isolated DB; patch applied before lifespan runs."""
-    with patch("api.db", test_db):
+    """TestClient with isolated DB and no-op APScheduler; patch applied before lifespan."""
+    with patch("api.db", test_db), \
+         patch("api.insights_gen") as mock_ig, \
+         patch("apscheduler.schedulers.asyncio.AsyncIOScheduler.start"), \
+         patch("apscheduler.schedulers.asyncio.AsyncIOScheduler.shutdown"):
+        mock_ig.generate.return_value = {"insights": [], "generated_at": None, "requires_sessions": 5}
         with TestClient(app) as c:
             yield c
 
@@ -50,8 +55,14 @@ def test_scores_current_empty_db(client: TestClient) -> None:
 
 
 def test_scores_current_returns_zeros_when_no_data(client: TestClient) -> None:
+    assert client.get("/scores/current").json()["overall"] == 0
+
+
+def test_scores_current_with_data(client: TestClient, test_db: DevProfileDB) -> None:
+    test_db.save_scores(Scores("2026-05-10", 75, 60, 80, 55, 67, 10))
     data = client.get("/scores/current").json()
-    assert data["overall"] == 0
+    assert data["overall"] == 67
+    assert data["prompt_quality"] == 75
 
 
 # ── scores/history ────────────────────────────────────────────────────────────
@@ -64,9 +75,8 @@ def test_scores_history_empty(client: TestClient) -> None:
 
 
 def test_scores_history_returns_data(client: TestClient, test_db: DevProfileDB) -> None:
-    test_db.save_scores("2026-05-10", 70, 60, 80, 55, 66, 5)
-    resp = client.get("/scores/history?days=10")
-    data = resp.json()
+    test_db.save_scores(Scores("2026-05-10", 70, 60, 80, 55, 66, 5))
+    data = client.get("/scores/history?days=10").json()
     assert len(data) == 1
     assert data[0]["prompt_quality"] == 70
 
@@ -80,15 +90,15 @@ def test_profile_summary_empty(client: TestClient) -> None:
     assert data["total_sessions"] == 0
 
 
-def test_profile_summary_with_data(client: TestClient, test_db: DevProfileDB) -> None:
-    from datetime import datetime, timezone
-    now = datetime(2026, 5, 10, tzinfo=timezone.utc)
-    test_db.save_session("s1", "claude-code", now, None, 15.0, 3, "abc", "api_backend", 0.8, "tdd")
-    test_db.save_signals("s1", [("platform", "docker", 2), ("ecosystem", "python", 5)])
-
+def test_profile_summary_with_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+    test_db.save_session(sample_session_1)
+    test_db.save_signals(sample_session_1.session_id, [
+        Signal("platform", "testing", 2),
+        Signal("ecosystem", "rails", 5),
+    ])
     data = client.get("/profile/summary").json()
     assert data["total_sessions"] == 1
-    assert "docker" in data["platforms"]
+    assert "testing" in data["platforms"]
 
 
 # ── insights ──────────────────────────────────────────────────────────────────
@@ -97,16 +107,6 @@ def test_profile_summary_with_data(client: TestClient, test_db: DevProfileDB) ->
 def test_insights_requires_sessions(client: TestClient) -> None:
     data = client.get("/insights").json()
     assert "requires_sessions" in data
-
-
-def test_insights_returns_cache_after_enough_sessions(
-    client: TestClient, test_db: DevProfileDB
-) -> None:
-    test_db.save_scores("2026-05-10", 75, 60, 80, 55, 67, 10)
-    data = client.get("/insights").json()
-    assert "insights" in data
-    assert isinstance(data["insights"], list)
-    assert len(data["insights"]) > 0
 
 
 # ── export ────────────────────────────────────────────────────────────────────
@@ -118,44 +118,58 @@ def test_export_structure(client: TestClient) -> None:
         assert key in data
 
 
+def test_export_version(client: TestClient) -> None:
+    assert client.get("/export").json()["version"] == VERSION
+
+
 # ── process ───────────────────────────────────────────────────────────────────
 
 
-def test_process_no_events(client: TestClient) -> None:
-    with patch("api.read_all_events", return_value=[]):
+def test_process_no_new_events(client: TestClient) -> None:
+    with patch("api.processor") as mock_proc:
+        mock_proc.process_new.return_value = ProcessResult(new_sessions=0)
         resp = client.post("/process")
     assert resp.status_code == 200
     assert resp.json()["processed"] == 0
 
 
-def test_process_two_sessions(client: TestClient, sessions_dir: Path) -> None:
-    from reader.jsonl_reader import read_all_events
-    events = read_all_events(sessions_dir)
+def test_process_two_sessions(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+    from reader.jsonl_reader import JsonlReader
+    from processor import Processor
 
-    with patch("api.read_all_events", return_value=events):
+    cursor = tmp_path / ".test_cursor"
+    reader = JsonlReader(sessions_dir, cursor)
+    new_processor = Processor(test_db, reader)
+    with patch("api.processor", new_processor):
         resp = client.post("/process")
     assert resp.status_code == 200
     assert resp.json()["processed"] == 2
 
 
-def test_process_idempotent(client: TestClient, sessions_dir: Path) -> None:
-    from reader.jsonl_reader import read_all_events
-    events = read_all_events(sessions_dir)
+def test_process_idempotent(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+    from reader.jsonl_reader import JsonlReader
+    from processor import Processor
 
-    with patch("api.read_all_events", return_value=events):
+    cursor = tmp_path / ".test_cursor2"
+    reader = JsonlReader(sessions_dir, cursor)
+    new_processor = Processor(test_db, reader)
+    with patch("api.processor", new_processor):
         r1 = client.post("/process")
         r2 = client.post("/process")
     assert r1.json()["processed"] == 2
     assert r2.json()["processed"] == 0
 
 
-def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessions_dir: Path) -> None:
-    from reader.jsonl_reader import read_all_events
-    events = read_all_events(sessions_dir)
+def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+    from reader.jsonl_reader import JsonlReader
+    from processor import Processor
 
-    with patch("api.read_all_events", return_value=events):
+    cursor = tmp_path / ".test_cursor3"
+    reader = JsonlReader(sessions_dir, cursor)
+    new_processor = Processor(test_db, reader)
+    with patch("api.processor", new_processor):
         client.post("/process")
 
     scores = test_db.get_current_scores()
     assert scores is not None
-    assert scores["sessions_analyzed"] == 2
+    assert scores.sessions_analyzed == 2

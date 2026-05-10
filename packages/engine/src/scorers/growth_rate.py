@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-from collections import Counter
-
-from extractors.commands import extract_platforms
-from extractors.files import extract_ecosystems
+from extractors.commands import detect_platforms
+from extractors.files import detect_ecosystems
 from models import Session
+
+
+def _delta_score(recent: float, previous: float, max_weight: int) -> int:
+    """Map delta to [0, max_weight]. No change → max_weight/2."""
+    if previous == 0 and recent == 0:
+        return max_weight // 2
+    if previous == 0:
+        return max_weight
+    ratio = (recent - previous) / previous
+    normalized = max(0.0, min(1.0, ratio + 0.5))
+    return int(normalized * max_weight)
 
 
 def _metrics(sessions: list[Session]) -> dict:
@@ -18,51 +27,41 @@ def _metrics(sessions: list[Session]) -> dict:
             "platforms": set(),
         }
 
-    all_events = [e for s in sessions for e in s.events]
+    # Avg prompt — use pre-computed aggregate when events are absent
+    avgs: list[float] = []
+    for s in sessions:
+        if s.events:
+            prompt_events = [e for e in s.events if e.prompt_length is not None]
+            if prompt_events:
+                avgs.append(sum(e.prompt_length for e in prompt_events) / len(prompt_events))
+        elif s.avg_prompt_length > 0:
+            avgs.append(s.avg_prompt_length)
 
-    prompt_events = [e for e in all_events if e.prompt_length is not None]
-    avg_prompt = (
-        sum(e.prompt_length for e in prompt_events) / len(prompt_events) if prompt_events else 0.0
-    )
-
-    test_sessions = sum(1 for s in sessions if s.has_test_context)
-    test_ratio = test_sessions / len(sessions)
-
-    avg_tools = sum(len(set(s.tools_used)) for s in sessions) / len(sessions)
+    test_ratio = sum(1 for s in sessions if s.has_test_context) / len(sessions)
+    avg_tools = sum(len(s.tools_used) for s in sessions) / len(sessions)
     avg_duration = sum(s.duration_minutes for s in sessions) / len(sessions)
 
-    all_exts: Counter = Counter()
-    all_cmds: list[str] = []
+    all_ext_keys: set[str] = set()
+    all_commands: list[str] = []
     for s in sessions:
-        all_exts.update(s.file_extensions)
-        all_cmds.extend(s.commands)
+        all_ext_keys.update(s.file_extensions.keys())
+        all_commands.extend(s.commands)
+
+    fake_paths = [f"f{ext}" for ext in all_ext_keys]
+    ecosystems = set(detect_ecosystems(fake_paths).keys())
+    platforms = set(detect_platforms(all_commands).keys())
 
     return {
-        "avg_prompt": avg_prompt,
+        "avg_prompt": sum(avgs) / len(avgs) if avgs else 0.0,
         "test_ratio": test_ratio,
         "avg_tools": avg_tools,
         "avg_duration": avg_duration,
-        "ecosystems": set(extract_ecosystems(all_exts)),
-        "platforms": set(extract_platforms(all_cmds)),
+        "ecosystems": ecosystems,
+        "platforms": platforms,
     }
 
 
-def _delta_score(recent: float, previous: float, max_weight: int) -> int:
-    """Map delta to [0, max_weight]. No change → max_weight/2."""
-    if previous == 0 and recent == 0:
-        return max_weight // 2
-    if previous == 0:
-        return max_weight
-    # A ±50% change covers the full range
-    ratio = (recent - previous) / previous
-    normalized = max(0.0, min(1.0, ratio + 0.5))
-    return int(normalized * max_weight)
-
-
-def compute_growth_rate(
-    recent_sessions: list[Session],
-    previous_sessions: list[Session],
-) -> int:
+class GrowthRateScorer:
     """
     Compare last 30 days vs previous 30 days.
     Returns 50 when no previous data (neutral baseline).
@@ -74,22 +73,24 @@ def compute_growth_rate(
       +10  Δ avg session duration
       +10  new ecosystems or platforms
     """
-    if not recent_sessions:
-        return 0
-    if not previous_sessions:
-        return 50
 
-    r = _metrics(recent_sessions)
-    p = _metrics(previous_sessions)
+    def score(self, recent: list[Session], previous: list[Session]) -> int:
+        if not recent:
+            return 0
+        if not previous:
+            return 50
 
-    score = 0
-    score += _delta_score(r["avg_prompt"], p["avg_prompt"], 30)
-    score += _delta_score(r["test_ratio"], p["test_ratio"], 30)
-    score += _delta_score(r["avg_tools"], p["avg_tools"], 20)
-    score += _delta_score(r["avg_duration"], p["avg_duration"], 10)
+        r = _metrics(recent)
+        p = _metrics(previous)
 
-    new_eco = r["ecosystems"] - p["ecosystems"]
-    new_plat = r["platforms"] - p["platforms"]
-    score += 10 if (new_eco or new_plat) else 5
+        result = 0
+        result += _delta_score(r["avg_prompt"], p["avg_prompt"], 30)
+        result += _delta_score(r["test_ratio"], p["test_ratio"], 30)
+        result += _delta_score(r["avg_tools"], p["avg_tools"], 20)
+        result += _delta_score(r["avg_duration"], p["avg_duration"], 10)
 
-    return max(0, min(100, score))
+        new_eco = r["ecosystems"] - p["ecosystems"]
+        new_plat = r["platforms"] - p["platforms"]
+        result += 10 if (new_eco or new_plat) else 5
+
+        return max(0, min(100, result))

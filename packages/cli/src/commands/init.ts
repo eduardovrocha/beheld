@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { runWizard } from "../ui/wizard";
-import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand } from "../config/hooks";
+import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand, installClaudeMcpServer } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
 import type { DevProfileConfig } from "../types";
 
@@ -47,6 +47,7 @@ export async function initCommand(): Promise<void> {
     {
       installClaudeHooks: async () => {
         await installClaudeCodeHooks();
+        await installClaudeMcpServer();
         await installClaudeSlashCommand();
       },
       installContinueMcp: async () => {

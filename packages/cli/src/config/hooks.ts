@@ -93,15 +93,6 @@ export async function installClaudeCodeHooks(
   }
   cfg.hooks = hooks;
 
-  // MCP server registration for /devprofile slash command
-  const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-  if (!mcpServers["devprofile"]) {
-    mcpServers["devprofile"] = {
-      url: "http://127.0.0.1:7337/mcp",
-    };
-  }
-  cfg.mcpServers = mcpServers;
-
   writeJson(settingsFile, cfg);
 }
 
@@ -126,10 +117,6 @@ export async function removeClaudeCodeHooks(
       );
     }
     cfg.hooks = hooks;
-    // Remove MCP server entry
-    const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-    delete mcpServers["devprofile"];
-    cfg.mcpServers = mcpServers;
     writeJson(settingsFile, cfg);
   } catch {
     restoreBackup(settingsFile);
@@ -202,14 +189,52 @@ export async function removeClaudeSlashCommand(
   }
 }
 
+// ── Claude Code global MCP registry (~/.claude.json) ─────────────────────────
+
+export function claudeJsonPath(base = homedir()): string {
+  return join(base, ".claude.json");
+}
+
+export async function installClaudeMcpServer(
+  claudeJson = claudeJsonPath(),
+): Promise<void> {
+  const cfg = readJson(claudeJson);
+  const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
+  if (!mcpServers["devprofile"]) {
+    mcpServers["devprofile"] = {
+      type: "http",
+      url: "http://127.0.0.1:7337/mcp",
+    };
+    cfg.mcpServers = mcpServers;
+    writeJson(claudeJson, cfg);
+  }
+}
+
+export async function removeClaudeMcpServer(
+  claudeJson = claudeJsonPath(),
+): Promise<void> {
+  if (!existsSync(claudeJson)) return;
+  try {
+    const cfg = readJson(claudeJson);
+    const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
+    if ("devprofile" in mcpServers) {
+      delete mcpServers["devprofile"];
+      cfg.mcpServers = mcpServers;
+      writeJson(claudeJson, cfg);
+    }
+  } catch { /* ignore */ }
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
 
 export async function removeAllHooks(
   settingsFile = claudeSettingsPath(),
   configFile = continueConfigPath(),
   commandFile = claudeCommandPath(),
+  claudeJson = claudeJsonPath(),
 ): Promise<void> {
   await removeClaudeCodeHooks(settingsFile);
   await removeContinueDevMcp(configFile);
   await removeClaudeSlashCommand(commandFile);
+  await removeClaudeMcpServer(claudeJson);
 }

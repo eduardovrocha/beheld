@@ -10,9 +10,11 @@ import { detectEnvironments } from "../src/ui/wizard";
 import {
   installClaudeCodeHooks,
   installContinueDevMcp,
+  installClaudeMcpServer,
   removeAllHooks,
   claudeSettingsPath,
   continueConfigPath,
+  claudeJsonPath,
 } from "../src/config/hooks";
 import type { ProfileData, Scores, ViewFlags } from "../src/types";
 
@@ -235,6 +237,7 @@ describe("hooks idempotency", () => {
   let tmpDir: string;
   let settingsFile: string;
   let configFile: string;
+  let claudeJson: string;
 
   beforeEach(() => {
     tmpDir = join(tmpdir(), `devprofile-hooks-${randomUUID()}`);
@@ -242,21 +245,37 @@ describe("hooks idempotency", () => {
     mkdirSync(join(tmpDir, ".continue"), { recursive: true });
     settingsFile = join(tmpDir, ".claude", "settings.json");
     configFile = join(tmpDir, ".continue", "config.json");
+    claudeJson = join(tmpDir, ".claude.json");
     writeFileSync(settingsFile, "{}");
     writeFileSync(configFile, JSON.stringify({ mcpServers: [] }));
+    writeFileSync(claudeJson, "{}");
   });
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test("installClaudeCodeHooks adds hooks and MCP entry", async () => {
+  test("installClaudeCodeHooks adds hooks only (no MCP in settings.json)", async () => {
     await installClaudeCodeHooks(settingsFile);
     const cfg = JSON.parse(readFileSync(settingsFile, "utf8"));
     expect(cfg.hooks.PreToolUse).toHaveLength(1);
     expect(cfg.hooks.PostToolUse).toHaveLength(1);
     expect(cfg.hooks.Stop).toHaveLength(1);
-    expect(cfg.mcpServers?.devprofile).toBeDefined();
+    expect(cfg.mcpServers?.devprofile).toBeUndefined();
+  });
+
+  test("installClaudeMcpServer adds devprofile to ~/.claude.json", async () => {
+    await installClaudeMcpServer(claudeJson);
+    const cfg = JSON.parse(readFileSync(claudeJson, "utf8"));
+    expect(cfg.mcpServers?.devprofile?.type).toBe("http");
+    expect(cfg.mcpServers?.devprofile?.url).toBe("http://127.0.0.1:7337/mcp");
+  });
+
+  test("installClaudeMcpServer is idempotent", async () => {
+    await installClaudeMcpServer(claudeJson);
+    await installClaudeMcpServer(claudeJson);
+    const cfg = JSON.parse(readFileSync(claudeJson, "utf8"));
+    expect(Object.keys(cfg.mcpServers).filter((k) => k === "devprofile")).toHaveLength(1);
   });
 
   test("installClaudeCodeHooks is idempotent — second call does not duplicate hooks", async () => {
@@ -285,13 +304,13 @@ describe("hooks idempotency", () => {
     expect(devprofiles).toHaveLength(1);
   });
 
-  test("removeAllHooks removes devprofile hooks and MCP entries", async () => {
+  test("removeAllHooks removes devprofile hooks, MCP entries, and claude.json entry", async () => {
     await installClaudeCodeHooks(settingsFile);
     await installContinueDevMcp(configFile);
-    await removeAllHooks(settingsFile, configFile);
+    await installClaudeMcpServer(claudeJson);
+    await removeAllHooks(settingsFile, configFile, undefined, claudeJson);
 
     const claudeCfg = JSON.parse(readFileSync(settingsFile, "utf8"));
-    expect(claudeCfg.mcpServers?.devprofile).toBeUndefined();
     for (const event of ["PreToolUse", "PostToolUse", "Stop"]) {
       const hooks = (claudeCfg.hooks?.[event] ?? []) as Array<{
         hooks?: Array<{ command?: string }>;
@@ -302,6 +321,9 @@ describe("hooks idempotency", () => {
     const continueCfg = JSON.parse(readFileSync(configFile, "utf8"));
     const servers = continueCfg.mcpServers as Array<{ name: string }>;
     expect(servers.some((s) => s.name === "devprofile")).toBe(false);
+
+    const claudeJsonCfg = JSON.parse(readFileSync(claudeJson, "utf8"));
+    expect(claudeJsonCfg.mcpServers?.devprofile).toBeUndefined();
   });
 
   test("removeAllHooks preserves non-devprofile hooks", async () => {
@@ -312,7 +334,7 @@ describe("hooks idempotency", () => {
     };
     writeFileSync(settingsFile, JSON.stringify(existing, null, 2));
     await installClaudeCodeHooks(settingsFile);
-    await removeAllHooks(settingsFile, configFile);
+    await removeAllHooks(settingsFile, configFile, undefined, claudeJson);
 
     const cfg = JSON.parse(readFileSync(settingsFile, "utf8"));
     expect(cfg.hooks.PreToolUse).toHaveLength(1);

@@ -223,7 +223,13 @@ export async function installClaudeMcpServer(
 ): Promise<void> {
   const cfg = readJson(claudeJson);
   const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-  if (!mcpServers["devprofile"]) {
+  const existing = mcpServers["devprofile"] as { args?: string[] } | undefined;
+  const needsUpdate =
+    !existing ||
+    !Array.isArray(existing.args) ||
+    !existing.args.includes("--stdio");
+
+  if (needsUpdate) {
     mcpServers["devprofile"] = {
       type: "stdio",
       command: join(base, ".local", "bin", "devprofile"),

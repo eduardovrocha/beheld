@@ -150,6 +150,41 @@ describe("handlePreToolUse", () => {
     });
     expect(JSON.stringify(event.metadata)).not.toContain("sk-test");
   });
+
+  test("metadata não contém paths absolutos", () => {
+    const event = handlePreToolUse({
+      tool_name: "Bash",
+      tool_input: { command: "cd /Users/eduardo/projects/app && bun test" },
+      session_id: "test-123",
+      timestamp: "2026-05-11T00:00:00Z",
+    });
+    const metaStr = JSON.stringify(event.metadata);
+    expect(metaStr).not.toMatch(/\/Users\//);
+    expect(metaStr).not.toMatch(/\/home\//);
+    expect(metaStr).toMatch(/\[path:[a-f0-9]{8}\]/);
+  });
+
+  test("metadata preserva valores não-path", () => {
+    const event = handlePreToolUse({
+      tool_name: "Bash",
+      tool_input: { command: "echo hello", exit_code: 0 },
+      session_id: "test-123",
+      timestamp: "2026-05-11T00:00:00Z",
+    });
+    expect(event.metadata).toMatchObject({ command: "echo hello", exit_code: 0 });
+  });
+
+  test("command_sanitized e metadata são consistentes — ambos substituem paths por hash", () => {
+    const event = handlePreToolUse({
+      tool_name: "Bash",
+      tool_input: { command: "/Users/eduardo/.local/bin/devprofile start" },
+      session_id: "test-123",
+      timestamp: "2026-05-11T00:00:00Z",
+    });
+    expect(event.command_sanitized).toMatch(/\[path:/);
+    expect(JSON.stringify(event.metadata)).toMatch(/\[path:/);
+    expect(JSON.stringify(event.metadata)).not.toMatch(/\/Users\//);
+  });
 });
 
 describe("handlePostToolUse", () => {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "crypto";
-import { sanitize, sanitizeCommand } from "../sanitizer";
+import { sanitize, sanitizeCommand, sanitizeMetadata } from "../sanitizer";
 import type { ClaudeCodeHookPayload, DevProfileEvent } from "../types";
 
 const TEST_KEYWORDS = ["rspec", "jest", "pytest", "playwright", "vitest"];
@@ -46,7 +46,7 @@ export function handlePreToolUse(body: unknown): DevProfileEvent {
     has_test_context:
       safe.tool_name === "Bash" ? hasTestContext(input) : undefined,
     cwd_hash: cwdHash(safe.cwd),
-    metadata: input,
+    metadata: sanitizeMetadata(input as Record<string, unknown>),
   };
 }
 

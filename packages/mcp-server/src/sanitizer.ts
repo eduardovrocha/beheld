@@ -62,6 +62,44 @@ export function sanitizeCommand(cmd: string): string {
   return applyPatterns(withHashedPaths);
 }
 
+// Matches absolute paths rooted at well-known system directories.
+// More precise than sanitizeCommand's regex to avoid false positives in JSON.
+const ABS_PATH_RE = /(\/(?:Users|home|root|tmp|var|etc|opt|usr)[^\s"'`,;|&<>(){}[\]]*)/g;
+
+function sanitizePathsInString(s: string): string {
+  return s.replace(ABS_PATH_RE, (match) => {
+    const filename = match.split("/").pop() ?? match;
+    return `[path:${quickHash(match)}]/${filename}`;
+  });
+}
+
+/**
+ * Recursively sanitizes absolute paths in all string values of a metadata
+ * object. Uses the same [path:HASH]/filename format as sanitizeCommand so
+ * the same path produces the same token in both command_sanitized and metadata.
+ */
+export function sanitizeMetadata(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string") {
+      result[key] = sanitizePathsInString(value);
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((v) =>
+        typeof v === "string"
+          ? sanitizePathsInString(v)
+          : typeof v === "object" && v !== null
+          ? sanitizeMetadata(v as Record<string, unknown>)
+          : v,
+      );
+    } else if (typeof value === "object" && value !== null) {
+      result[key] = sanitizeMetadata(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 function quickHash(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) {

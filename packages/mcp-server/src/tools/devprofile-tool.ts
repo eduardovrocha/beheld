@@ -1,4 +1,5 @@
 import type { McpTool } from "./types";
+import { getLastCachedScores } from "../../../cli/src/storage/local-cache";
 
 const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
 
@@ -10,6 +11,7 @@ interface EngineScores {
   overall: number;
   sessions_analyzed: number;
   updated_at: string | null;
+  source: "live" | "cache";
 }
 
 interface ProfileSummary {
@@ -30,10 +32,12 @@ async function fetchScores(): Promise<EngineScores | null> {
     const r = await fetch(`${ENGINE_URL}/scores/current`, {
       signal: AbortSignal.timeout(2000),
     });
-    if (!r.ok) return null;
-    return (await r.json()) as EngineScores;
+    if (!r.ok) throw new Error("engine error");
+    return { ...(await r.json()) as Omit<EngineScores, "source">, source: "live" };
   } catch {
-    return null;
+    const cached = getLastCachedScores();
+    if (!cached) return null;
+    return { ...cached, source: "cache" };
   }
 }
 
@@ -157,25 +161,29 @@ export const devprofileTool: McpTool = {
 
     const scores = await fetchScores();
     if (!scores) {
-      return "DevProfile: engine not running. Start it with `devprofile start`.";
+      return "DevProfile: engine offline e nenhum score cacheado disponível. Execute: devprofile start";
     }
 
+    const cacheNote = scores.source === "cache"
+      ? `\n[cache de ${scores.updated_at ?? "data desconhecida"} — engine offline]`
+      : "";
+
     if (view === "scores") {
-      return formatScores(scores);
+      return formatScores(scores) + cacheNote;
     }
 
     if (view === "insight") {
       const insightData = await fetchInsights();
-      return formatInsight(insightData?.insights ?? []);
+      return formatInsight(insightData?.insights ?? []) + cacheNote;
     }
 
     if (view === "full") {
       const [summary, insightData] = await Promise.all([fetchSummary(), fetchInsights()]);
-      return formatFull(scores, summary, insightData?.insights ?? []);
+      return formatFull(scores, summary, insightData?.insights ?? []) + cacheNote;
     }
 
     // summary (default)
     const insightData = await fetchInsights();
-    return formatSummary(scores, insightData?.insights ?? []);
+    return formatSummary(scores, insightData?.insights ?? []) + cacheNote;
   },
 };

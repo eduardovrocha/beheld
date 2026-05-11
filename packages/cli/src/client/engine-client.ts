@@ -1,4 +1,5 @@
 import type { Insight, ProcessResult, ProfileSummary, Scores } from "../types";
+import { getLastCachedScores, type CachedScores } from "../storage/local-cache";
 
 export interface EngineStatus {
   ok: boolean;
@@ -40,8 +41,16 @@ export async function engineHealth(): Promise<{ ok: boolean } | null> {
   return get<{ ok: boolean; version?: string }>("/health");
 }
 
-export async function scoresCurrent(): Promise<Scores | null> {
-  return get<Scores>("/scores/current");
+export async function scoresCurrent(): Promise<CachedScores | null> {
+  try {
+    const res = await fetch(`${BASE}/scores/current`, {
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
+    if (!res.ok) throw new Error("engine error");
+    return { ...(await res.json()) as Omit<CachedScores, "source">, source: "live" };
+  } catch {
+    return getLastCachedScores();
+  }
 }
 
 export async function scoresHistory(days = 30): Promise<Scores[] | null> {

@@ -422,6 +422,89 @@ describe("hooks idempotency", () => {
   });
 });
 
+// ── scoresCurrent offline fallback ───────────────────────────────────────────
+
+describe("scoresCurrent offline fallback", () => {
+  const repoRoot = join(import.meta.dir, "../../..");
+  const deadEngineUrl = "http://127.0.0.1:19999";
+
+  test("view exits 1 with no-cache message when engine offline and no DB", async () => {
+    const missingDb = join(tmpdir(), `devprofile-missing-${randomUUID()}.db`);
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: missingDb },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(1);
+    expect(output).toContain("nenhum score cacheado");
+  }, 15000);
+
+  test("view shows cache warning when engine offline but DB has scores", async () => {
+    const { Database } = await import("bun:sqlite");
+    const dbPath = join(tmpdir(), `devprofile-cache-${randomUUID()}.db`);
+    const db = new Database(dbPath);
+    db.exec(
+      `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
+       tech_breadth INTEGER, growth_rate INTEGER, overall INTEGER, sessions_analyzed INTEGER)`,
+    );
+    db.exec(`INSERT INTO scores VALUES ('2024-01-01', 70, 60, 80, 50, 68, 5)`);
+    db.close();
+
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    expect(output).toContain("Engine offline");
+    rmSync(dbPath, { force: true });
+  }, 15000);
+
+  test("view --scores-only with cached DB returns space-separated numbers", async () => {
+    const { Database } = await import("bun:sqlite");
+    const dbPath = join(tmpdir(), `devprofile-scores-${randomUUID()}.db`);
+    const db = new Database(dbPath);
+    db.exec(
+      `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
+       tech_breadth INTEGER, growth_rate INTEGER, overall INTEGER, sessions_analyzed INTEGER)`,
+    );
+    db.exec(`INSERT INTO scores VALUES ('2024-01-01', 70, 60, 80, 50, 68, 5)`);
+    db.close();
+
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view", "--scores-only"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    const parts = output.trim().split(" ").map(Number);
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe(70);
+    expect(parts[1]).toBe(60);
+    expect(parts[2]).toBe(80);
+    expect(parts[3]).toBe(50);
+    rmSync(dbPath, { force: true });
+  }, 15000);
+});
+
 // ── engineStatus / orphan detection ──────────────────────────────────────────
 
 describe("EngineStatus interface", () => {

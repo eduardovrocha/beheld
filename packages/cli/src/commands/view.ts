@@ -62,6 +62,18 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
     mcpSessionCurrent(),
   ]);
 
+  if (!scores) {
+    console.log("\n  ✗ Engine offline e nenhum score cacheado disponível.");
+    console.log("  Execute: devprofile start\n");
+    process.exit(1);
+  }
+
+  if (scores.source === "cache" && !flags.json && !flags.scoresOnly) {
+    console.log(`\n  ⚠️  Engine offline — exibindo último score salvo.`);
+    console.log(`  Referente a: ${scores.updated_at}`);
+    console.log("  Execute: devprofile start para atualizar.\n");
+  }
+
   const data: ProfileData = {
     scores,
     summary,

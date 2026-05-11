@@ -283,7 +283,7 @@ describe("hooks idempotency", () => {
     const entry = cfg.mcpServers?.devprofile;
     expect(entry?.type).toBe("stdio");
     expect(entry?.command).toContain(".local/bin/devprofile");
-    expect(entry?.args).toEqual(["server"]);
+    expect(entry?.args).toEqual(["server", "--stdio"]);
     expect(entry?.url).toBeUndefined();
   });
 

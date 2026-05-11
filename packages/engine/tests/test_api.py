@@ -161,6 +161,56 @@ def test_status_sessions_processed_with_data(client: TestClient, test_db: DevPro
     assert data["sessions_processed"] == 1
 
 
+# ── profile/readiness ────────────────────────────────────────────────────────
+
+
+def test_readiness_zero_sessions(client: TestClient) -> None:
+    data = client.get("/profile/readiness").json()
+    assert data["ready"] is False
+    assert data["sessions_count"] == 0
+    assert data["sessions_required"] == 3
+    assert data["sessions_remaining"] == 3
+
+
+def test_readiness_partial_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+    test_db.save_session(sample_session_1)
+    data = client.get("/profile/readiness").json()
+    assert data["ready"] is False
+    assert data["sessions_count"] == 1
+    assert data["sessions_remaining"] == 2
+
+
+def test_readiness_enough_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+    from models import Session
+    import copy
+    s3 = copy.deepcopy(sample_session_1)
+    s3.session_id = "sess-extra"
+    test_db.save_session(sample_session_1)
+    test_db.save_session(sample_session_2)
+    test_db.save_session(s3)
+    data = client.get("/profile/readiness").json()
+    assert data["ready"] is True
+    assert data["sessions_count"] == 3
+    assert data["sessions_remaining"] == 0
+
+
+def test_readiness_structure(client: TestClient) -> None:
+    data = client.get("/profile/readiness").json()
+    for key in ("ready", "sessions_count", "sessions_required", "sessions_remaining"):
+        assert key in data
+
+
+def test_readiness_sessions_remaining_never_negative(client: TestClient, test_db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+    import copy
+    for i in range(5):
+        s = copy.deepcopy(sample_session_1)
+        s.session_id = f"sess-extra-{i}"
+        test_db.save_session(s)
+    data = client.get("/profile/readiness").json()
+    assert data["sessions_remaining"] == 0
+    assert data["ready"] is True
+
+
 # ── count_unprocessed_events ──────────────────────────────────────────────────
 
 

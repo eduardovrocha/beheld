@@ -83,6 +83,21 @@ def health() -> dict:
     return {"ok": True, "version": VERSION}
 
 
+MIN_SESSIONS = 3
+
+
+@app.get("/profile/readiness")
+def profile_readiness() -> dict:
+    sessions_count = get_sessions_processed()
+    ready = sessions_count >= MIN_SESSIONS
+    return {
+        "ready": ready,
+        "sessions_count": sessions_count,
+        "sessions_required": MIN_SESSIONS,
+        "sessions_remaining": max(0, MIN_SESSIONS - sessions_count),
+    }
+
+
 @app.get("/status")
 def status() -> dict:
     return {

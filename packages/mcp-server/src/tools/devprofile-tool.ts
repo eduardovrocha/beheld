@@ -27,6 +27,25 @@ interface Insight {
   generated_at: string | null;
 }
 
+interface EngineReadiness {
+  ready: boolean;
+  sessions_count: number;
+  sessions_required: number;
+  sessions_remaining: number;
+}
+
+async function fetchReadiness(): Promise<EngineReadiness | null> {
+  try {
+    const r = await fetch(`${ENGINE_URL}/profile/readiness`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!r.ok) return null;
+    return (await r.json()) as EngineReadiness;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchScores(): Promise<EngineScores | null> {
   try {
     const r = await fetch(`${ENGINE_URL}/scores/current`, {
@@ -162,6 +181,22 @@ export const devprofileTool: McpTool = {
     const scores = await fetchScores();
     if (!scores) {
       return "DevProfile: engine offline e nenhum score cacheado disponível. Execute: devprofile start";
+    }
+
+    // Only check readiness when live — cache means a profile existed before
+    if (scores.source === "live") {
+      const r = await fetchReadiness().catch(() => null);
+      if (r && !r.ready) {
+        const remaining = r.sessions_required - r.sessions_count;
+        return [
+          "DevProfile ainda coletando dados.",
+          "",
+          `${r.sessions_count}/${r.sessions_required} sessões — faltam ${remaining} sessão${remaining !== 1 ? "ões" : ""}.`,
+          "",
+          "Continue usando o Claude Code normalmente.",
+          "O perfil será gerado automaticamente.",
+        ].join("\n");
+      }
     }
 
     const cacheNote = scores.source === "cache"

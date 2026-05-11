@@ -9,6 +9,13 @@ export interface EngineStatus {
   last_processed_at: string | null;
 }
 
+export interface EngineReadiness {
+  ready: boolean;
+  sessions_count: number;
+  sessions_required: number;
+  sessions_remaining: number;
+}
+
 const BASE = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
 const TIMEOUT = 3000;
 
@@ -71,4 +78,8 @@ export async function processNew(): Promise<ProcessResult | null> {
 
 export async function engineStatus(): Promise<EngineStatus | null> {
   return get<EngineStatus>("/status");
+}
+
+export async function readiness(): Promise<EngineReadiness | null> {
+  return get<EngineReadiness>("/profile/readiness");
 }

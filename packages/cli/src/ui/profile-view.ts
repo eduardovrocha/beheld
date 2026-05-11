@@ -32,6 +32,29 @@ function scoreLine(label: string, score: number): string {
   return `  ${padded} ${c}${String(score).padStart(3)}${RESET}  ${c}${bar(score)}${RESET}`;
 }
 
+// ── renderCollecting ──────────────────────────────────────────────────────────
+
+export function renderCollecting(sessionsCount: number, sessionsRequired: number): void {
+  const remaining = sessionsRequired - sessionsCount;
+  const progress = Math.round((sessionsCount / sessionsRequired) * 100);
+  const filled = Math.round((sessionsCount / sessionsRequired) * 20);
+  const b = "█".repeat(filled) + "░".repeat(20 - filled);
+
+  console.log("");
+  console.log("  DevProfile — Coletando dados");
+  console.log("");
+  console.log(`  ${b}  ${progress}%`);
+  console.log("");
+  console.log(`  ${sessionsCount} de ${sessionsRequired} sessões coletadas.`);
+  const verb = remaining !== 1 ? "Faltam" : "Falta";
+  const noun = remaining !== 1 ? "sessões" : "sessão";
+  console.log(`  ${verb} ${remaining} ${noun} para gerar seu perfil.`);
+  console.log("");
+  console.log("  Continue usando o Claude Code normalmente.");
+  console.log("  O perfil será gerado automaticamente.");
+  console.log("");
+}
+
 // ── renderProfile ─────────────────────────────────────────────────────────────
 
 export function renderProfile(data: ProfileData, flags: ViewFlags): string {

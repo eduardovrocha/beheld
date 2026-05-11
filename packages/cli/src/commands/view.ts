@@ -1,6 +1,6 @@
-import { scoresCurrent, profileSummary, insights, engineStatus, processNew } from "../client/engine-client";
+import { scoresCurrent, profileSummary, insights, engineStatus, processNew, readiness } from "../client/engine-client";
 import { mcpSessionCurrent } from "../client/mcp-client";
-import { renderProfile } from "../ui/profile-view";
+import { renderProfile, renderCollecting } from "../ui/profile-view";
 import type { ProfileData, ViewFlags } from "../types";
 
 interface ViewOptions {
@@ -66,6 +66,15 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
     console.log("\n  ✗ Engine offline e nenhum score cacheado disponível.");
     console.log("  Execute: devprofile start\n");
     process.exit(1);
+  }
+
+  // Only check readiness when scores are live — cache proves a profile existed before
+  if (scores.source === "live" && !flags.json && !flags.scoresOnly) {
+    const r = await readiness();
+    if (r && !r.ready) {
+      renderCollecting(r.sessions_count, r.sessions_required);
+      process.exit(0);
+    }
   }
 
   if (scores.source === "cache" && !flags.json && !flags.scoresOnly) {

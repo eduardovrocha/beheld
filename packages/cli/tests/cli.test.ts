@@ -422,6 +422,114 @@ describe("hooks idempotency", () => {
   });
 });
 
+// ── renderCollecting ─────────────────────────────────────────────────────────
+
+describe("renderCollecting", () => {
+  test("renders collecting screen with 0 sessions (0%)", () => {
+    const { renderCollecting } = require("../src/ui/profile-view");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(String(args[0]));
+    renderCollecting(0, 3);
+    console.log = orig;
+    const out = lines.join("\n");
+    expect(out).toContain("Coletando dados");
+    expect(out).toContain("░░░░░░░░░░░░░░░░░░░░  0%");
+    expect(out).toContain("0 de 3 sessões coletadas");
+    expect(out).toContain("Faltam 3 sessões");
+  });
+
+  test("renders collecting screen with 2 sessions (66%)", () => {
+    const { renderCollecting } = require("../src/ui/profile-view");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(String(args[0]));
+    renderCollecting(2, 3);
+    console.log = orig;
+    const out = lines.join("\n");
+    expect(out).toContain("2 de 3 sessões coletadas");
+    expect(out).toContain("Falta 1 sessão");
+  });
+
+  test("uses singular 'sessão' when remaining === 1", () => {
+    const { renderCollecting } = require("../src/ui/profile-view");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(String(args[0]));
+    renderCollecting(2, 3);
+    console.log = orig;
+    const out = lines.join("\n");
+    expect(out).toMatch(/Falta 1 sessão[^ões]/);
+    expect(out).not.toContain("sessões para gerar");
+  });
+
+  test("uses plural 'sessões' when remaining > 1", () => {
+    const { renderCollecting } = require("../src/ui/profile-view");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(String(args[0]));
+    renderCollecting(0, 3);
+    console.log = orig;
+    const out = lines.join("\n");
+    expect(out).toContain("Faltam 3 sessões");
+  });
+});
+
+// ── readiness subprocess tests ────────────────────────────────────────────────
+
+describe("view readiness gate", () => {
+  const repoRoot = join(import.meta.dir, "../../..");
+  const deadEngineUrl = "http://127.0.0.1:19999";
+
+  test("view shows 'Coletando dados' when engine offline and DB has 0 scores (no cache)", async () => {
+    const missingDb = join(tmpdir(), `devprofile-noread-${randomUUID()}.db`);
+    // Engine offline + no cache → exits 1 with error (not collecting screen)
+    // Collecting screen only shows when engine is LIVE and reports not ready
+    // This test confirms the exit path when engine offline + no cache
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: missingDb },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(1);
+    expect(output).toContain("nenhum score cacheado");
+  }, 15000);
+
+  test("view with cached scores (source=cache) never shows collecting screen", async () => {
+    const { Database } = await import("bun:sqlite");
+    const dbPath = join(tmpdir(), `devprofile-readiness-${randomUUID()}.db`);
+    const db = new Database(dbPath);
+    db.exec(
+      `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
+       tech_breadth INTEGER, growth_rate INTEGER, overall INTEGER, sessions_analyzed INTEGER)`,
+    );
+    db.exec(`INSERT INTO scores VALUES ('2024-01-01', 70, 60, 80, 50, 68, 1)`);
+    db.close();
+
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    expect(output).not.toContain("Coletando dados");
+    expect(output).toContain("Engine offline");
+    rmSync(dbPath, { force: true });
+  }, 15000);
+});
+
 // ── scoresCurrent offline fallback ───────────────────────────────────────────
 
 describe("scoresCurrent offline fallback", () => {

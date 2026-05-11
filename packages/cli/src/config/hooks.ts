@@ -197,8 +197,10 @@ export async function installClaudeSlashCommand(
   commandFile = claudeCommandPath(),
 ): Promise<void> {
   mkdirSync(dirname(commandFile), { recursive: true });
-  if (!existsSync(commandFile)) {
-    writeFileSync(commandFile, SLASH_COMMAND_CONTENT);
+  const exists = existsSync(commandFile);
+  const isEmpty = exists && readFileSync(commandFile, "utf-8").trim().length === 0;
+  if (!exists || isEmpty) {
+    writeFileSync(commandFile, SLASH_COMMAND_CONTENT, "utf-8");
   }
 }
 

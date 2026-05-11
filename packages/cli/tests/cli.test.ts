@@ -16,6 +16,7 @@ import {
   continueConfigPath,
   claudeJsonPath,
   migrateProjectScopedRegistrations,
+  installClaudeSlashCommand,
 } from "../src/config/hooks";
 import type { ProfileData, Scores, ViewFlags } from "../src/types";
 
@@ -933,4 +934,37 @@ describe("view --json e --scores-only não poluem stdout com warnings", () => {
     expect(stdout).not.toContain("não processados");
     expect(stdout.trim()).toMatch(/^[\d\s]+$/);
   }, 15000);
+});
+
+describe("installClaudeSlashCommand", () => {
+  test("sobrescreve arquivo vazio", async () => {
+    const tmpFile = join(tmpdir(), `devprofile-empty-${Date.now()}.md`);
+    writeFileSync(tmpFile, "");
+
+    await installClaudeSlashCommand(tmpFile);
+
+    const content = readFileSync(tmpFile, "utf-8");
+    expect(content.trim().length).toBeGreaterThan(0);
+    expect(content).toContain("devprofile");
+  });
+
+  test("preserva arquivo com conteúdo existente", async () => {
+    const tmpFile = join(tmpdir(), `devprofile-existing-${Date.now()}.md`);
+    const original = "conteúdo customizado pelo usuário";
+    writeFileSync(tmpFile, original);
+
+    await installClaudeSlashCommand(tmpFile);
+
+    const content = readFileSync(tmpFile, "utf-8");
+    expect(content).toBe(original);
+  });
+
+  test("cria arquivo se não existe", async () => {
+    const tmpFile = join(tmpdir(), `devprofile-new-${Date.now()}.md`);
+
+    await installClaudeSlashCommand(tmpFile);
+
+    expect(existsSync(tmpFile)).toBe(true);
+    expect(readFileSync(tmpFile, "utf-8").trim().length).toBeGreaterThan(0);
+  });
 });

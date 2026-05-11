@@ -880,3 +880,57 @@ describe("autostart — templates de LaunchAgent e systemd", () => {
     expect(service).not.toContain("Restart=always");
   });
 });
+
+// ── B7: view --json/--scores-only stdout/stderr separation ───────────────────
+
+describe("view --json e --scores-only não poluem stdout com warnings", () => {
+  const repoRoot = join(import.meta.dir, "../../..");
+
+  test("view --json retorna JSON puro no stdout (sem warnings)", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view", "--json"],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    // Stdout must be parseable JSON — no warning text mixed in
+    expect(() => JSON.parse(stdout)).not.toThrow();
+    expect(stdout).not.toContain("⚠️");
+    expect(stdout).not.toContain("não processados");
+  }, 15000);
+
+  test("view --json coloca warnings no stderr, não no stdout", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view", "--json"],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ] as const);
+    // stdout must be valid JSON regardless of whether warnings are present
+    expect(() => JSON.parse(stdout)).not.toThrow();
+    // If there were orphan warnings, they belong in stderr
+    if (stderr.includes("não processados")) {
+      expect(stdout).not.toContain("não processados");
+    }
+  }, 15000);
+
+  test("view --scores-only não polui stdout com warnings", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view", "--scores-only"],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    // stdout must contain only space-separated numbers — no warning text
+    expect(stdout).not.toContain("⚠️");
+    expect(stdout).not.toContain("não processados");
+    expect(stdout.trim()).toMatch(/^[\d\s]+$/);
+  }, 15000);
+});

@@ -9,6 +9,28 @@ interface ViewOptions {
   refresh?: boolean;
 }
 
+// In machine-readable modes (--json, --scores-only) diagnostic messages go to
+// stderr so stdout stays clean for piping into jq, python3, etc.
+function isRaw(flags: ViewFlags): boolean {
+  return flags.json === true || flags.scoresOnly === true;
+}
+
+function warn(msg: string, flags: ViewFlags): void {
+  if (isRaw(flags)) {
+    process.stderr.write(msg + "\n");
+  } else {
+    console.log(msg);
+  }
+}
+
+function warnWrite(msg: string, flags: ViewFlags): void {
+  if (isRaw(flags)) {
+    process.stderr.write(msg);
+  } else {
+    process.stdout.write(msg);
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -34,25 +56,26 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
 
   if (opts.refresh) {
     if (!hasOrphans) {
-      console.log("\n  Nenhum evento pendente. Score já está atualizado.\n");
+      warn("\n  Nenhum evento pendente. Score já está atualizado.\n", flags);
     } else {
-      process.stdout.write(
+      warnWrite(
         `\n  Processando ${status.unprocessed_events} bytes de eventos pendentes...`,
+        flags,
       );
       await processNew();
       const result = await waitForProcessing();
       if (result === "done") {
-        process.stdout.write(" ✓\n\n");
+        warnWrite(" ✓\n\n", flags);
       } else {
-        process.stdout.write("\n");
-        console.log("  ⚠️  Processamento ainda em andamento (timeout 30s).");
-        console.log("  O score exibido pode estar parcialmente atualizado.\n");
+        warnWrite("\n", flags);
+        warn("  ⚠️  Processamento ainda em andamento (timeout 30s).", flags);
+        warn("  O score exibido pode estar parcialmente atualizado.\n", flags);
       }
     }
   } else if (hasOrphans) {
-    console.log(`\n  ⚠️  Há eventos não processados (sessão interrompida).`);
-    console.log(`  Score pode estar desatualizado.`);
-    console.log(`  Execute: devprofile view --refresh para atualizar.\n`);
+    warn(`\n  ⚠️  Há eventos não processados (sessão interrompida).`, flags);
+    warn(`  Score pode estar desatualizado.`, flags);
+    warn(`  Execute: devprofile view --refresh para atualizar.\n`, flags);
   }
 
   const [scores, summary, insightData, session] = await Promise.all([
@@ -63,8 +86,8 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
   ]);
 
   if (!scores) {
-    console.log("\n  ✗ Engine offline e nenhum score cacheado disponível.");
-    console.log("  Execute: devprofile start\n");
+    warn("\n  ✗ Engine offline e nenhum score cacheado disponível.", flags);
+    warn("  Execute: devprofile start\n", flags);
     process.exit(1);
   }
 

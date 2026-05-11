@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from scorers.growth_rate import GrowthRateScorer, _delta_score
+from scorers.overall import WEIGHTS, calculate_overall
 from scorers.prompt_quality import PromptQualityScorer
 from scorers.tech_breadth import TechBreadthScorer
 from scorers.test_maturity import TestMaturityScorer
@@ -139,3 +140,49 @@ def test_delta_score_max_decline() -> None:
 
 def test_delta_score_zero_previous() -> None:
     assert _delta_score(100.0, 0.0, 20) == 20  # any value from 0 = full growth
+
+
+# ── calculate_overall ────────────────────────────────────────────────────────
+
+
+def test_overall_weights() -> None:
+    assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
+
+
+def test_overall_weights_individual() -> None:
+    assert WEIGHTS["prompt_quality"] == 0.30
+    assert WEIGHTS["test_maturity"]  == 0.30
+    assert WEIGHTS["tech_breadth"]   == 0.25
+    assert WEIGHTS["growth_rate"]    == 0.15
+
+
+def test_overall_senior_balanced() -> None:
+    # raw = 85*0.30 + 80*0.30 + 90*0.25 + 70*0.15 = 82.5 → round → 82
+    # (spec stated 83 but Python banker's rounding rounds 82.5 to even 82)
+    assert calculate_overall(85, 80, 90, 70) == 82
+
+
+def test_overall_good_prompts_no_tests() -> None:
+    # raw = 95*0.30 + 20*0.30 + 70*0.25 + 50*0.15 = 59.5 → round → 60
+    # test_maturity baixo puxa o score para baixo significativamente
+    assert calculate_overall(95, 20, 70, 50) == 60
+
+
+def test_overall_beginner_neutral_growth() -> None:
+    # raw = 40*0.30 + 30*0.30 + 35*0.25 + 50*0.15 = 37.25 → round → 37
+    # growth_rate neutro (50) não prejudica quem tem pouco histórico
+    assert calculate_overall(40, 30, 35, 50) == 37
+
+
+def test_overall_stagnant_but_competent() -> None:
+    # raw = 80*0.30 + 75*0.30 + 85*0.25 + 20*0.15 = 70.75 → round → 71
+    # growth baixo (20) mas não derruba quem é competente
+    assert calculate_overall(80, 75, 85, 20) == 71
+
+
+def test_overall_perfect() -> None:
+    assert calculate_overall(100, 100, 100, 100) == 100
+
+
+def test_overall_zero() -> None:
+    assert calculate_overall(0, 0, 0, 0) == 0

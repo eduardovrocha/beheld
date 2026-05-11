@@ -10,6 +10,7 @@ from extractors.files import detect_ecosystems, detect_languages
 from models import Scores, Session, Signal, TechnicalSignals
 from reader.jsonl_reader import JsonlReader
 from scorers.growth_rate import GrowthRateScorer
+from scorers.overall import calculate_overall
 from scorers.prompt_quality import PromptQualityScorer
 from scorers.tech_breadth import TechBreadthScorer
 from scorers.test_maturity import TestMaturityScorer
@@ -95,7 +96,7 @@ class Processor:
         tm = TestMaturityScorer().score(all_sessions)
         tb = TechBreadthScorer().score(all_sessions)
         gr = GrowthRateScorer().score(recent, previous)
-        overall = (pq + tm + tb + gr) // 4
+        overall = calculate_overall(pq, tm, tb, gr)
 
         self.db.save_scores(
             Scores(

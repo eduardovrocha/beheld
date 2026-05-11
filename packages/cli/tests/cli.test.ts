@@ -1,7 +1,7 @@
 import { test, expect, describe, mock, beforeEach, afterEach } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, mkdtempSync, statSync, chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { VERSION } from "../src/index";
@@ -804,5 +804,34 @@ describe("codesignEngine — macOS", () => {
   test("isCommandAvailable retorna true para 'sh' (sempre disponível)", async () => {
     const { isCommandAvailable } = await import("../src/engine-extractor");
     expect(isCommandAvailable("sh")).toBe(true);
+  });
+});
+
+// ── Secure permissions ────────────────────────────────────────────────────────
+
+describe("permissões seguras do diretório ~/.devprofile", () => {
+  test("cria diretório com permissão 0700", () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), "devprofile-test-"));
+    const devprofileDir = join(tmpBase, ".devprofile");
+
+    mkdirSync(devprofileDir, { recursive: true, mode: 0o700 });
+
+    const mode = statSync(devprofileDir).mode & 0o777;
+    expect(mode).toBe(0o700);
+
+    rmSync(tmpBase, { recursive: true });
+  });
+
+  test("ensureSecurePermissions corrige diretório com 0755", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "devprofile-perm-"));
+    chmodSync(tmpDir, 0o755);
+    expect(statSync(tmpDir).mode & 0o777).toBe(0o755);
+
+    const { ensureSecurePermissions } = await import("../src/daemon-manager");
+    ensureSecurePermissions(tmpDir);
+
+    expect(statSync(tmpDir).mode & 0o777).toBe(0o700);
+
+    rmSync(tmpDir, { recursive: true });
   });
 });

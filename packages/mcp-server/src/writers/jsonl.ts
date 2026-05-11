@@ -43,7 +43,7 @@ export class JsonlWriter {
       fs.mkdirSync(baseDir, { recursive: true, mode: 0o700 });
     }
     if (!fs.existsSync(this.sessionsDir)) {
-      fs.mkdirSync(this.sessionsDir, { recursive: true });
+      fs.mkdirSync(this.sessionsDir, { recursive: true, mode: 0o700 });
     }
   }
 

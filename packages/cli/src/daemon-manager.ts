@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, openSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, openSync, chmodSync } from "node:fs";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
@@ -32,8 +32,23 @@ function readPids(): DaemonPids {
 }
 
 function writePids(pids: DaemonPids): void {
-  mkdirSync(devprofileDir(), { recursive: true });
+  mkdirSync(devprofileDir(), { recursive: true, mode: 0o700 });
   writeFileSync(pidFile(), JSON.stringify(pids));
+}
+
+/**
+ * Ensures ~/.devprofile and its subdirectories have secure permissions (0700).
+ * Corrects existing installations that may have been created with looser modes.
+ * Accepts an optional baseDir for testability; defaults to the live devprofile dir.
+ */
+export function ensureSecurePermissions(baseDir?: string): void {
+  const base = baseDir ?? devprofileDir();
+  const dirs = [base, join(base, "sessions"), join(base, "bin")];
+  for (const dir of dirs) {
+    if (existsSync(dir)) {
+      try { chmodSync(dir, 0o700); } catch { /* ignore — no permission to chmod */ }
+    }
+  }
 }
 
 function processAlive(pid: number): boolean {
@@ -103,7 +118,7 @@ export async function start(): Promise<StartResult> {
 
   const engineDest = await ensureEngine();
   const log = logFile();
-  mkdirSync(devprofileDir(), { recursive: true });
+  mkdirSync(devprofileDir(), { recursive: true, mode: 0o700 });
 
   const pids = readPids();
 

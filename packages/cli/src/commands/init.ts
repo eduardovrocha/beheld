@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { runWizard } from "../ui/wizard";
 import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand, installClaudeMcpServer, migrateProjectScopedRegistrations } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
+import { ensureSecurePermissions } from "../daemon-manager";
 import type { DevProfileConfig } from "../types";
 
 const VERSION = "0.1.0";
@@ -34,6 +35,7 @@ async function askReinit(): Promise<boolean> {
 }
 
 export async function initCommand(opts: { force?: boolean } = {}): Promise<void> {
+  ensureSecurePermissions();
   const existing = readConfig();
   if (existing && !opts.force) {
     const reinit = await askReinit();
@@ -77,6 +79,6 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
     environments: result.environments,
   };
 
-  mkdirSync(join(homedir(), ".devprofile"), { recursive: true });
+  mkdirSync(join(homedir(), ".devprofile"), { recursive: true, mode: 0o700 });
   writeFileSync(configPath(), JSON.stringify(config, null, 2) + "\n");
 }

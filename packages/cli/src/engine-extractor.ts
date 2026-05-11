@@ -40,7 +40,7 @@ export async function ensureEngine(
   _platform = osPlatform(),
 ): Promise<string> {
   const dest = join(homedir(), ".devprofile", "bin", "engine");
-  await mkdir(dirname(dest), { recursive: true });
+  await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
   if (!existsSync(dest)) {
     // Bun bundles assets at a virtual /$bunfs/ path — must read via Bun.file()
     const content = await Bun.file(engineBinary).arrayBuffer();

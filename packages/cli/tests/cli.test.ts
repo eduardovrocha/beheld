@@ -79,6 +79,18 @@ describe("CLI process", () => {
     const exit = await proc.exited;
     expect(exit).not.toBe(0);
   });
+
+  test("view --help lists --refresh flag", async () => {
+    const proc = Bun.spawn(["bun", "run", "packages/cli/src/index.ts", "view", "--help"], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    expect(output).toContain("--refresh");
+  });
 });
 
 // ── renderProfile ─────────────────────────────────────────────────────────────
@@ -408,4 +420,45 @@ describe("hooks idempotency", () => {
     const p = continueConfigPath("/home/test");
     expect(p).toBe(join("/home/test", ".continue", "config.json"));
   });
+});
+
+// ── engineStatus / orphan detection ──────────────────────────────────────────
+
+describe("EngineStatus interface", () => {
+  test("engineStatus() returns null when engine is offline", async () => {
+    const { engineStatus } = await import("../src/client/engine-client");
+    // Engine not running in tests — should return null gracefully
+    const result = await engineStatus();
+    expect(result).toBeNull();
+  });
+});
+
+describe("viewCommand orphan detection", () => {
+  const repoRoot = join(import.meta.dir, "../../..");
+
+  // Engine offline path: engineStatus() + 4 data calls each have a 3s network
+  // timeout — total wall time ≥ 6s; override Bun's 5s default.
+  test("view --refresh prints 'já está atualizado' when engine is offline (no orphans detected)", async () => {
+    // When engine is offline, engineStatus returns null → hasOrphans = false
+    // --refresh with no orphans prints "Nenhum evento pendente" message
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view", "--refresh"],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    // Engine offline → no orphans → should print up-to-date message, then profile
+    expect(output).toContain("atualizado");
+  }, 15000);
+
+  test("view without --refresh does not mention 'refresh' when engine is offline", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "packages/cli/src/index.ts", "view"],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    // No orphans detected (engine offline → null status) → no warning shown
+    expect(output).not.toContain("eventos não processados");
+  }, 15000);
 });

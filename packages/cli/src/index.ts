@@ -57,7 +57,8 @@ program
   .description("Display your developer profile")
   .option("--json", "Output as JSON")
   .option("--scores-only", "Output scores as space-separated numbers")
-  .action(async (opts: { json?: boolean; scoresOnly?: boolean }) => {
+  .option("--refresh", "Process pending events before displaying profile")
+  .action(async (opts: { json?: boolean; scoresOnly?: boolean; refresh?: boolean }) => {
     const { viewCommand } = await import("./commands/view");
     await viewCommand(opts);
   });

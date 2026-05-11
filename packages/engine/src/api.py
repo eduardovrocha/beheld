@@ -5,6 +5,7 @@ import json
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -19,6 +20,43 @@ db = DevProfileDB(DB_PATH)
 _reader = JsonlReader(SESSIONS_DIR, CURSOR_FILE)
 processor = Processor(db, _reader)
 insights_gen = InsightGenerator(db)
+
+
+# ── status helpers ────────────────────────────────────────────────────────────
+
+
+def count_unprocessed_events() -> int:
+    if not SESSIONS_DIR.exists():
+        return 0
+
+    cursor: dict[str, int] = {}
+    if CURSOR_FILE.exists():
+        try:
+            data = json.loads(CURSOR_FILE.read_text())
+            cursor = data.get("offsets", {})
+        except Exception:
+            cursor = {}
+
+    unprocessed = 0
+    for jsonl_file in SESSIONS_DIR.glob("*.jsonl"):
+        file_size = jsonl_file.stat().st_size
+        last_offset = cursor.get(jsonl_file.name, 0)
+        if file_size > last_offset:
+            unprocessed += file_size - last_offset
+
+    return unprocessed
+
+
+def get_sessions_processed() -> int:
+    row = db.connect().execute("SELECT COUNT(*) FROM sessions").fetchone()
+    return row[0] if row else 0
+
+
+def get_last_processed_at() -> str | None:
+    row = db.connect().execute(
+        "SELECT processed_at FROM sessions ORDER BY processed_at DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else None
 
 
 @asynccontextmanager
@@ -43,6 +81,17 @@ app = FastAPI(title="DevProfile Engine", version=VERSION, lifespan=lifespan)
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "version": VERSION}
+
+
+@app.get("/status")
+def status() -> dict:
+    return {
+        "ok": True,
+        "version": VERSION,
+        "sessions_processed": get_sessions_processed(),
+        "unprocessed_events": count_unprocessed_events(),
+        "last_processed_at": get_last_processed_at(),
+    }
 
 
 @app.post("/process")

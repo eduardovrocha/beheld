@@ -1,5 +1,13 @@
 import type { Insight, ProcessResult, ProfileSummary, Scores } from "../types";
 
+export interface EngineStatus {
+  ok: boolean;
+  version: string;
+  sessions_processed: number;
+  unprocessed_events: number;
+  last_processed_at: string | null;
+}
+
 const BASE = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
 const TIMEOUT = 3000;
 
@@ -50,4 +58,8 @@ export async function insights(): Promise<Insight | null> {
 
 export async function processNew(): Promise<ProcessResult | null> {
   return post<ProcessResult>("/process");
+}
+
+export async function engineStatus(): Promise<EngineStatus | null> {
+  return get<EngineStatus>("/status");
 }

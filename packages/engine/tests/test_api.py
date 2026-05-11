@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from api import VERSION, app
+from api import VERSION, app, count_unprocessed_events
 from models import Scores, Signal
 from processor import ProcessResult
 from storage.sqlite import DevProfileDB
@@ -120,6 +121,89 @@ def test_export_structure(client: TestClient) -> None:
 
 def test_export_version(client: TestClient) -> None:
     assert client.get("/export").json()["version"] == VERSION
+
+
+# ── status ───────────────────────────────────────────────────────────────────
+
+
+def test_status_structure(client: TestClient) -> None:
+    with patch("api.count_unprocessed_events", return_value=0):
+        data = client.get("/status").json()
+    assert data["ok"] is True
+    assert "version" in data
+    assert "sessions_processed" in data
+    assert "unprocessed_events" in data
+    assert "last_processed_at" in data
+
+
+def test_status_sessions_processed_zero_when_empty(client: TestClient) -> None:
+    with patch("api.count_unprocessed_events", return_value=0):
+        data = client.get("/status").json()
+    assert data["sessions_processed"] == 0
+
+
+def test_status_last_processed_at_none_when_empty(client: TestClient) -> None:
+    with patch("api.count_unprocessed_events", return_value=0):
+        data = client.get("/status").json()
+    assert data["last_processed_at"] is None
+
+
+def test_status_unprocessed_events_field(client: TestClient) -> None:
+    with patch("api.count_unprocessed_events", return_value=512):
+        data = client.get("/status").json()
+    assert data["unprocessed_events"] == 512
+
+
+def test_status_sessions_processed_with_data(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+    test_db.save_session(sample_session_1)
+    with patch("api.count_unprocessed_events", return_value=0):
+        data = client.get("/status").json()
+    assert data["sessions_processed"] == 1
+
+
+# ── count_unprocessed_events ──────────────────────────────────────────────────
+
+
+def test_count_unprocessed_no_sessions_dir(tmp_path: Path) -> None:
+    missing = tmp_path / "sessions"
+    with patch("api.SESSIONS_DIR", missing), patch("api.CURSOR_FILE", tmp_path / ".cursor"):
+        assert count_unprocessed_events() == 0
+
+
+def test_count_unprocessed_no_cursor(tmp_path: Path) -> None:
+    sd = tmp_path / "sessions"
+    sd.mkdir()
+    (sd / "2026-05-10_test.jsonl").write_text('{"event_id":"1"}\n')
+    with patch("api.SESSIONS_DIR", sd), patch("api.CURSOR_FILE", tmp_path / ".cursor"):
+        result = count_unprocessed_events()
+    assert result > 0
+
+
+def test_count_unprocessed_zero_when_cursor_at_end(tmp_path: Path) -> None:
+    sd = tmp_path / "sessions"
+    sd.mkdir()
+    content = '{"event_id":"1"}\n'
+    f = sd / "2026-05-10_test.jsonl"
+    f.write_text(content)
+    cursor = tmp_path / ".cursor"
+    cursor.write_text(json.dumps({"offsets": {"2026-05-10_test.jsonl": len(content.encode())}}))
+    with patch("api.SESSIONS_DIR", sd), patch("api.CURSOR_FILE", cursor):
+        assert count_unprocessed_events() == 0
+
+
+def test_count_unprocessed_partial_cursor(tmp_path: Path) -> None:
+    sd = tmp_path / "sessions"
+    sd.mkdir()
+    content = '{"event_id":"1"}\n{"event_id":"2"}\n'
+    f = sd / "2026-05-10_test.jsonl"
+    f.write_text(content)
+    half = len('{"event_id":"1"}\n'.encode())
+    cursor = tmp_path / ".cursor"
+    cursor.write_text(json.dumps({"offsets": {"2026-05-10_test.jsonl": half}}))
+    with patch("api.SESSIONS_DIR", sd), patch("api.CURSOR_FILE", cursor):
+        result = count_unprocessed_events()
+    expected = len('{"event_id":"2"}\n'.encode())
+    assert result == expected
 
 
 # ── process ───────────────────────────────────────────────────────────────────

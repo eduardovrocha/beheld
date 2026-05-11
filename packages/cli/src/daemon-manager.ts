@@ -181,50 +181,65 @@ export async function isRunning(): Promise<boolean> {
   return mcp && eng;
 }
 
+// KeepAlive is false because `devprofile start` exits once both daemons are up.
+// launchd must not loop-restart a one-shot command.
+export function generateLaunchAgentPlist(bin: string, devDir: string): string {
+  const log = join(devDir, "daemon.log");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devprofile.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${bin}</string>
+    <string>start</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>${log}</string>
+  <key>StandardErrorPath</key>
+  <string>${log}</string>
+</dict>
+</plist>`;
+}
+
+// Type=oneshot + RemainAfterExit because `devprofile start` exits after launching
+// both daemons. Without RemainAfterExit the unit would show as inactive immediately.
+export function generateSystemdService(bin: string, _devDir: string): string {
+  return `[Unit]
+Description=DevProfile daemons
+After=default.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${bin} start
+
+[Install]
+WantedBy=default.target
+`;
+}
+
 export async function installAutostart(): Promise<void> {
-  const bin = existsSync(binaryPath())
-    ? binaryPath()
-    : process.execPath;
-  const log = logFile();
+  const bin = existsSync(binaryPath()) ? binaryPath() : process.execPath;
 
   if (platform() === "darwin") {
     const dir = join(homedir(), "Library", "LaunchAgents");
     const plist = join(dir, "com.devprofile.daemon.plist");
     await mkdir(dir, { recursive: true });
-    const content = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.devprofile.daemon</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${bin}</string>
-    <string>server</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${log}</string>
-  <key>StandardErrorPath</key><string>${log}</string>
-</dict></plist>`;
-    await writeFile(plist, content);
+    await writeFile(plist, generateLaunchAgentPlist(bin, devprofileDir()));
     // launchctl load is best-effort; ignore errors in non-interactive envs
     spawn("launchctl", ["load", "-w", plist], { stdio: "ignore" });
   } else if (platform() === "linux") {
     const dir = join(homedir(), ".config", "systemd", "user");
     const unit = join(dir, "devprofile.service");
     await mkdir(dir, { recursive: true });
-    const content = `[Unit]
-Description=DevProfile daemon
-After=default.target
-
-[Service]
-ExecStart=${bin} server
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-`;
-    await writeFile(unit, content);
+    await writeFile(unit, generateSystemdService(bin, devprofileDir()));
     spawn("systemctl", ["--user", "enable", "--now", "devprofile.service"], {
       stdio: "ignore",
     });

@@ -835,3 +835,48 @@ describe("permissões seguras do diretório ~/.devprofile", () => {
     rmSync(tmpDir, { recursive: true });
   });
 });
+
+// ── Autostart templates ───────────────────────────────────────────────────────
+
+describe("autostart — templates de LaunchAgent e systemd", () => {
+  test("LaunchAgent usa devprofile start em vez de server", async () => {
+    const { generateLaunchAgentPlist } = await import("../src/daemon-manager");
+    const plist = generateLaunchAgentPlist(
+      "/usr/local/bin/devprofile",
+      "/home/user/.devprofile",
+    );
+    expect(plist).toContain("<string>start</string>");
+    expect(plist).not.toContain("<string>server</string>");
+  });
+
+  test("LaunchAgent tem KeepAlive false", async () => {
+    const { generateLaunchAgentPlist } = await import("../src/daemon-manager");
+    const plist = generateLaunchAgentPlist(
+      "/usr/local/bin/devprofile",
+      "/home/user/.devprofile",
+    );
+    expect(plist).toContain("<false/>");
+    expect(plist).not.toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+  });
+
+  test("systemd service usa devprofile start em vez de server", async () => {
+    const { generateSystemdService } = await import("../src/daemon-manager");
+    const service = generateSystemdService(
+      "/usr/local/bin/devprofile",
+      "/home/user/.devprofile",
+    );
+    expect(service).toContain("devprofile start");
+    expect(service).not.toContain("devprofile server");
+  });
+
+  test("systemd service é Type=oneshot com RemainAfterExit", async () => {
+    const { generateSystemdService } = await import("../src/daemon-manager");
+    const service = generateSystemdService(
+      "/usr/local/bin/devprofile",
+      "/home/user/.devprofile",
+    );
+    expect(service).toContain("Type=oneshot");
+    expect(service).toContain("RemainAfterExit=yes");
+    expect(service).not.toContain("Restart=always");
+  });
+});

@@ -1,4 +1,4 @@
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import { test, expect, describe, mock, beforeEach, afterEach } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
@@ -652,4 +652,79 @@ describe("viewCommand orphan detection", () => {
     // No orphans detected (engine offline → null status) → no warning shown
     expect(output).not.toContain("eventos não processados");
   }, 15000);
+});
+
+// ── B1: daemon already-running detection ─────────────────────────────────────
+
+describe("daemon start — já em execução", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("isMcpRunning retorna true quando porta 7337 responde 200", async () => {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      if (String(url).includes(":7337/health")) return new Response("{}", { status: 200 });
+      throw new Error("unexpected url");
+    }) as typeof fetch;
+
+    const { isMcpRunning } = await import("../src/daemon-manager");
+    expect(await isMcpRunning()).toBe(true);
+  });
+
+  test("isMcpRunning retorna false quando porta 7337 recusa conexão", async () => {
+    globalThis.fetch = mock(async () => { throw new Error("ECONNREFUSED"); }) as typeof fetch;
+
+    const { isMcpRunning } = await import("../src/daemon-manager");
+    expect(await isMcpRunning()).toBe(false);
+  });
+
+  test("isEngineRunning retorna true quando porta 7338 responde 200", async () => {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      if (String(url).includes(":7338/health")) return new Response("{}", { status: 200 });
+      throw new Error("unexpected url");
+    }) as typeof fetch;
+
+    const { isEngineRunning } = await import("../src/daemon-manager");
+    expect(await isEngineRunning()).toBe(true);
+  });
+
+  test("isEngineRunning retorna false quando porta 7338 recusa conexão", async () => {
+    globalThis.fetch = mock(async () => { throw new Error("ECONNREFUSED"); }) as typeof fetch;
+
+    const { isEngineRunning } = await import("../src/daemon-manager");
+    expect(await isEngineRunning()).toBe(false);
+  });
+
+  test("start() retorna alreadyRunning:true quando ambas as portas respondem", async () => {
+    globalThis.fetch = mock(async () => new Response("{}", { status: 200 })) as typeof fetch;
+
+    const { start } = await import("../src/daemon-manager");
+    const result = await start();
+    expect(result.alreadyRunning).toBe(true);
+    expect(result.mcp).toBe(true);
+    expect(result.engine).toBe(true);
+  });
+
+  test("start() não chama ensureEngine quando ambos já estão rodando", async () => {
+    let fetchCallCount = 0;
+    globalThis.fetch = mock(async () => {
+      fetchCallCount++;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const { start } = await import("../src/daemon-manager");
+    const result = await start();
+    // Only the two initial health checks — no waitForHealthPort polling
+    expect(fetchCallCount).toBe(2);
+    expect(result.alreadyRunning).toBe(true);
+  });
+
+  test("isMcpRunning retorna false quando porta responde com status != 200", async () => {
+    globalThis.fetch = mock(async () => new Response("error", { status: 500 })) as typeof fetch;
+
+    const { isMcpRunning } = await import("../src/daemon-manager");
+    expect(await isMcpRunning()).toBe(false);
+  });
 });

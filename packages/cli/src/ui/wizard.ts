@@ -154,7 +154,7 @@ export interface SetupActions {
   installClaudeHooks?: () => Promise<void>;
   installContinueMcp?: () => Promise<void>;
   extractEngine?: () => Promise<string>;
-  startDaemons?: () => Promise<void>;
+  startDaemons?: () => Promise<string | void>;
   installAutostart?: () => Promise<void>;
 }
 

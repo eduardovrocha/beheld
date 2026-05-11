@@ -59,7 +59,10 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
         return ensureEngine();
       },
       startDaemons: async () => {
-        await daemonManager.start();
+        const result = await daemonManager.start();
+        if (result.alreadyRunning) return "Daemons já em execução";
+        if (result.mcp && result.engine) return "Daemons iniciados";
+        return `Falha parcial — MCP:${result.mcp} Engine:${result.engine}`;
       },
       installAutostart: async () => {
         await daemonManager.installAutostart();

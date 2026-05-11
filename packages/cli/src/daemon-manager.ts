@@ -45,29 +45,69 @@ function processAlive(pid: number): boolean {
   }
 }
 
-async function waitForHealth(
-  check: () => Promise<unknown>,
-  maxMs = 10_000,
+export interface StartResult {
+  mcp: boolean;
+  engine: boolean;
+  alreadyRunning: boolean;
+}
+
+export async function isMcpRunning(): Promise<boolean> {
+  try {
+    const res = await fetch("http://127.0.0.1:7337/health", {
+      signal: AbortSignal.timeout(1000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function isEngineRunning(): Promise<boolean> {
+  try {
+    const res = await fetch("http://127.0.0.1:7338/health", {
+      signal: AbortSignal.timeout(1000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForHealthPort(
+  port: number,
+  timeoutMs = 10_000,
+  intervalMs = 500,
 ): Promise<boolean> {
-  const start = Date.now();
-  let delay = 200;
-  while (Date.now() - start < maxMs) {
-    if (await check()) return true;
-    await new Promise((r) => setTimeout(r, delay));
-    delay = Math.min(delay * 2, 2000);
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (res.ok) return true;
+    } catch { /* not up yet */ }
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
   return false;
 }
 
-export async function start(): Promise<void> {
+export async function start(): Promise<StartResult> {
+  const [mcpAlreadyUp, engineAlreadyUp] = await Promise.all([
+    isMcpRunning(),
+    isEngineRunning(),
+  ]);
+
+  if (mcpAlreadyUp && engineAlreadyUp) {
+    return { mcp: true, engine: true, alreadyRunning: true };
+  }
+
   const engineDest = await ensureEngine();
   const log = logFile();
   mkdirSync(devprofileDir(), { recursive: true });
 
   const pids = readPids();
 
-  // Start MCP server if not already running
-  if (!(await mcpHealth())) {
+  if (!mcpAlreadyUp) {
     const bin = existsSync(binaryPath()) ? binaryPath() : process.execPath;
     const args = existsSync(binaryPath())
       ? ["server"]
@@ -82,8 +122,7 @@ export async function start(): Promise<void> {
     pids.mcp = child.pid ?? undefined;
   }
 
-  // Start engine if not already running
-  if (!(await engineHealth())) {
+  if (!engineAlreadyUp) {
     const fd = openSync(log, "a");
     const child = spawn(engineDest, [], {
       detached: true,
@@ -96,13 +135,10 @@ export async function start(): Promise<void> {
 
   writePids(pids);
 
-  const mcpOk = await waitForHealth(mcpHealth);
-  const engineOk = await waitForHealth(engineHealth);
-  if (!mcpOk || !engineOk) {
-    throw new Error(
-      `Daemon startup timed out — MCP:${mcpOk} Engine:${engineOk}`,
-    );
-  }
+  const mcp = mcpAlreadyUp || await waitForHealthPort(7337);
+  const engine = engineAlreadyUp || await waitForHealthPort(7338);
+
+  return { mcp, engine, alreadyRunning: false };
 }
 
 export async function stop(): Promise<void> {
@@ -126,8 +162,8 @@ export async function stop(): Promise<void> {
 }
 
 export async function isRunning(): Promise<boolean> {
-  const [mcp, eng] = await Promise.all([mcpHealth(), engineHealth()]);
-  return mcp?.ok === true && eng?.ok === true;
+  const [mcp, eng] = await Promise.all([isMcpRunning(), isEngineRunning()]);
+  return mcp && eng;
 }
 
 export async function installAutostart(): Promise<void> {

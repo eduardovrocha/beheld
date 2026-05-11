@@ -227,7 +227,7 @@ export async function installClaudeMcpServer(
     mcpServers["devprofile"] = {
       type: "stdio",
       command: join(base, ".local", "bin", "devprofile"),
-      args: ["server"],
+      args: ["server", "--stdio"],
     };
     cfg.mcpServers = mcpServers;
     writeJson(claudeJson, cfg);

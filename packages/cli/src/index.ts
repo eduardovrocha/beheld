@@ -98,9 +98,18 @@ program
 program
   .command("server")
   .description("Start the MCP server (internal)")
-  .action(async () => {
-    const { startServer } = await import("../../mcp-server/src/server");
-    await startServer();
+  .option("--stdio", "Run as MCP stdio server (used by Claude Code)")
+  .action(async (opts: { stdio?: boolean }) => {
+    // --stdio: spawned by Claude Code via ~/.claude.json (type: stdio)
+    // no flag: spawned by daemon-manager (stdio: ignore) or invoked manually
+    const isStdio = opts.stdio === true;
+    if (isStdio) {
+      const { startStdioServer } = await import("../../mcp-server/src/stdio-server");
+      await startStdioServer();
+    } else {
+      const { startServer } = await import("../../mcp-server/src/server");
+      await startServer();
+    }
   });
 
 if (import.meta.main) {

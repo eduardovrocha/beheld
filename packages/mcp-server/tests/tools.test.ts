@@ -203,18 +203,22 @@ describe("devprofile tool — full view", () => {
 });
 
 describe("devprofile tool — engine offline", () => {
-  test("returns helpful offline message", async () => {
-    const saved = process.env.DEVPROFILE_ENGINE_URL;
+  test("returns helpful offline message when no cache available", async () => {
+    const savedUrl = process.env.DEVPROFILE_ENGINE_URL;
+    const savedDb = process.env.DEVPROFILE_CACHE_DB;
     process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19999";
+    process.env.DEVPROFILE_CACHE_DB = "/tmp/devprofile-nonexistent-cache.db";
     const { devprofileTool } = await import("../src/tools/devprofile-tool?v=offline2");
     const text = (await devprofileTool.handler({})) as string;
-    expect(text).toContain("engine not running");
-    process.env.DEVPROFILE_ENGINE_URL = saved;
+    process.env.DEVPROFILE_ENGINE_URL = savedUrl;
+    process.env.DEVPROFILE_CACHE_DB = savedDb ?? "";
+    expect(text).toContain("engine offline");
+    expect(text).toContain("nenhum score cacheado");
   });
 });
 
 describe("devprofile tool — zero sessions", () => {
-  test("shows no-sessions message when sessions_analyzed = 0", async () => {
+  test("shows collecting screen when sessions_analyzed = 0 (readiness gate)", async () => {
     const zeroServer = Bun.serve({
       port: 17343,
       hostname: "127.0.0.1",
@@ -224,7 +228,9 @@ describe("devprofile tool — zero sessions", () => {
           new Response(JSON.stringify(d), { headers: { "Content-Type": "application/json" } });
         if (url.pathname === "/scores/current")
           return json({ ...mockScores, overall: 0, sessions_analyzed: 0 });
-        return json({});
+        if (url.pathname === "/profile/readiness")
+          return json({ ready: false, sessions_count: 0, sessions_required: 3, sessions_remaining: 3 });
+        return new Response("Not Found", { status: 404 });
       },
     });
 
@@ -235,6 +241,7 @@ describe("devprofile tool — zero sessions", () => {
     zeroServer.stop(true);
     process.env.DEVPROFILE_ENGINE_URL = saved;
 
-    expect(text).toContain("nenhuma sessão");
+    expect(text).toContain("coletando dados");
+    expect(text).toContain("0/3");
   });
 });

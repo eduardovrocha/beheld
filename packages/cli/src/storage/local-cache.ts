@@ -2,8 +2,9 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DB_PATH = process.env.DEVPROFILE_CACHE_DB
-  ?? join(homedir(), ".devprofile", "profile.db");
+function getDbPath(): string {
+  return process.env.DEVPROFILE_CACHE_DB ?? join(homedir(), ".devprofile", "profile.db");
+}
 
 export interface CachedScores {
   updated_at: string | null;
@@ -18,7 +19,7 @@ export interface CachedScores {
 
 export function getLastCachedScores(): CachedScores | null {
   try {
-    const db = new Database(DB_PATH, { readonly: true });
+    const db = new Database(getDbPath(), { readonly: true });
     const row = db
       .query(
         `SELECT date, prompt_quality, test_maturity, tech_breadth,

@@ -8,6 +8,7 @@ import { writePid, clearPid, rotateLogs, getDevProfileDir } from "./daemon";
 import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import { notificationService } from "./notifications";
+import { triggerEngineProcessing } from "./engine-trigger";
 import type { DevProfileEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
@@ -16,6 +17,7 @@ const TOOLS: McpTool[] = [devprofileTool, statusTool];
 const startedAt = Date.now();
 
 const writer = new JsonlWriter(getDevProfileDir());
+
 
 // ─── In-memory session state ────────────────────────────────────────────────
 
@@ -196,7 +198,8 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           const event = handleStop(body);
           await writer.write(event);
           sessions.delete(event.session_id);
-          // Fire-and-forget: daily score notification after session ends
+          // Fire-and-forget: trigger engine processing + daily notification
+          triggerEngineProcessing(event.session_id).catch(() => {});
           notificationService.checkDailyScore().catch(() => {});
           return json({ ok: true });
         } catch (err) {

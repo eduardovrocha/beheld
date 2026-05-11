@@ -1,4 +1,4 @@
-import { test, expect, describe } from "bun:test";
+import { test, expect, describe, mock, beforeEach, afterEach } from "bun:test";
 import { handlePreToolUse, handlePostToolUse, handleStop } from "../src/hooks/claude-code";
 import { createHash } from "crypto";
 
@@ -168,6 +168,69 @@ describe("handlePostToolUse", () => {
   test("duration_ms is optional", () => {
     const event = handlePostToolUse({ session_id: "s1", tool_name: "Read" });
     expect(event.duration_ms).toBeUndefined();
+  });
+});
+
+describe("triggerEngineProcessing", () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.DEVPROFILE_ENGINE_URL;
+
+  beforeEach(() => {
+    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19998"; // dead port
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) {
+      delete process.env.DEVPROFILE_ENGINE_URL;
+    } else {
+      process.env.DEVPROFILE_ENGINE_URL = originalEnv;
+    }
+  });
+
+  test("resolves (does not reject) when engine is offline", async () => {
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await expect(triggerEngineProcessing("sess-offline")).resolves.toBeUndefined();
+  });
+
+  test("resolves when fetch returns ok:true", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+    ) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await expect(triggerEngineProcessing("sess-ok")).resolves.toBeUndefined();
+  });
+
+  test("resolves when fetch returns non-ok status", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response("error", { status: 500 }),
+    ) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await expect(triggerEngineProcessing("sess-500")).resolves.toBeUndefined();
+  });
+
+  test("resolves (does not throw) when fetch throws AbortError", async () => {
+    globalThis.fetch = mock(async () => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      throw err;
+    }) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await expect(triggerEngineProcessing("sess-abort")).resolves.toBeUndefined();
+  });
+
+  test("completes in < 200ms when engine responds immediately", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+    ) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    const start = Date.now();
+    await triggerEngineProcessing("sess-fast");
+    expect(Date.now() - start).toBeLessThan(200);
   });
 });
 

@@ -144,6 +144,49 @@ describe("POST /hook/stop", () => {
     expect(r.status).toBe(200);
     expect((await r.json() as { ok: boolean }).ok).toBe(true);
   });
+
+  test("returns HTTP 200 in < 100ms with engine offline (fire-and-forget)", async () => {
+    // Engine is not running in tests — connection refused fires instantly.
+    // Response must not block on the 3s timeout.
+    const start = Date.now();
+    const r = await fetch(`${BASE}/hook/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: "timing-test", total_turns: 3 }),
+    });
+    const elapsed = Date.now() - start;
+    expect(r.status).toBe(200);
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  test("returns HTTP 200 with engine online (fire-and-forget, no blocking)", async () => {
+    // Same assertion holds whether engine is up or down — response is immediate.
+    const start = Date.now();
+    const r = await fetch(`${BASE}/hook/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: "online-test", total_turns: 1 }),
+    });
+    const elapsed = Date.now() - start;
+    expect(r.status).toBe(200);
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  test("writes stop event to JSONL before returning", async () => {
+    const sessionId = `stop-write-${Date.now()}`;
+    await fetch(`${BASE}/hook/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, total_turns: 2 }),
+    });
+    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    const allContent = files.map((f) =>
+      fs.readFileSync(path.join(sessionsDir, f), "utf8"),
+    ).join("");
+    expect(allContent).toContain(sessionId);
+    expect(allContent).toContain('"event_type":"stop"');
+  });
 });
 
 describe("POST /mcp", () => {

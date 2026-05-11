@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from classifiers.project_type import classify
-from classifiers.workflow import classify_workflow
 from extractors.commands import detect_platforms
+from extractors.tools import build_tool_sequence, detect_workflow
 from extractors.files import detect_ecosystems, detect_languages
 from models import Scores, Session, Signal, TechnicalSignals
 from reader.jsonl_reader import JsonlReader
@@ -34,7 +34,8 @@ class Processor:
             return ProcessResult(new_sessions=0)
 
         for session in new_sessions:
-            self._annotate_session(session)
+            prior_seq = self.db.get_session_tool_sequence(session.session_id)
+            self._annotate_session(session, prior_seq)
             self.db.save_session(session)
             self.db.save_signals(session.session_id, self._build_signals(session))
 
@@ -43,7 +44,7 @@ class Processor:
 
     # ── private helpers ───────────────────────────────────────────────────────
 
-    def _annotate_session(self, session: Session) -> None:
+    def _annotate_session(self, session: Session, prior_tool_sequence: list[str] | None = None) -> None:
         fake_paths = [f"f{ext}" for ext in session.file_extensions.keys()]
         signals = TechnicalSignals(
             platforms=detect_platforms(session.commands),
@@ -51,7 +52,12 @@ class Processor:
             languages=detect_languages(fake_paths),
             tools={t: session.tools_used.count(t) for t in set(session.tools_used)},
         )
-        workflow = classify_workflow(session)
+
+        current_seq = build_tool_sequence(session)
+        full_seq = (prior_tool_sequence or []) + current_seq
+        session.tool_sequence = full_seq
+
+        workflow = detect_workflow(full_seq)
         signals.workflow_pattern = workflow
 
         classification = classify(signals)

@@ -34,7 +34,7 @@ def test_save_and_get_session(db: DevProfileDB, sample_session_1) -> None:
 
 def test_save_session_idempotent(db: DevProfileDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
-    db.save_session(sample_session_1)  # INSERT OR REPLACE
+    db.save_session(sample_session_1)  # second save accumulates, does not duplicate row
     assert db.count_sessions() == 1
 
 
@@ -146,6 +146,46 @@ def test_profile_update_replaces(db: DevProfileDB) -> None:
 
 def test_get_profile_missing_key(db: DevProfileDB) -> None:
     assert db.get_profile("missing") is None
+
+
+def test_save_session_accumulates_event_count(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+    import copy
+    first = copy.copy(sample_session_1)
+    first.event_count = 10
+    second = copy.copy(sample_session_1)
+    second.event_count = 5
+    db.save_session(first)
+    db.save_session(second)
+    sessions = db.get_all_sessions_as_objects()
+    assert sessions[0].event_count == 15
+
+
+def test_save_session_merges_tools(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+    import copy
+    first = copy.copy(sample_session_1)
+    first.tools_used = ["Bash", "Read"]
+    second = copy.copy(sample_session_1)
+    second.tools_used = ["Edit", "Read"]
+    db.save_session(first)
+    db.save_session(second)
+    sessions = db.get_all_sessions_as_objects()
+    assert set(sessions[0].tools_used) == {"Bash", "Read", "Edit"}
+
+
+def test_save_session_appends_tool_sequence(db: DevProfileDB, sample_session_1) -> None:
+    import copy
+    first = copy.copy(sample_session_1)
+    first.tool_sequence = ["Bash", "Read"]
+    second = copy.copy(sample_session_1)
+    second.tool_sequence = ["Edit", "Bash"]
+    db.save_session(first)
+    db.save_session(second)
+    seq = db.get_session_tool_sequence("sess-1")
+    assert seq == ["Bash", "Read", "Edit", "Bash"]
+
+
+def test_get_session_tool_sequence_missing(db: DevProfileDB) -> None:
+    assert db.get_session_tool_sequence("nonexistent") == []
 
 
 def test_get_all_profile(db: DevProfileDB) -> None:

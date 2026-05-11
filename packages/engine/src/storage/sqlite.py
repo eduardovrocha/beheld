@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     tools_json TEXT DEFAULT '[]',
     extensions_json TEXT DEFAULT '{}',
     commands_json TEXT DEFAULT '[]',
+    tool_sequence_json TEXT DEFAULT '[]',
     processed_at TEXT NOT NULL
 );
 
@@ -93,6 +94,14 @@ class DevProfileDB:
             if not self._in_memory and self.db_path.exists():
                 self.db_path.unlink()
             self.connect().executescript(SCHEMA_SQL)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        conn = self.connect()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "tool_sequence_json" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN tool_sequence_json TEXT DEFAULT '[]'")
+            conn.commit()
 
     def close(self) -> None:
         if self._conn:
@@ -102,43 +111,102 @@ class DevProfileDB:
     # ── sessions ──────────────────────────────────────────────────────────────
 
     def save_session(self, session: Session) -> None:
+        from collections import Counter as _Counter
         conn = self.connect()
         now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO sessions
-            (id, source, started_at, ended_at, duration_minutes, total_turns, cwd_hash,
-             project_category, project_confidence, workflow_pattern,
-             has_test_context, avg_prompt_length, has_code_context_ratio, event_count,
-             tools_json, extensions_json, commands_json, processed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session.session_id,
-                session.source,
-                session.started_at.isoformat(),
-                session.ended_at.isoformat() if session.ended_at else None,
-                session.duration_minutes,
-                session.total_turns,
-                session.cwd_hash,
-                session.project_category,
-                session.project_confidence,
-                session.workflow_pattern,
-                int(session.has_test_context),
-                session.avg_prompt_length,
-                session.has_code_context_ratio,
-                session.event_count,
-                json.dumps(session.tools_used),
-                json.dumps(dict(session.file_extensions)),
-                json.dumps(session.commands),
-                now,
-            ),
-        )
+
+        existing = conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session.session_id,)
+        ).fetchone()
+
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO sessions
+                (id, source, started_at, ended_at, duration_minutes, total_turns, cwd_hash,
+                 project_category, project_confidence, workflow_pattern,
+                 has_test_context, avg_prompt_length, has_code_context_ratio, event_count,
+                 tools_json, extensions_json, commands_json, tool_sequence_json, processed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session.session_id, session.source,
+                    session.started_at.isoformat(),
+                    session.ended_at.isoformat() if session.ended_at else None,
+                    session.duration_minutes, session.total_turns, session.cwd_hash,
+                    session.project_category, session.project_confidence, session.workflow_pattern,
+                    int(session.has_test_context), session.avg_prompt_length,
+                    session.has_code_context_ratio, session.event_count,
+                    json.dumps(session.tools_used), json.dumps(dict(session.file_extensions)),
+                    json.dumps(session.commands), json.dumps(session.tool_sequence), now,
+                ),
+            )
+        else:
+            old = dict(existing)
+            old_count = old.get("event_count") or 0
+            new_count = session.event_count
+            total_count = old_count + new_count
+
+            merged_tools = list(
+                set(json.loads(old.get("tools_json") or "[]")) | set(session.tools_used)
+            )
+            merged_ext = _Counter(json.loads(old.get("extensions_json") or "{}")) + session.file_extensions
+            old_cmds = json.loads(old.get("commands_json") or "[]")
+            merged_cmds = old_cmds + [c for c in session.commands if c not in old_cmds]
+            merged_seq = json.loads(old.get("tool_sequence_json") or "[]") + session.tool_sequence
+
+            if total_count > 0:
+                merged_prompt = (
+                    (old.get("avg_prompt_length") or 0.0) * old_count
+                    + session.avg_prompt_length * new_count
+                ) / total_count
+                merged_ctx = (
+                    (old.get("has_code_context_ratio") or 0.0) * old_count
+                    + session.has_code_context_ratio * new_count
+                ) / total_count
+            else:
+                merged_prompt = session.avg_prompt_length
+                merged_ctx = session.has_code_context_ratio
+
+            ended_at = session.ended_at.isoformat() if session.ended_at else old.get("ended_at")
+            duration = max(session.duration_minutes, old.get("duration_minutes") or 0.0)
+            total_turns = session.total_turns or (old.get("total_turns") or 0)
+            has_test = int(session.has_test_context or bool(old.get("has_test_context")))
+
+            conn.execute(
+                """
+                UPDATE sessions SET
+                    ended_at = ?, duration_minutes = ?, total_turns = ?,
+                    project_category = ?, project_confidence = ?, workflow_pattern = ?,
+                    has_test_context = ?, avg_prompt_length = ?, has_code_context_ratio = ?,
+                    event_count = ?, tools_json = ?, extensions_json = ?, commands_json = ?,
+                    tool_sequence_json = ?, processed_at = ?
+                WHERE id = ?
+                """,
+                (
+                    ended_at, duration, total_turns,
+                    session.project_category, session.project_confidence, session.workflow_pattern,
+                    has_test, merged_prompt, merged_ctx, total_count,
+                    json.dumps(merged_tools), json.dumps(dict(merged_ext)), json.dumps(merged_cmds),
+                    json.dumps(merged_seq), now, session.session_id,
+                ),
+            )
         conn.commit()
 
     def get_existing_session_ids(self) -> set[str]:
         rows = self.connect().execute("SELECT id FROM sessions").fetchall()
         return {row["id"] for row in rows}
+
+    def get_session_tool_sequence(self, session_id: str) -> list[str]:
+        row = self.connect().execute(
+            "SELECT tool_sequence_json FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return []
+        try:
+            return json.loads(row["tool_sequence_json"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     def get_all_sessions_as_objects(self) -> list[Session]:
         """Reconstruct lightweight Session objects from DB for scoring."""
@@ -172,6 +240,7 @@ class DevProfileDB:
                 s.tools_used = json.loads(r.get("tools_json") or "[]")
                 s.file_extensions = Counter(json.loads(r.get("extensions_json") or "{}"))
                 s.commands = json.loads(r.get("commands_json") or "[]")
+                s.tool_sequence = json.loads(r.get("tool_sequence_json") or "[]")
             except (json.JSONDecodeError, TypeError):
                 pass
             sessions.append(s)

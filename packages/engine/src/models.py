@@ -68,6 +68,8 @@ class Session:
     avg_prompt_length: float = 0.0
     has_code_context_ratio: float = 0.0
     event_count: int = 0
+    # Accumulated ordered tool sequence (persisted for incremental classification)
+    tool_sequence: list[str] = field(default_factory=list)
 
 
 # ── storage types ─────────────────────────────────────────────────────────────

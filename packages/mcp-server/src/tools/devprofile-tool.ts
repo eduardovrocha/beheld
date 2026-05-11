@@ -191,7 +191,7 @@ export const devprofileTool: McpTool = {
         return [
           "DevProfile ainda coletando dados.",
           "",
-          `${r.sessions_count}/${r.sessions_required} sessões — faltam ${remaining} sessão${remaining !== 1 ? "ões" : ""}.`,
+          `${r.sessions_count}/${r.sessions_required} sessões — ${remaining !== 1 ? "faltam" : "falta"} ${remaining} ${remaining !== 1 ? "sessões" : "sessão"}.`,
           "",
           "Continue usando o Claude Code normalmente.",
           "O perfil será gerado automaticamente.",

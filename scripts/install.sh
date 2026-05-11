@@ -78,6 +78,13 @@ mkdir -p "$INSTALL_DIR"
 mv "$TMP_BIN" "${INSTALL_DIR}/${BINARY}"
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
+# Assina no macOS (necessário para binários copiados via curl)
+if [ "$(uname -s)" = "Darwin" ]; then
+  xattr -d com.apple.quarantine "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
+  codesign --sign - --force "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
+  echo "  ✓ Assinatura ad-hoc aplicada (macOS)"
+fi
+
 if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
   echo ""
   echo "NOTE: Add ${INSTALL_DIR} to your PATH:"

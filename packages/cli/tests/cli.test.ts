@@ -728,3 +728,81 @@ describe("daemon start — já em execução", () => {
     expect(await isMcpRunning()).toBe(false);
   });
 });
+
+// ── codesignEngine — macOS ────────────────────────────────────────────────────
+
+describe("codesignEngine — macOS", () => {
+  function makeSpawn(status = 0): { fn: ReturnType<typeof mock>; calls: string[][] } {
+    const calls: string[][] = [];
+    const fn = mock((cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      return { status, stderr: Buffer.from("") };
+    });
+    return { fn, calls };
+  }
+
+  test("executa xattr e codesign quando ambos disponíveis", async () => {
+    const { codesignEngine } = await import("../src/engine-extractor");
+    const { fn, calls } = makeSpawn(0);
+    codesignEngine("/tmp/fake-engine", fn);
+    const cmds = calls.map((c) => c[0]);
+    expect(cmds).toContain("which");
+    expect(cmds).toContain("xattr");
+    expect(cmds).toContain("codesign");
+  });
+
+  test("xattr é chamado com -d com.apple.quarantine", async () => {
+    const { codesignEngine } = await import("../src/engine-extractor");
+    const { fn, calls } = makeSpawn(0);
+    codesignEngine("/tmp/fake-engine", fn);
+    const xattrCall = calls.find((c) => c[0] === "xattr");
+    expect(xattrCall).toBeDefined();
+    expect(xattrCall).toContain("-d");
+    expect(xattrCall).toContain("com.apple.quarantine");
+    expect(xattrCall).toContain("/tmp/fake-engine");
+  });
+
+  test("codesign é chamado com --sign - --force", async () => {
+    const { codesignEngine } = await import("../src/engine-extractor");
+    const { fn, calls } = makeSpawn(0);
+    codesignEngine("/tmp/fake-engine", fn);
+    const csCall = calls.find((c) => c[0] === "codesign");
+    expect(csCall).toBeDefined();
+    expect(csCall).toContain("--sign");
+    expect(csCall).toContain("-");
+    expect(csCall).toContain("--force");
+    expect(csCall).toContain("/tmp/fake-engine");
+  });
+
+  test("não lança exceção se codesign retorna status != 0 (non-fatal)", async () => {
+    const { codesignEngine } = await import("../src/engine-extractor");
+    const { fn } = makeSpawn(1);
+    expect(() => codesignEngine("/tmp/fake-engine", fn)).not.toThrow();
+  });
+
+  test("não executa codesign se nenhum comando disponível (which sempre retorna 1)", async () => {
+    const { codesignEngine } = await import("../src/engine-extractor");
+    const calls: string[] = [];
+    const fn = mock((cmd: string) => {
+      calls.push(cmd);
+      return { status: 1, stderr: Buffer.from("") };
+    });
+    codesignEngine("/tmp/fake-engine", fn);
+    expect(calls).not.toContain("codesign");
+  });
+
+  test("ensureEngine é uma função exportada", async () => {
+    const { ensureEngine } = await import("../src/engine-extractor");
+    expect(typeof ensureEngine).toBe("function");
+  });
+
+  test("isCommandAvailable retorna false para comando inexistente", async () => {
+    const { isCommandAvailable } = await import("../src/engine-extractor");
+    expect(isCommandAvailable("devprofile-nonexistent-xyz")).toBe(false);
+  });
+
+  test("isCommandAvailable retorna true para 'sh' (sempre disponível)", async () => {
+    const { isCommandAvailable } = await import("../src/engine-extractor");
+    expect(isCommandAvailable("sh")).toBe(true);
+  });
+});

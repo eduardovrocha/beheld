@@ -4,6 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { WizardDimensions, WizardEnvironments } from "../types";
 
+// ── Privacy strings (Phase 6 — required verbatim by F6.7 spec) ───────────────
+
+/** Exact wording asserted by tests — keep these strings stable. */
+export const BOOTSTRAP_PRIVACY_LINES = [
+  "Cada repositório é processado uma única vez — reimportar não altera o perfil.",
+  "Mensagens de commit, nomes de branch e conteúdo de código nunca são gravados.",
+] as const;
+
 // ── ANSI ──────────────────────────────────────────────────────────────────────
 
 const RESET = "\x1b[0m";
@@ -113,6 +121,71 @@ async function screen2(
   return result;
 }
 
+// ── Tela 3.5 — Git Bootstrap (opcional) ──────────────────────────────────────
+
+export type BootstrapChoice = "import_now" | "later" | "skip";
+
+export interface BootstrapResult {
+  choice: BootstrapChoice;
+  author_email?: string;
+}
+
+export interface BootstrapScreenDeps {
+  prompt: (label: string) => Promise<string>;
+  log: (msg: string) => void;
+  /** Invoked when the user picks [1]. The implementation in initCommand wires
+   *  this to the real interactive `runImport` loop. */
+  runImportLoop: (authorEmail: string) => Promise<void>;
+}
+
+/** Render the bootstrap screen and dispatch to the user's choice.
+ *  Pure with respect to IO — all side effects flow through `deps`. */
+export async function bootstrapScreen(
+  deps: BootstrapScreenDeps,
+): Promise<BootstrapResult> {
+  deps.log("─────────────────────────────────────────────────────");
+  deps.log("DevProfile · Histórico git (opcional)");
+  deps.log("─────────────────────────────────────────────────────");
+  deps.log("");
+  deps.log("Seu perfil começa a se formar a partir de hoje.");
+  deps.log("Quer carregar também o histórico dos seus projetos anteriores?");
+  deps.log("");
+  deps.log("O DevProfile pode analisar repositórios onde você tem commits");
+  deps.log("e extrair sinais técnicos — linguagens, ferramentas, ritmo de trabalho.");
+  deps.log("");
+  deps.log("O que é coletado:   extensões de arquivo, ecosystems, timing");
+  deps.log("O que é ignorado:   mensagens de commit, nomes de branch, conteúdo de código");
+  deps.log("");
+  for (const line of BOOTSTRAP_PRIVACY_LINES) deps.log(line);
+  deps.log("");
+  deps.log("  [1] Importar agora");
+  deps.log("  [2] Importar depois  (devprofile import)");
+  deps.log("  [3] Pular");
+  deps.log("");
+
+  // Default to [3] (skip) on empty input so the wizard can never block.
+  const raw = (await deps.prompt("> ")).trim();
+  const choice: BootstrapChoice =
+    raw === "1" ? "import_now" : raw === "2" ? "later" : "skip";
+
+  if (choice === "import_now") {
+    const email = (await deps.prompt("Qual o seu email de commit no git? ")).trim();
+    if (!email) {
+      deps.log("Email não informado. Pulando bootstrap.");
+      return { choice: "skip" };
+    }
+    await deps.runImportLoop(email);
+    return { choice, author_email: email };
+  }
+
+  if (choice === "later") {
+    deps.log("Ok. Execute devprofile import quando quiser.");
+    return { choice };
+  }
+
+  return { choice };
+}
+
 // ── Tela 3 — Ambientes ────────────────────────────────────────────────────────
 
 async function screen3(
@@ -213,10 +286,20 @@ async function screen4(
 export interface WizardResult {
   dimensions: WizardDimensions;
   environments: WizardEnvironments;
+  /** Set only when the user picked [1] on the bootstrap screen and entered
+   *  an email. initCommand merges this into the final config.json. */
+  author_email?: string;
+  bootstrap_choice?: BootstrapChoice;
+}
+
+export interface WizardActions extends SetupActions {
+  /** Drives Tela 3.5. Provided by initCommand which wires it to the real
+   *  interactive import loop. */
+  runBootstrapImport?: (authorEmail: string) => Promise<void>;
 }
 
 export async function runWizard(
-  actions: SetupActions = {},
+  actions: WizardActions = {},
   homeBase = homedir(),
 ): Promise<WizardResult> {
   const rl = createInterface({
@@ -227,8 +310,25 @@ export async function runWizard(
 
   await screen1(rl);
   const dimensions = await screen2(rl);
+
+  // Tela 3.5 — Git bootstrap (only meaningful if the host can run the import).
+  let bootstrap: BootstrapResult = { choice: "skip" };
+  if (actions.runBootstrapImport) {
+    process.stdout.write("\x1b[2J\x1b[0;0H");
+    bootstrap = await bootstrapScreen({
+      prompt: (q) => prompt(rl, q),
+      log: (m) => console.log(m),
+      runImportLoop: actions.runBootstrapImport,
+    });
+  }
+
   const environments = await screen3(rl, homeBase);
   await screen4(rl, environments, actions);
 
-  return { dimensions, environments };
+  return {
+    dimensions,
+    environments,
+    author_email: bootstrap.author_email,
+    bootstrap_choice: bootstrap.choice,
+  };
 }

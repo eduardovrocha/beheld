@@ -74,6 +74,14 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
       installAutostart: async () => {
         await daemonManager.installAutostart();
       },
+      runBootstrapImport: async (authorEmail: string) => {
+        // Persist email immediately so the import loop can pick it up,
+        // then enter the interactive loop. The author_email is also returned
+        // up the call chain so the final config.json write below preserves it.
+        const { runImport, defaultConfigStore } = await import("./import");
+        defaultConfigStore.setAuthorEmail(authorEmail);
+        await runImport({});
+      },
     },
   );
 
@@ -82,6 +90,7 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
     initialized_at: new Date().toISOString(),
     dimensions: result.dimensions,
     environments: result.environments,
+    ...(result.author_email ? { author_email: result.author_email } : {}),
   };
 
   mkdirSync(join(homedir(), ".devprofile"), { recursive: true, mode: 0o700 });

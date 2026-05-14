@@ -4,12 +4,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { devprofileCoachTool } from "./tools/coach-tool";
 import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import type { McpTool } from "./tools/types";
 
 const VERSION = "0.1.0";
-const TOOLS: McpTool[] = [devprofileTool, statusTool];
+const TOOLS: McpTool[] = [devprofileTool, devprofileCoachTool, statusTool];
 
 export async function startStdioServer(): Promise<void> {
   const server = new Server(

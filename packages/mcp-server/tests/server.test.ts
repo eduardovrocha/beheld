@@ -201,7 +201,7 @@ describe("POST /mcp", () => {
     expect(body.result.serverInfo.name).toBe("devprofile");
   });
 
-  test("tools/list returns devprofile and devprofile_status", async () => {
+  test("tools/list returns devprofile, devprofile_coach and devprofile_status", async () => {
     const r = await fetch(`${BASE}/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -210,6 +210,7 @@ describe("POST /mcp", () => {
     const body = (await r.json()) as { result: { tools: Array<{ name: string }> } };
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("devprofile");
+    expect(names).toContain("devprofile_coach");
     expect(names).toContain("devprofile_status");
   });
 

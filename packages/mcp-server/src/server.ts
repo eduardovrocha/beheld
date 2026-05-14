@@ -5,6 +5,7 @@ import { handleMcpRequest } from "./hooks/continue";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getDevProfileDir } from "./daemon";
+import { devprofileCoachTool } from "./tools/coach-tool";
 import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import { notificationService } from "./notifications";
@@ -13,7 +14,7 @@ import type { DevProfileEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
 const VERSION = "0.1.0";
-const TOOLS: McpTool[] = [devprofileTool, statusTool];
+const TOOLS: McpTool[] = [devprofileTool, devprofileCoachTool, statusTool];
 const startedAt = Date.now();
 
 const writer = new JsonlWriter(getDevProfileDir());

@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import os
 
-from models import Scores, Session, Signal
+from models import Scores, Session, Signal, WorkflowMetrics
 
 _DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
 DB_PATH = _DATA_HOME / ".devprofile" / "profile.db"
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    description TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
@@ -62,7 +69,55 @@ CREATE TABLE IF NOT EXISTS profile (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workflow_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    computed_at TEXT NOT NULL,
+    period_days INTEGER NOT NULL,
+    sessions_analyzed INTEGER NOT NULL,
+    metrics_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed_at
+    ON workflow_metrics(computed_at);
 """
+
+
+@dataclass(frozen=True)
+class Migration:
+    version: int
+    description: str
+    apply: Callable[[sqlite3.Connection], None]
+
+
+def _migration_1_add_tool_sequence_json(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "tool_sequence_json" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN tool_sequence_json TEXT DEFAULT '[]'")
+
+
+def _migration_2_add_workflow_metrics(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            computed_at TEXT NOT NULL,
+            period_days INTEGER NOT NULL,
+            sessions_analyzed INTEGER NOT NULL,
+            metrics_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed_at
+            ON workflow_metrics(computed_at);
+        """
+    )
+
+
+MIGRATIONS: list[Migration] = [
+    Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
+    Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
+]
+
+LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
 
 
 class DevProfileDB:
@@ -94,13 +149,44 @@ class DevProfileDB:
             if not self._in_memory and self.db_path.exists():
                 self.db_path.unlink()
             self.connect().executescript(SCHEMA_SQL)
-        self._migrate_schema()
+        self._migrate()
 
-    def _migrate_schema(self) -> None:
+    def current_schema_version(self) -> int:
         conn = self.connect()
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-        if "tool_sequence_json" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN tool_sequence_json TEXT DEFAULT '[]'")
+        try:
+            row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+        except sqlite3.OperationalError:
+            return 0
+        if row is None or row["v"] is None:
+            return 0
+        return int(row["v"])
+
+    def _migrate(self) -> None:
+        conn = self.connect()
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                description TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+        current = self.current_schema_version()
+        for migration in MIGRATIONS:
+            if migration.version <= current:
+                continue
+            migration.apply(conn)
+            conn.execute(
+                "INSERT INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)",
+                (
+                    migration.version,
+                    migration.description,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
             conn.commit()
 
     def close(self) -> None:
@@ -320,6 +406,47 @@ class DevProfileDB:
             "SELECT * FROM scores ORDER BY date DESC LIMIT ?", (days,)
         ).fetchall()
         return [_row_to_scores(dict(r)) for r in rows]
+
+    # ── workflow_metrics ──────────────────────────────────────────────────────
+
+    def save_workflow_metrics(
+        self,
+        metrics: WorkflowMetrics,
+        period_days: int,
+        sessions_analyzed: int,
+    ) -> None:
+        from dataclasses import asdict
+        conn = self.connect()
+        now = datetime.now(timezone.utc).isoformat()
+        canonical = json.dumps(asdict(metrics), sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            """
+            INSERT INTO workflow_metrics
+            (computed_at, period_days, sessions_analyzed, metrics_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (now, period_days, sessions_analyzed, canonical),
+        )
+        conn.commit()
+
+    def get_latest_workflow_metrics(self) -> Optional[dict]:
+        row = self.connect().execute(
+            "SELECT * FROM workflow_metrics ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "computed_at": row["computed_at"],
+            "period_days": row["period_days"],
+            "sessions_analyzed": row["sessions_analyzed"],
+            "metrics": WorkflowMetrics.from_dict(json.loads(row["metrics_json"])),
+        }
+
+    def count_workflow_metrics(self) -> int:
+        row = self.connect().execute(
+            "SELECT COUNT(*) AS n FROM workflow_metrics"
+        ).fetchone()
+        return row["n"] if row else 0
 
     # ── profile ───────────────────────────────────────────────────────────────
 

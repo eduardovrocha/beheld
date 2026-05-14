@@ -307,3 +307,195 @@ def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessio
     scores = test_db.get_current_scores()
     assert scores is not None
     assert scores.sessions_analyzed == 2
+
+
+def test_process_persists_workflow_metrics(
+    client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path,
+) -> None:
+    from reader.jsonl_reader import JsonlReader
+    from processor import Processor
+
+    cursor = tmp_path / ".test_cursor_metrics"
+    reader = JsonlReader(sessions_dir, cursor)
+    new_processor = Processor(test_db, reader)
+    with patch("api.processor", new_processor):
+        client.post("/process")
+
+    latest = test_db.get_latest_workflow_metrics()
+    assert latest is not None
+    assert latest["period_days"] == 30
+    assert latest["sessions_analyzed"] >= 1
+    # Metrics object is a real WorkflowMetrics (not just a dict)
+    from models import WorkflowMetrics
+    assert isinstance(latest["metrics"], WorkflowMetrics)
+
+
+# ── /metrics/workflow ─────────────────────────────────────────────────────────
+
+
+def test_metrics_workflow_empty_returns_zero_metrics(client: TestClient) -> None:
+    resp = client.get("/metrics/workflow")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["computed_at"] is None
+    assert data["period_days"] == 30
+    assert data["sessions_analyzed"] == 0
+    # All 10 metric fields present and zero
+    assert data["metrics"]["test_after_ratio"] == 0.0
+    assert data["metrics"]["bash_to_read_ratio"] == 0.0
+    assert data["metrics"]["ecosystem_concentration"] == 0.0
+
+
+def test_metrics_workflow_returns_persisted_values(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import WorkflowMetrics
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=7.8),
+        period_days=30,
+        sessions_analyzed=42,
+    )
+    resp = client.get("/metrics/workflow")
+    data = resp.json()
+    assert data["sessions_analyzed"] == 42
+    assert data["metrics"]["test_after_ratio"] == 0.78
+    assert data["metrics"]["bash_to_read_ratio"] == 7.8
+
+
+def test_metrics_workflow_response_is_canonical_serializable(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The `metrics` block must round-trip through sort_keys without losing info
+    — that's what F5 depends on for hash stability."""
+    from models import WorkflowMetrics
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.5, prompt_avg_chars=120.0),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+    resp = client.get("/metrics/workflow")
+    data = resp.json()
+    canonical = json.dumps(data["metrics"], sort_keys=True, separators=(",", ":"))
+    assert json.loads(canonical) == data["metrics"]
+
+
+# ── /coach ────────────────────────────────────────────────────────────────────
+
+
+def test_coach_insufficient_when_no_scores(client: TestClient) -> None:
+    resp = client.get("/coach")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["version"] == 1
+    assert data["data_freshness"] == "insufficient"
+    assert data["patterns"] == []
+    assert data["scores"]["sessions_analyzed"] == 0
+    # Guidance is always present so the host LLM has its instructions
+    assert data["coaching_guidance"]["tone"].startswith("pt-BR")
+    assert len(data["coaching_guidance"]["must"]) >= 3
+
+
+def test_coach_insufficient_when_below_min_sessions(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=2,  # below MIN_SESSIONS=3
+    ))
+    resp = client.get("/coach")
+    assert resp.json()["data_freshness"] == "insufficient"
+
+
+def test_coach_live_with_data_returns_patterns(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40, growth_rate=30,
+        overall=35, sessions_analyzed=30,
+    ))
+    # Metrics that will trigger test_after_dominant + debug_driven_bash_heavy
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(
+            test_after_ratio=0.8,
+            median_test_delay_min=12.0,
+            bash_to_read_ratio=6.0,
+        ),
+        period_days=30,
+        sessions_analyzed=30,
+    )
+
+    resp = client.get("/coach?session_hint=feature_work")
+    data = resp.json()
+    assert data["data_freshness"] == "live"
+    assert data["context_for_session"]["session_phase_hint"] == "feature_work"
+    pattern_ids = [p["id"] for p in data["patterns"]]
+    assert "test_after_dominant" in pattern_ids
+    assert "debug_driven_bash_heavy" in pattern_ids
+
+
+def test_coach_invalid_session_hint_is_coerced_to_unknown(client: TestClient) -> None:
+    resp = client.get("/coach?session_hint=lol_not_a_hint")
+    data = resp.json()
+    assert data["context_for_session"]["session_phase_hint"] == "unknown"
+
+
+def test_coach_response_is_fully_json_serializable(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The whole payload must roundtrip through json.dumps without errors —
+    no dataclass leaks, no Decimal, no datetime objects."""
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40, growth_rate=30,
+        overall=35, sessions_analyzed=30,
+    ))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.7),
+        period_days=30,
+        sessions_analyzed=30,
+    )
+    resp = client.get("/coach")
+    data = resp.json()
+    # If we got here, FastAPI already serialized it. Sanity check we can
+    # round-trip without loss.
+    roundtrip = json.loads(json.dumps(data, sort_keys=True))
+    assert roundtrip["version"] == 1
+    assert "coaching_guidance" in roundtrip
+
+
+def test_coach_payload_includes_coaching_guidance_constants(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The guidance block must be present in BOTH insufficient and live modes —
+    it's how the host LLM knows how to behave even when no patterns fire."""
+    resp_insufficient = client.get("/coach")
+    assert resp_insufficient.json()["coaching_guidance"]["good_example"]
+
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=30,
+    ))
+    resp_live = client.get("/coach")
+    assert resp_live.json()["coaching_guidance"]["bad_example"]
+
+
+def test_coach_suggested_followups_present_in_live_mode(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=30,
+    ))
+    resp = client.get("/coach")
+    followups = resp.json()["suggested_followups"]
+    assert len(followups) >= 1
+    assert all(isinstance(f, str) for f in followups)

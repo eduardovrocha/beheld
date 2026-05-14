@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from models import Scores, Signal
-from storage.sqlite import DevProfileDB
+from models import Scores, Signal, WorkflowMetrics
+from storage.sqlite import DevProfileDB, LATEST_SCHEMA_VERSION, MIGRATIONS
 
 
 @pytest.fixture
@@ -22,7 +23,14 @@ def test_init_schema_creates_tables(db: DevProfileDB) -> None:
         row[0]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert {"sessions", "technical_signals", "scores", "profile"} <= tables
+    assert {
+        "sessions",
+        "technical_signals",
+        "scores",
+        "profile",
+        "workflow_metrics",
+        "schema_version",
+    } <= tables
 
 
 def test_save_and_get_session(db: DevProfileDB, sample_session_1) -> None:
@@ -205,3 +213,194 @@ def test_in_memory_db() -> None:
     mem_db.set_profile("x", "y")
     assert mem_db.get_profile("x") == "y"
     mem_db.close()
+
+
+# ── schema versioning ─────────────────────────────────────────────────────────
+
+
+def test_schema_version_table_exists(db: DevProfileDB) -> None:
+    conn = db.connect()
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    assert "schema_version" in tables
+
+
+def test_fresh_db_at_latest_version(db: DevProfileDB) -> None:
+    assert db.current_schema_version() == LATEST_SCHEMA_VERSION
+
+
+def test_migrations_recorded_in_history(db: DevProfileDB) -> None:
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT version, description, applied_at FROM schema_version ORDER BY version"
+    ).fetchall()
+    versions = [r["version"] for r in rows]
+    assert versions == [m.version for m in MIGRATIONS]
+    for row in rows:
+        assert row["description"]
+        assert row["applied_at"]
+
+
+def test_reinit_is_idempotent(db_path: Path) -> None:
+    first = DevProfileDB(db_path)
+    first.init_schema()
+    first.close()
+
+    second = DevProfileDB(db_path)
+    second.init_schema()
+    rows = second.connect().execute("SELECT COUNT(*) AS n FROM schema_version").fetchone()
+    assert rows["n"] == LATEST_SCHEMA_VERSION
+    second.close()
+
+
+def test_pre_versioning_db_migrates_to_latest(db_path: Path) -> None:
+    """Simulate a DB created before schema_version existed: sessions table
+    without tool_sequence_json and no schema_version table at all."""
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            processed_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = DevProfileDB(db_path)
+    db.init_schema()
+    try:
+        cols = {row[1] for row in db.connect().execute("PRAGMA table_info(sessions)").fetchall()}
+        assert "tool_sequence_json" in cols
+        assert db.current_schema_version() == LATEST_SCHEMA_VERSION
+    finally:
+        db.close()
+
+
+# ── workflow_metrics ──────────────────────────────────────────────────────────
+
+
+def test_workflow_metrics_table_exists(db: DevProfileDB) -> None:
+    conn = db.connect()
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    assert "workflow_metrics" in tables
+
+
+def test_save_and_get_latest_workflow_metrics(db: DevProfileDB) -> None:
+    m = WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=7.8)
+    db.save_workflow_metrics(m, period_days=30, sessions_analyzed=42)
+    latest = db.get_latest_workflow_metrics()
+    assert latest is not None
+    assert latest["period_days"] == 30
+    assert latest["sessions_analyzed"] == 42
+    assert latest["metrics"] == m
+    assert latest["computed_at"]  # ISO timestamp
+
+
+def test_get_latest_workflow_metrics_returns_none_when_empty(db: DevProfileDB) -> None:
+    assert db.get_latest_workflow_metrics() is None
+
+
+def test_workflow_metrics_is_append_only(db: DevProfileDB) -> None:
+    db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.5), 30, 10)
+    db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.7), 30, 12)
+    db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.9), 30, 15)
+    assert db.count_workflow_metrics() == 3
+    latest = db.get_latest_workflow_metrics()
+    assert latest["metrics"].test_after_ratio == 0.9
+    assert latest["sessions_analyzed"] == 15
+
+
+def test_workflow_metrics_persists_canonical_json(db: DevProfileDB) -> None:
+    """The stored metrics_json should be canonical (sort_keys, compact) so the
+    bundle hash (F5.3.3) is reproducible without re-serializing."""
+    m = WorkflowMetrics(test_after_ratio=0.5, bash_to_read_ratio=2.0)
+    db.save_workflow_metrics(m, period_days=30, sessions_analyzed=10)
+    row = db.connect().execute(
+        "SELECT metrics_json FROM workflow_metrics ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    raw = row["metrics_json"]
+    # Compact format: no spaces between separators
+    assert ", " not in raw
+    assert ": " not in raw
+    # Keys are alphabetically ordered
+    import json
+    parsed = json.loads(raw)
+    keys = list(parsed.keys())
+    assert keys == sorted(keys)
+
+
+def test_pre_v2_db_gains_workflow_metrics_table(db_path: Path) -> None:
+    """An older DB at v1 should pick up the workflow_metrics table on init."""
+    pre_v2 = DevProfileDB(db_path)
+    # Simulate v1 state: only first migration ran
+    pre_v2.connect().executescript(
+        """
+        CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY,
+            description TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_version (version, description, applied_at)
+        VALUES (1, 'add tool_sequence_json to sessions', '2026-05-13T00:00:00+00:00');
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            tool_sequence_json TEXT DEFAULT '[]',
+            processed_at TEXT NOT NULL
+        );
+        """
+    )
+    pre_v2.connect().commit()
+    pre_v2.close()
+
+    db = DevProfileDB(db_path)
+    db.init_schema()
+    try:
+        assert db.current_schema_version() == LATEST_SCHEMA_VERSION
+        tables = {
+            row[0]
+            for row in db.connect()
+            .execute("SELECT name FROM sqlite_master WHERE type='table'")
+            .fetchall()
+        }
+        assert "workflow_metrics" in tables
+    finally:
+        db.close()
+
+
+def test_already_migrated_db_records_version_once(db_path: Path) -> None:
+    """A DB that already has tool_sequence_json (from old ad-hoc migration) but
+    lacks schema_version should be brought up to current without re-altering."""
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            tool_sequence_json TEXT DEFAULT '[]',
+            processed_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = DevProfileDB(db_path)
+    db.init_schema()
+    try:
+        assert db.current_schema_version() == LATEST_SCHEMA_VERSION
+        rows = db.connect().execute("SELECT COUNT(*) AS n FROM schema_version").fetchone()
+        assert rows["n"] == LATEST_SCHEMA_VERSION
+    finally:
+        db.close()

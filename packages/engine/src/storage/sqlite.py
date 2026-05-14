@@ -15,6 +15,13 @@ from models import Scores, Session, Signal, WorkflowMetrics
 _DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
 DB_PATH = _DATA_HOME / ".devprofile" / "profile.db"
 
+# `tool_sequence_json` is appended every time `save_session` merges a new
+# update.  Without a cap, a long-running session that survives many writes
+# bloats the DB (observed 2 GB in a single 27-session profile — see the
+# spawned task spec).  The classifier only needs a recent window; older
+# events past this length are dropped on every save.
+MAX_TOOL_SEQUENCE_LEN = 2000
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
@@ -174,6 +181,34 @@ def _migration_3_add_snapshots(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_5_truncate_tool_sequences(conn: sqlite3.Connection) -> None:
+    """Auto-heal databases where `tool_sequence_json` grew unbounded before
+    `MAX_TOOL_SEQUENCE_LEN` was introduced.  We slice the JSON in Python so
+    we don't rely on the SQLite JSON1 extension being compiled in."""
+    rows = conn.execute(
+        "SELECT id, tool_sequence_json FROM sessions "
+        "WHERE length(tool_sequence_json) > ?",
+        (MAX_TOOL_SEQUENCE_LEN * 50,),  # >50 bytes/event ≈ way more than fits
+    ).fetchall()
+    for row_id, raw in rows:
+        try:
+            seq = json.loads(raw or "[]")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(seq, list) or len(seq) <= MAX_TOOL_SEQUENCE_LEN:
+            continue
+        conn.execute(
+            "UPDATE sessions SET tool_sequence_json = ? WHERE id = ?",
+            (json.dumps(seq[-MAX_TOOL_SEQUENCE_LEN:]), row_id),
+        )
+    # Reclaim the space — without VACUUM the rows shrink but the file doesn't.
+    # Must run outside the active transaction; the migration runner commits
+    # right after `apply` returns, so we leave VACUUM to the explicit caller
+    # of init_schema.  Marking via a flag lets _migrate() handle it cleanly.
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pending_vacuum (id INTEGER)")
+    conn.execute("INSERT INTO _pending_vacuum VALUES (1)")
+
+
 def _migration_4_add_l1_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -217,6 +252,8 @@ MIGRATIONS: list[Migration] = [
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
     Migration(3, "add snapshots table (chain of .dpbundle)", _migration_3_add_snapshots),
     Migration(4, "add L1 tables (repositories + signals + aggregated view)", _migration_4_add_l1_tables),
+    Migration(5, "truncate runaway tool_sequence_json (cap to MAX_TOOL_SEQUENCE_LEN)",
+              _migration_5_truncate_tool_sequences),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
@@ -291,6 +328,23 @@ class DevProfileDB:
             )
             conn.commit()
 
+        # If any migration flagged a pending VACUUM (e.g. migration 5 after
+        # truncating bloated rows), run it now so disk space is reclaimed.
+        pending = conn.execute(
+            "SELECT name FROM sqlite_temp_master WHERE name = '_pending_vacuum'"
+        ).fetchone()
+        if pending is not None:
+            conn.execute("DROP TABLE _pending_vacuum")
+            # VACUUM requires no open transaction — sqlite3 auto-begins one on
+            # mutating statements, so commit first.
+            conn.commit()
+            try:
+                conn.execute("VACUUM")
+            except sqlite3.OperationalError:
+                # In-memory DBs or rare lock states — skip; the row-level
+                # truncate already capped the data, only disk reclaim is lost.
+                pass
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()
@@ -342,6 +396,10 @@ class DevProfileDB:
             old_cmds = json.loads(old.get("commands_json") or "[]")
             merged_cmds = old_cmds + [c for c in session.commands if c not in old_cmds]
             merged_seq = json.loads(old.get("tool_sequence_json") or "[]") + session.tool_sequence
+            # Cap at the most recent window — unbounded growth ate 2 GB in a
+            # real-world session before this fix.
+            if len(merged_seq) > MAX_TOOL_SEQUENCE_LEN:
+                merged_seq = merged_seq[-MAX_TOOL_SEQUENCE_LEN:]
 
             if total_count > 0:
                 merged_prompt = (

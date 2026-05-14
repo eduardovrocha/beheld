@@ -193,6 +193,73 @@ def test_save_session_appends_tool_sequence(db: DevProfileDB, sample_session_1) 
     assert seq == ["Bash", "Read", "Edit", "Bash"]
 
 
+def test_save_session_caps_tool_sequence_length(db: DevProfileDB, sample_session_1) -> None:
+    """Regression: a long-running session must not let tool_sequence_json grow
+    unbounded.  Before the cap, a real-world profile ballooned to 2 GB and
+    OOM'd /snapshot/payload.  After the fix, the column stays bounded by
+    MAX_TOOL_SEQUENCE_LEN regardless of how many save_session calls happen."""
+    import copy
+    from storage.sqlite import MAX_TOOL_SEQUENCE_LEN
+
+    # First write seeds the row.
+    seed = copy.copy(sample_session_1)
+    seed.tool_sequence = ["init"]
+    db.save_session(seed)
+
+    # Append 3 × MAX events in chunks to simulate a long-lived session.
+    for batch_idx in range(30):
+        update = copy.copy(sample_session_1)
+        update.tool_sequence = [f"b{batch_idx}-t{i}" for i in range(MAX_TOOL_SEQUENCE_LEN // 10)]
+        db.save_session(update)
+
+    seq = db.get_session_tool_sequence("sess-1")
+    assert len(seq) == MAX_TOOL_SEQUENCE_LEN
+    # The cap keeps the most recent tail — last item must be the newest batch.
+    assert seq[-1].startswith("b29-")
+
+
+def test_migration_5_truncates_existing_oversized_rows(db_path) -> None:
+    """A DB with a pre-existing bloated tool_sequence_json must auto-heal
+    on init_schema — the user shouldn't have to know about the bug."""
+    import json
+    import sqlite3
+    from storage.sqlite import MAX_TOOL_SEQUENCE_LEN
+
+    # Build a v0 DB (no schema_version yet) with a humongous row.
+    raw = sqlite3.connect(str(db_path))
+    raw.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            tool_sequence_json TEXT DEFAULT '[]',
+            processed_at TEXT NOT NULL
+        );
+        """
+    )
+    bloated = json.dumps([f"event-{i}" for i in range(MAX_TOOL_SEQUENCE_LEN * 5)])
+    raw.execute(
+        "INSERT INTO sessions (id, source, started_at, tool_sequence_json, processed_at) VALUES (?, ?, ?, ?, ?)",
+        ("bloated", "claude-code", "2026-05-14T00:00:00+00:00", bloated, "2026-05-14T00:00:00+00:00"),
+    )
+    raw.commit()
+    raw.close()
+
+    db = DevProfileDB(db_path)
+    db.init_schema()
+    try:
+        row = db.connect().execute(
+            "SELECT tool_sequence_json FROM sessions WHERE id = ?", ("bloated",)
+        ).fetchone()
+        seq = json.loads(row["tool_sequence_json"])
+        assert len(seq) == MAX_TOOL_SEQUENCE_LEN
+        # Tail-preserving: the newest events survive.
+        assert seq[-1] == f"event-{MAX_TOOL_SEQUENCE_LEN * 5 - 1}"
+    finally:
+        db.close()
+
+
 def test_get_session_tool_sequence_missing(db: DevProfileDB) -> None:
     assert db.get_session_tool_sequence("nonexistent") == []
 

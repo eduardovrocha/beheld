@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -45,6 +45,24 @@ function bundleFilename(createdAt: string, hash: string): string {
   // sha256:abc... → abc
   const hashShort = hash.slice("sha256:".length, "sha256:".length + 8);
   return `${dateStr}_${hashShort}.dpbundle`;
+}
+
+/** Resolve the convenience-copy directory. Returns null when no usable
+ *  destination exists — caller should silently skip in that case.
+ *
+ *  Precedence:
+ *    1. DEVPROFILE_DESKTOP_DIR env (explicit override, e.g. for tests or CI)
+ *    2. ~/Desktop if it exists (works on macOS, Windows, and most Linux setups)
+ *    3. null
+ *
+ *  Set DEVPROFILE_NO_DESKTOP_COPY=1 to opt out entirely.
+ */
+function desktopCopyDir(): string | null {
+  if (process.env.DEVPROFILE_NO_DESKTOP_COPY === "1") return null;
+  const override = process.env.DEVPROFILE_DESKTOP_DIR;
+  if (override) return existsSync(override) ? override : null;
+  const candidate = join(homedir(), "Desktop");
+  return existsSync(candidate) ? candidate : null;
 }
 
 export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void> {
@@ -103,6 +121,20 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
     outputPath = opts.output;
   }
 
+  // Convenience copy to the desktop so the user can find the bundle without
+  // having to know about ~/.devprofile/snapshots/. Skipped silently if the
+  // target dir doesn't exist or DEVPROFILE_NO_DESKTOP_COPY=1.
+  let desktopPath: string | undefined;
+  const desktop = desktopCopyDir();
+  if (desktop) {
+    desktopPath = join(desktop, fileName);
+    try {
+      writeFileSync(desktopPath, serialized);
+    } catch {
+      desktopPath = undefined; // silent — primary already on disk
+    }
+  }
+
   // 4. Register in DB
   let saveOk = true;
   try {
@@ -126,6 +158,7 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   console.log("  ✓ Snapshot gerado");
   console.log(`    hash:         ${hash.slice(0, 24)}...`);
   console.log(`    arquivo:      ${primaryPath}`);
+  if (desktopPath) console.log(`    desktop:      ${desktopPath}`);
   if (outputPath) console.log(`    cópia:        ${outputPath}`);
   console.log(`    assinado por: ${fp}`);
   if (!saveOk) {

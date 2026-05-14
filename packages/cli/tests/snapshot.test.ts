@@ -104,10 +104,18 @@ afterAll(() => {
   else process.env.DEVPROFILE_PORTAL_URL = savedEnvPortal;
 });
 
+let savedDesktopOptOut: string | undefined;
+let savedDesktopDir: string | undefined;
+
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), "devprofile-snap-"));
   savedEnvDir = process.env.DEVPROFILE_DATA_DIR;
   process.env.DEVPROFILE_DATA_DIR = workDir;
+  // Prevent tests from writing to the real ~/Desktop. Each test that wants to
+  // assert the desktop-copy behaviour will unset this and set DESKTOP_DIR.
+  savedDesktopOptOut = process.env.DEVPROFILE_NO_DESKTOP_COPY;
+  savedDesktopDir = process.env.DEVPROFILE_DESKTOP_DIR;
+  process.env.DEVPROFILE_NO_DESKTOP_COPY = "1";
   saveBodies = [];
   savedHashes = [];
   lastUploadBody = null;
@@ -132,6 +140,10 @@ beforeEach(() => {
 afterEach(() => {
   if (savedEnvDir === undefined) delete process.env.DEVPROFILE_DATA_DIR;
   else process.env.DEVPROFILE_DATA_DIR = savedEnvDir;
+  if (savedDesktopOptOut === undefined) delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
+  else process.env.DEVPROFILE_NO_DESKTOP_COPY = savedDesktopOptOut;
+  if (savedDesktopDir === undefined) delete process.env.DEVPROFILE_DESKTOP_DIR;
+  else process.env.DEVPROFILE_DESKTOP_DIR = savedDesktopDir;
   rmSync(workDir, { recursive: true, force: true });
 });
 
@@ -242,6 +254,53 @@ describe("snapshotCommand — generate", () => {
 });
 
 // ── share flag ──────────────────────────────────────────────────────────────
+
+// ── desktop convenience copy ────────────────────────────────────────────────
+
+describe("snapshotCommand — desktop convenience copy", () => {
+  test("writes a copy to DEVPROFILE_DESKTOP_DIR when set", async () => {
+    const desktop = mkdtempSync(join(tmpdir(), "devprofile-desktop-"));
+    delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
+    process.env.DEVPROFILE_DESKTOP_DIR = desktop;
+    try {
+      const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop1");
+      await snapshotCommand();
+      const files = readdirSync(desktop).filter((f) => f.endsWith(".dpbundle"));
+      expect(files.length).toBe(1);
+      // Content equals primary copy under ~/.devprofile/snapshots/
+      const snapDir = join(workDir, ".devprofile", "snapshots");
+      const primary = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+      expect(readFileSync(join(desktop, files[0]), "utf8")).toBe(
+        readFileSync(join(snapDir, primary), "utf8"),
+      );
+    } finally {
+      rmSync(desktop, { recursive: true, force: true });
+    }
+  });
+
+  test("does NOT copy when DEVPROFILE_NO_DESKTOP_COPY=1 (default in tests)", async () => {
+    // beforeEach already sets DEVPROFILE_NO_DESKTOP_COPY=1
+    const desktop = mkdtempSync(join(tmpdir(), "devprofile-desktop-"));
+    process.env.DEVPROFILE_DESKTOP_DIR = desktop;
+    try {
+      const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop2");
+      await snapshotCommand();
+      expect(readdirSync(desktop).length).toBe(0);
+    } finally {
+      rmSync(desktop, { recursive: true, force: true });
+    }
+  });
+
+  test("silently skips when DEVPROFILE_DESKTOP_DIR points at nonexistent path", async () => {
+    delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
+    process.env.DEVPROFILE_DESKTOP_DIR = join(tmpdir(), "definitely-not-a-real-dir-" + Date.now());
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop3");
+    // Should not throw, primary write still works
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    expect(readdirSync(snapDir).length).toBe(1);
+  });
+});
 
 describe("snapshotCommand — --share", () => {
   test("uploads the bundle and prints the short URL", async () => {

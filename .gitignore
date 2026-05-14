@@ -20,3 +20,6 @@ packages/cli/assets/devprofile-engine
 
 # OS
 .DS_Store
+
+# Separate project — Rails portal + Docker (lives at web/, tracked independently)
+web/

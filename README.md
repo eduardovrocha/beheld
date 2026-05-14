@@ -70,26 +70,61 @@ Scores range from 0–100. The engine computes them incrementally from JSONL ses
 
 ## Commands
 
-```sh
-devprofile init               # Run onboarding wizard (installs hooks + starts daemon)
-devprofile start              # Start MCP server + scoring engine
-devprofile stop               # Stop both daemons gracefully
-devprofile restart            # Stop then start
-devprofile status             # Show daemon health, session, and today's stats
-devprofile view               # Display your profile in the terminal
-devprofile view --json        # Output full profile as JSON
-devprofile view --scores-only # Output 4 scores as space-separated numbers
-devprofile view --coach       # Show coaching context (patterns + suggestions)
-devprofile keys show          # Display the Ed25519 public key + fingerprint
-devprofile keys import <p>    # Import an existing key (JWK or PEM)
-devprofile keys rotate        # Generate a new key pair (archives the current one)
-devprofile snapshot           # Generate a signed .dpbundle
-devprofile snapshot --share   # Generate + upload to the portal + print a QR
-devprofile snapshot list      # List previously generated snapshots
-devprofile verify <file>      # Verify a .dpbundle offline (schema + hash + signature)
-devprofile update             # Download and install the latest version
-devprofile delete --local     # Delete ~/.devprofile/ (keeps hooks)
-devprofile delete --all       # Delete data + remove all hooks (full uninstall)
+### Slash command no Claude Code
+
+After `devprofile init`, the `/devprofile` slash command is available directly in Claude Code chat:
+
+```
+/devprofile              → resumo: score geral + top insights
+/devprofile scores       → os 4 scores com barras de progresso
+/devprofile insights     → próxima ação recomendada (1 insight de "opportunity")
+/devprofile full         → perfil completo com plataformas, ecosystems e workflow
+```
+
+### CLI no terminal
+
+```bash
+# onboarding e daemons
+devprofile init [--force]                      # wizard de 4 telas (--force re-roda)
+devprofile start                               # sobe MCP server (7337) + engine (7338)
+devprofile stop                                # para ambos os daemons
+devprofile restart                             # stop + start
+devprofile status                              # estado dos daemons + sessão atual
+
+# perfil
+devprofile view                                # perfil completo no terminal
+devprofile view --json                         # output JSON para scripts
+devprofile view --scores-only                  # apenas os 4 scores numéricos
+devprofile view --refresh                      # processa eventos órfãos antes de exibir
+devprofile view --coach                        # contexto de coaching (padrões + sugestões)
+devprofile view --coach --session-hint <phase> # phase ∈ feature_work | debug | refactor | exploration
+
+# chaves Ed25519 (Fase 5 — assinatura de snapshots)
+devprofile keys show                           # public key + fingerprint
+devprofile keys import <arquivo>               # importa JWK ou PEM (PKCS#8)
+devprofile keys rotate                         # gera novo par, arquiva o anterior
+
+# snapshots assinados (.dpbundle — Fase 5)
+devprofile snapshot                            # gera bundle local
+devprofile snapshot --output <path>            # também grava em <path>
+devprofile snapshot --share                    # gera + upload + QR + URL curta
+devprofile snapshot list                       # histórico (newest-first)
+devprofile verify <arquivo.dpbundle>           # schema + hash + signature offline
+devprofile verify <arquivo.dpbundle> --chain   # também walks previous_hash
+
+# manutenção
+devprofile update                              # verifica e instala nova versão
+devprofile delete --local                      # apaga ~/.devprofile/
+devprofile delete --all                        # local + remove hooks
+```
+
+### Subcomando interno
+
+> Usado pelo Claude Code e pelo autostart — não é para uso direto.
+
+```bash
+devprofile server          # HTTP server na porta 7337 (modo standalone)
+devprofile server --stdio  # protocolo MCP via stdin/stdout (spawned pelo Claude Code)
 ```
 
 ### devprofile view
@@ -136,17 +171,6 @@ devprofile view --coach                          # render ANSI (above)
 devprofile view --coach --session-hint debug     # tag the phase
 devprofile view --coach --json                   # raw CoachPayload (for jq / debug)
 ```
-
-### /devprofile in Claude Code
-
-After `devprofile init`, the `/devprofile` slash command is available directly in Claude Code chat:
-
-| Command | Output |
-|---------|--------|
-| `/devprofile` | Score + top 3 insights |
-| `/devprofile scores` | Score table with progress bars |
-| `/devprofile insight` | Next recommended action |
-| `/devprofile full` | Complete profile (scores + platforms + ecosystems) |
 
 ### MCP tools exposed to the host LLM
 

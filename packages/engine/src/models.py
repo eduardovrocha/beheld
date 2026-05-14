@@ -206,3 +206,49 @@ class CoachPayload:
     patterns: list[Pattern]
     coaching_guidance: CoachingGuidance
     suggested_followups: list[str] = field(default_factory=list)
+
+
+# ── signed snapshot (.dpbundle) — Phase 5 ─────────────────────────────────────
+#
+# Wire format contract. Identical shape in TypeScript (cli/src/bundle/types.ts).
+# Any change here MUST bump BUNDLE_VERSION and update the TS twin in the same
+# commit — the cross-language canonical hash test (test_bundle_contract) catches
+# drift.
+
+BUNDLE_VERSION = "1"
+
+
+@dataclass(frozen=True)
+class BundleSignals:
+    """Aggregate signals over the snapshot period. All values are scalars or
+    flat dicts of scalars — canonical JSON ordering is trivial."""
+    platforms: dict[str, int]
+    ecosystems: dict[str, int]
+    workflow_distribution: dict[str, float]
+    project_categories: dict[str, float]
+    workflow_metrics: WorkflowMetrics
+    sessions_analyzed: int
+    period_days: int
+
+
+@dataclass(frozen=True)
+class BundlePayload:
+    """The signed half of a .dpbundle. SHA-256 of canonical_json(payload) is
+    embedded in the parent Bundle.hash; that same canonical_json is what
+    Ed25519 signs."""
+    created_at: str
+    devprofile_version: str
+    previous_hash: Optional[str]
+    scores: Scores
+    signals: BundleSignals
+
+
+@dataclass(frozen=True)
+class Bundle:
+    """Top-level .dpbundle wire format. `version` is the bundle schema version,
+    independent of devprofile_version (which tracks the app)."""
+    version: str
+    payload: BundlePayload
+    hash: str          # "sha256:<hex>"
+    signature: str     # "ed25519:<hex>"
+    public_key: str    # "ed25519:<base64url-x>"

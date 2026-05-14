@@ -1,23 +1,48 @@
 from __future__ import annotations
 
+from typing import ClassVar, Optional
+
 from models import Session
+from scorers.base import DataSource, L1Snapshot
 
 _TEST_COMMANDS = frozenset(
     ("rspec", "jest", "pytest", "playwright", "vitest", "cypress", "mocha", "minitest")
 )
 _TEST_EXTENSIONS = (".spec.", ".test.", "_spec.", "_test.")
 
+_L1_WEIGHT = 0.50
+_L2_WEIGHT = 0.50
+
 
 class TestMaturityScorer:
     """
-    Dimensions (sums to 100):
+    L2 dimensions (sums to 100):
       +35  % sessions with has_test_context
       +30  TDD / test-after workflow pattern
       +20  test file extensions present
       +15  test commands in bash
+
+    Combined with the L1 baseline (avg_test_ratio across imported repos)
+    using a 50/50 weight — historical testing rigor and current habits both
+    matter equally.
     """
 
-    def score(self, sessions: list[Session]) -> int:
+    data_sources: ClassVar[list[DataSource]] = ["l1", "l2"]
+
+    def score(self, sessions: list[Session], l1: Optional[L1Snapshot] = None) -> int:
+        l1 = l1 or L1Snapshot()
+        l2_score = self._score_l2(sessions)
+
+        if l1.is_empty:
+            return l2_score
+
+        l1_baseline = int(round(max(0.0, min(1.0, l1.avg_test_ratio)) * 100))
+        if not sessions:
+            return l1_baseline
+
+        return int(round(l1_baseline * _L1_WEIGHT + l2_score * _L2_WEIGHT))
+
+    def _score_l2(self, sessions: list[Session]) -> int:
         if not sessions:
             return 0
 
@@ -33,14 +58,12 @@ class TestMaturityScorer:
             if s.workflow_pattern in ("tdd", "test-after"):
                 tdd_count += 1
                 continue
-            # Fallback: detect from events when available
             if s.events and s.has_test_context:
                 tools = [e.tool_name for e in s.events if e.event_type == "pre_tool_use" and e.tool_name]
                 bash_idxs = [i for i, t in enumerate(tools) if t == "Bash"]
                 write_idxs = [i for i, t in enumerate(tools) if t in ("Write", "Edit")]
                 if bash_idxs and write_idxs and any(b > w for b in bash_idxs for w in write_idxs):
                     tdd_count += 1
-        # 50% of sessions with TDD → full score
         result += int(30 * min(tdd_count / len(sessions) * 2, 1.0))
 
         # 3. Test file extensions

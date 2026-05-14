@@ -10,6 +10,7 @@ from extractors.tools import build_tool_sequence, detect_workflow
 from extractors.files import detect_ecosystems, detect_languages
 from models import Scores, Session, Signal, TechnicalSignals
 from reader.jsonl_reader import JsonlReader
+from scorers.base import L1Snapshot
 from scorers.growth_rate import GrowthRateScorer
 from scorers.overall import calculate_overall
 from scorers.prompt_quality import PromptQualityScorer
@@ -99,10 +100,12 @@ class Processor:
         recent = [s for s in all_sessions if s.started_at >= cutoff_recent]
         previous = [s for s in all_sessions if cutoff_previous <= s.started_at < cutoff_recent]
 
+        l1 = L1Snapshot.from_summary(self.db.get_l1_summary())
+
         pq = PromptQualityScorer().score(all_sessions)
-        tm = TestMaturityScorer().score(all_sessions)
-        tb = TechBreadthScorer().score(all_sessions)
-        gr = GrowthRateScorer().score(recent, previous)
+        tm = TestMaturityScorer().score(all_sessions, l1=l1)
+        tb = TechBreadthScorer().score(all_sessions, l1=l1)
+        gr = GrowthRateScorer().score(recent, previous, l1=l1)
         overall = calculate_overall(pq, tm, tb, gr)
 
         self.db.save_scores(

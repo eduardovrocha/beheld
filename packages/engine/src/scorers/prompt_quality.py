@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 from models import Session
+from scorers.base import DataSource
 
 _ADVANCED_TOOLS = frozenset({"bash", "computer_use", "web_search"})
 
@@ -14,7 +17,11 @@ class PromptQualityScorer:
       +15  avg distinct tools per session ≥ 4
       +15  long productive sessions (duration > 10 min AND events > 10)
       +10  sessions using Bash / advanced tools
+
+    L2-only by design — prompt quality has no analogue in git history.
     """
+
+    data_sources: ClassVar[list[DataSource]] = ["l2"]
 
     def score(self, sessions: list[Session]) -> int:
         if not sessions:

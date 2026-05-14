@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import ClassVar, Optional
+
 from extractors.commands import detect_platforms
 from extractors.files import detect_ecosystems
 from models import Session
+from scorers.base import DataSource, L1Snapshot
 
 
 def _delta_score(recent: float, previous: float, max_weight: int) -> int:
@@ -27,7 +30,6 @@ def _metrics(sessions: list[Session]) -> dict:
             "platforms": set(),
         }
 
-    # Avg prompt — use pre-computed aggregate when events are absent
     avgs: list[float] = []
     for s in sessions:
         if s.events:
@@ -63,20 +65,46 @@ def _metrics(sessions: list[Session]) -> dict:
 
 class GrowthRateScorer:
     """
-    Compare last 30 days vs previous 30 days.
-    Returns 50 when no previous data (neutral baseline).
+    Two comparison modes:
 
-    Dimensions (max sums to 100):
-      +30  Δ avg prompt length
-      +30  Δ % sessions with tests
-      +20  Δ avg distinct tools/session
-      +10  Δ avg session duration
-      +10  new ecosystems or platforms
+      L1 absent → recent L2 vs previous L2 (existing behavior):
+        +30 Δ avg prompt length
+        +30 Δ % sessions with tests
+        +20 Δ avg distinct tools/session
+        +10 Δ avg session duration
+        +10 new ecosystems or platforms
+
+      L1 present → recent L2 vs L1 baseline (trajectory vs lifetime):
+        starting at 50 (neutral), adjust based on:
+          +25 new ecosystems in L2 vs L1
+          +15 new platforms in L2 vs L1
+          +10 test_ratio improvement vs L1.avg_test_ratio
+          −10 test_ratio regression vs L1.avg_test_ratio
+
+    L2 empty → 50 (cannot judge trajectory with no recent activity).
     """
 
-    def score(self, recent: list[Session], previous: list[Session]) -> int:
+    data_sources: ClassVar[list[DataSource]] = ["l1", "l2"]
+
+    def score(
+        self,
+        recent: list[Session],
+        previous: list[Session],
+        l1: Optional[L1Snapshot] = None,
+    ) -> int:
+        l1 = l1 or L1Snapshot()
+
         if not recent:
-            return 0
+            # No L2 activity in window: neutral if we have any baseline at all,
+            # zero otherwise. Mirrors original behavior when L1 is empty.
+            return 50 if not l1.is_empty else 0
+
+        if l1.is_empty:
+            return self._compare_l2_periods(recent, previous)
+
+        return self._compare_l2_vs_l1(recent, l1)
+
+    def _compare_l2_periods(self, recent: list[Session], previous: list[Session]) -> int:
         if not previous:
             return 50
 
@@ -92,5 +120,23 @@ class GrowthRateScorer:
         new_eco = r["ecosystems"] - p["ecosystems"]
         new_plat = r["platforms"] - p["platforms"]
         result += 10 if (new_eco or new_plat) else 5
+
+        return max(0, min(100, result))
+
+    def _compare_l2_vs_l1(self, recent: list[Session], l1: L1Snapshot) -> int:
+        r = _metrics(recent)
+        result = 50  # neutral starting point
+
+        new_eco = r["ecosystems"] - l1.ecosystem_keys
+        result += min(25, 5 * len(new_eco))
+
+        new_plat = r["platforms"] - l1.platform_keys
+        result += min(15, 5 * len(new_plat))
+
+        if r["test_ratio"] > l1.avg_test_ratio:
+            bump = (r["test_ratio"] - l1.avg_test_ratio) * 50
+            result += int(min(10, bump))
+        elif r["test_ratio"] < l1.avg_test_ratio - 0.1:
+            result -= 10
 
         return max(0, min(100, result))

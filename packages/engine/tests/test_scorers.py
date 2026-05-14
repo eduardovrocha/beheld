@@ -146,14 +146,14 @@ def test_delta_score_zero_previous() -> None:
 
 
 def test_overall_weights() -> None:
-    assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
+    assert abs(sum(v["weight"] for v in WEIGHTS.values()) - 1.0) < 1e-9
 
 
 def test_overall_weights_individual() -> None:
-    assert WEIGHTS["prompt_quality"] == 0.30
-    assert WEIGHTS["test_maturity"]  == 0.30
-    assert WEIGHTS["tech_breadth"]   == 0.25
-    assert WEIGHTS["growth_rate"]    == 0.15
+    assert WEIGHTS["prompt_quality"]["weight"] == 0.30
+    assert WEIGHTS["test_maturity"]["weight"]  == 0.30
+    assert WEIGHTS["tech_breadth"]["weight"]   == 0.25
+    assert WEIGHTS["growth_rate"]["weight"]    == 0.15
 
 
 def test_overall_senior_balanced() -> None:

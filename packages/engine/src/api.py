@@ -361,6 +361,43 @@ def snapshots_list(limit: int = 100) -> list[dict]:
     return db.list_snapshots(limit)
 
 
+# ── L1 (git repository signals) ──────────────────────────────────────────────
+
+
+@app.get("/l1/summary")
+def l1_summary() -> dict:
+    """Aggregated L1 signals across all imported git repos.
+
+    Returns zero/empty values when no repos have been imported (no 500). L1 is
+    strictly separate from L2 (session signals) — scorers consume each layer
+    independently.
+    """
+    s = db.get_l1_summary()
+    return {
+        "total_repos": s["total_repos"],
+        "total_commits": s["total_commits"],
+        "earliest_commit": s["earliest_commit"],
+        "latest_commit": s["latest_commit"],
+        "ecosystems_merged": s["ecosystems_merged"],
+        "platforms_merged": s["platforms_merged"],
+        "avg_test_ratio": s["avg_test_ratio"],
+    }
+
+
+@app.get("/l1/repositories")
+def l1_repositories() -> list[dict]:
+    """List of imported repos, identified opaquely by root_commit_hash."""
+    return db.get_l1_repositories()
+
+
+@app.delete("/l1/repositories/{root_hash}")
+def l1_delete_repository(root_hash: str) -> dict:
+    removed = db.delete_l1_repository(root_hash)
+    if not removed:
+        raise HTTPException(status_code=404, detail="repository not found")
+    return {"ok": True, "root_commit_hash": root_hash}
+
+
 @app.get("/export")
 def export_data() -> dict:
     scores = db.get_current_scores()

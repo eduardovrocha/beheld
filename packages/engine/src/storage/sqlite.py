@@ -93,6 +93,38 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_snapshots_previous_hash ON snapshots(previous_hash);
+
+CREATE TABLE IF NOT EXISTS l1_repositories (
+    root_commit_hash TEXT PRIMARY KEY,
+    imported_at TEXT NOT NULL,
+    commit_count INTEGER NOT NULL,
+    author_email_hash TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS l1_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    root_commit_hash TEXT NOT NULL REFERENCES l1_repositories(root_commit_hash),
+    file_extensions TEXT NOT NULL DEFAULT '{}',
+    ecosystems TEXT NOT NULL DEFAULT '{}',
+    platforms TEXT NOT NULL DEFAULT '{}',
+    test_ratio REAL NOT NULL DEFAULT 0.0,
+    timing TEXT NOT NULL DEFAULT '{}',
+    first_commit_at TEXT,
+    last_commit_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_l1_signals_repo ON l1_signals(root_commit_hash);
+
+CREATE VIEW IF NOT EXISTS l1_aggregated AS
+SELECT
+    (SELECT COUNT(*) FROM l1_repositories) AS total_repos,
+    (SELECT COALESCE(SUM(commit_count), 0) FROM l1_repositories) AS total_commits,
+    (SELECT MIN(first_commit_at) FROM l1_signals WHERE first_commit_at IS NOT NULL) AS earliest_commit,
+    (SELECT MAX(last_commit_at) FROM l1_signals WHERE last_commit_at IS NOT NULL) AS latest_commit,
+    (SELECT COALESCE(json_group_array(json(file_extensions)), '[]') FROM l1_signals) AS all_extensions_json,
+    (SELECT COALESCE(json_group_array(json(ecosystems)), '[]') FROM l1_signals) AS all_ecosystems_json,
+    (SELECT COALESCE(json_group_array(json(platforms)), '[]') FROM l1_signals) AS all_platforms_json,
+    (SELECT COALESCE(AVG(test_ratio), 0.0) FROM l1_signals) AS avg_test_ratio;
 """
 
 
@@ -142,10 +174,49 @@ def _migration_3_add_snapshots(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_4_add_l1_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS l1_repositories (
+            root_commit_hash TEXT PRIMARY KEY,
+            imported_at TEXT NOT NULL,
+            commit_count INTEGER NOT NULL,
+            author_email_hash TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS l1_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            root_commit_hash TEXT NOT NULL REFERENCES l1_repositories(root_commit_hash),
+            file_extensions TEXT NOT NULL DEFAULT '{}',
+            ecosystems TEXT NOT NULL DEFAULT '{}',
+            platforms TEXT NOT NULL DEFAULT '{}',
+            test_ratio REAL NOT NULL DEFAULT 0.0,
+            timing TEXT NOT NULL DEFAULT '{}',
+            first_commit_at TEXT,
+            last_commit_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_l1_signals_repo ON l1_signals(root_commit_hash);
+
+        CREATE VIEW IF NOT EXISTS l1_aggregated AS
+        SELECT
+            (SELECT COUNT(*) FROM l1_repositories) AS total_repos,
+            (SELECT COALESCE(SUM(commit_count), 0) FROM l1_repositories) AS total_commits,
+            (SELECT MIN(first_commit_at) FROM l1_signals WHERE first_commit_at IS NOT NULL) AS earliest_commit,
+            (SELECT MAX(last_commit_at) FROM l1_signals WHERE last_commit_at IS NOT NULL) AS latest_commit,
+            (SELECT COALESCE(json_group_array(json(file_extensions)), '[]') FROM l1_signals) AS all_extensions_json,
+            (SELECT COALESCE(json_group_array(json(ecosystems)), '[]') FROM l1_signals) AS all_ecosystems_json,
+            (SELECT COALESCE(json_group_array(json(platforms)), '[]') FROM l1_signals) AS all_platforms_json,
+            (SELECT COALESCE(AVG(test_ratio), 0.0) FROM l1_signals) AS avg_test_ratio;
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
     Migration(3, "add snapshots table (chain of .dpbundle)", _migration_3_add_snapshots),
+    Migration(4, "add L1 tables (repositories + signals + aggregated view)", _migration_4_add_l1_tables),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
@@ -566,6 +637,129 @@ class DevProfileDB:
             prev_hash = stored_hash
 
         return {"ok": True, "snapshots_checked": len(rows), "broken_at": None}
+
+    # ── L1 (git repository signals) ───────────────────────────────────────────
+
+    def save_l1_repository(
+        self,
+        root_commit_hash: str,
+        imported_at: str,
+        commit_count: int,
+        author_email_hash: str,
+    ) -> bool:
+        """Idempotent insert. Returns True if a new row was created, False if a
+        repository with this root_commit_hash already exists."""
+        conn = self.connect()
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO l1_repositories
+            (root_commit_hash, imported_at, commit_count, author_email_hash)
+            VALUES (?, ?, ?, ?)
+            """,
+            (root_commit_hash, imported_at, commit_count, author_email_hash),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def save_l1_signals(
+        self,
+        root_commit_hash: str,
+        file_extensions: dict,
+        ecosystems: dict,
+        platforms: dict,
+        test_ratio: float,
+        timing: dict,
+        first_commit_at: Optional[str],
+        last_commit_at: Optional[str],
+    ) -> None:
+        """Replace existing signals for a repo with a fresh row (1:1 with
+        l1_repositories)."""
+        conn = self.connect()
+        conn.execute("DELETE FROM l1_signals WHERE root_commit_hash = ?", (root_commit_hash,))
+        conn.execute(
+            """
+            INSERT INTO l1_signals
+            (root_commit_hash, file_extensions, ecosystems, platforms,
+             test_ratio, timing, first_commit_at, last_commit_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                root_commit_hash,
+                json.dumps(file_extensions, sort_keys=True),
+                json.dumps(ecosystems, sort_keys=True),
+                json.dumps(platforms, sort_keys=True),
+                float(test_ratio),
+                json.dumps(timing, sort_keys=True),
+                first_commit_at,
+                last_commit_at,
+            ),
+        )
+        conn.commit()
+
+    def get_l1_summary(self) -> dict:
+        """Aggregate L1 signals across all imported repos. Safe on empty DB."""
+        row = self.connect().execute("SELECT * FROM l1_aggregated").fetchone()
+        if row is None:
+            return {
+                "total_repos": 0,
+                "total_commits": 0,
+                "earliest_commit": None,
+                "latest_commit": None,
+                "extensions_merged": {},
+                "ecosystems_merged": {},
+                "platforms_merged": {},
+                "avg_test_ratio": 0.0,
+            }
+
+        ext_arr = json.loads(row["all_extensions_json"] or "[]")
+        eco_arr = json.loads(row["all_ecosystems_json"] or "[]")
+        plat_arr = json.loads(row["all_platforms_json"] or "[]")
+
+        extensions_merged: dict[str, int] = {}
+        for d in ext_arr:
+            for k, v in d.items():
+                extensions_merged[k] = extensions_merged.get(k, 0) + int(v)
+
+        ecosystems_merged: dict[str, bool] = {}
+        for d in eco_arr:
+            for k, v in d.items():
+                if v:
+                    ecosystems_merged[k] = True
+
+        platforms_merged: dict[str, bool] = {}
+        for d in plat_arr:
+            for k, v in d.items():
+                if v:
+                    platforms_merged[k] = True
+
+        return {
+            "total_repos": int(row["total_repos"] or 0),
+            "total_commits": int(row["total_commits"] or 0),
+            "earliest_commit": row["earliest_commit"],
+            "latest_commit": row["latest_commit"],
+            "extensions_merged": extensions_merged,
+            "ecosystems_merged": ecosystems_merged,
+            "platforms_merged": platforms_merged,
+            "avg_test_ratio": float(row["avg_test_ratio"] or 0.0),
+        }
+
+    def get_l1_repositories(self) -> list[dict]:
+        rows = self.connect().execute(
+            "SELECT root_commit_hash, imported_at, commit_count "
+            "FROM l1_repositories ORDER BY imported_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_l1_repository(self, root_commit_hash: str) -> bool:
+        """Cascade-delete a repo and its signals. Returns True if a repo was
+        removed, False if none existed with that hash."""
+        conn = self.connect()
+        conn.execute("DELETE FROM l1_signals WHERE root_commit_hash = ?", (root_commit_hash,))
+        cur = conn.execute(
+            "DELETE FROM l1_repositories WHERE root_commit_hash = ?", (root_commit_hash,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
     # ── profile ───────────────────────────────────────────────────────────────
 

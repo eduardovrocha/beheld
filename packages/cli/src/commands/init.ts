@@ -36,6 +36,11 @@ async function askReinit(): Promise<boolean> {
 
 export async function initCommand(opts: { force?: boolean } = {}): Promise<void> {
   ensureSecurePermissions();
+  // Generate Ed25519 signing keys on first run (silent if already present).
+  // Required for `devprofile snapshot` (Phase 5 — signed .dpbundle).
+  const { ensureKeysSilent } = await import("./keys");
+  await ensureKeysSilent();
+
   const existing = readConfig();
   if (existing && !opts.force) {
     const reinit = await askReinit();

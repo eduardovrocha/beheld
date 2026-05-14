@@ -74,6 +74,34 @@ program
     await viewCommand(opts);
   });
 
+const keysCmd = program
+  .command("keys")
+  .description("Manage Ed25519 keys used to sign .dpbundle snapshots");
+
+keysCmd
+  .command("show")
+  .description("Display the current public key (Ed25519, JWK)")
+  .action(async () => {
+    const { keysShowCommand } = await import("./commands/keys");
+    await keysShowCommand();
+  });
+
+keysCmd
+  .command("import <path>")
+  .description("Import an existing Ed25519 private key (JWK or PEM)")
+  .action(async (path: string) => {
+    const { keysImportCommand } = await import("./commands/keys");
+    await keysImportCommand(path);
+  });
+
+keysCmd
+  .command("rotate")
+  .description("Generate a new key pair; current pair is archived (snapshots stay verifiable)")
+  .action(async () => {
+    const { keysRotateCommand } = await import("./commands/keys");
+    await keysRotateCommand();
+  });
+
 program
   .command("update")
   .description("Update DevProfile to the latest version")

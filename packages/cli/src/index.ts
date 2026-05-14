@@ -74,6 +74,23 @@ program
     await viewCommand(opts);
   });
 
+const snapshotCmd = program
+  .command("snapshot")
+  .description("Generate a signed .dpbundle of your current profile")
+  .option("--output <path>", "Also write the bundle to this path")
+  .action(async (opts: { output?: string }) => {
+    const { snapshotCommand } = await import("./commands/snapshot");
+    await snapshotCommand(opts);
+  });
+
+snapshotCmd
+  .command("list")
+  .description("List previously generated snapshots")
+  .action(async () => {
+    const { snapshotListCommand } = await import("./commands/snapshot");
+    await snapshotListCommand();
+  });
+
 const keysCmd = program
   .command("keys")
   .description("Manage Ed25519 keys used to sign .dpbundle snapshots");

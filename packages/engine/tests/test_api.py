@@ -565,3 +565,134 @@ def test_chain_status_detects_tampering(
     data = client.get("/snapshot/chain/status").json()
     assert data["ok"] is False
     assert data["broken_at"]["reason"] == "content_mismatch"
+
+
+# ── POST /snapshot/payload + /snapshot/save + GET /snapshots (Phase 5 / F5.3) ──
+
+
+def test_snapshot_payload_returns_409_when_no_scores(client: TestClient) -> None:
+    resp = client.post("/snapshot/payload")
+    assert resp.status_code == 409
+    assert "no scores" in resp.json()["detail"].lower()
+
+
+def test_snapshot_payload_builds_valid_shape(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40,
+        growth_rate=30, overall=35, sessions_analyzed=10,
+    ))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.6),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+
+    resp = client.post("/snapshot/payload")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Top-level shape per the contract (Etapa C)
+    assert "created_at" in data
+    assert "devprofile_version" in data
+    assert "previous_hash" in data
+    assert "scores" in data
+    assert "signals" in data
+    # signals contains the 7 documented fields
+    sig = data["signals"]
+    for key in (
+        "platforms", "ecosystems", "workflow_distribution",
+        "project_categories", "workflow_metrics",
+        "sessions_analyzed", "period_days",
+    ):
+        assert key in sig
+    # previous_hash is null for the first ever snapshot
+    assert data["previous_hash"] is None
+
+
+def test_snapshot_payload_carries_persisted_workflow_metrics(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40,
+        growth_rate=30, overall=35, sessions_analyzed=10))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=4.2),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+    data = client.post("/snapshot/payload").json()
+    wm = data["signals"]["workflow_metrics"]
+    assert wm["test_after_ratio"] == 0.78
+    assert wm["bash_to_read_ratio"] == 4.2
+
+
+def test_snapshot_payload_chains_to_previous(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(date="2026-05-14",
+        prompt_quality=10, test_maturity=10, tech_breadth=10,
+        growth_rate=10, overall=10, sessions_analyzed=5))
+    # Pre-existing snapshot in DB → next payload should reference it
+    test_db.save_snapshot(_h('{"prev":1}'), None, '{"prev":1}')
+    data = client.post("/snapshot/payload").json()
+    assert data["previous_hash"] == _h('{"prev":1}')
+
+
+def test_snapshot_save_rejects_invalid_hash_format(client: TestClient) -> None:
+    resp = client.post(
+        "/snapshot/save",
+        json={"hash": "not-a-hash", "payload_json": "{}"},
+    )
+    assert resp.status_code == 422  # pydantic validation
+
+
+def test_snapshot_save_persists_to_db(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    payload = '{"x":1}'
+    h = _h(payload)
+    resp = client.post(
+        "/snapshot/save",
+        json={"hash": h, "payload_json": payload, "bundle_path": "/tmp/a.dpbundle"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["hash"] == h
+    assert test_db.count_snapshots() == 1
+
+
+def test_snapshot_save_returns_409_on_duplicate(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    payload = '{"x":1}'
+    h = _h(payload)
+    body = {"hash": h, "payload_json": payload}
+    r1 = client.post("/snapshot/save", json=body)
+    assert r1.status_code == 200
+    r2 = client.post("/snapshot/save", json=body)
+    assert r2.status_code == 409
+
+
+def test_snapshots_list_empty(client: TestClient) -> None:
+    resp = client.get("/snapshots")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_snapshots_list_newest_first(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    test_db.save_snapshot(_h('{"i":1}'), None, '{"i":1}', bundle_path="/a")
+    test_db.save_snapshot(_h('{"i":2}'), _h('{"i":1}'), '{"i":2}', bundle_path="/b")
+    data = client.get("/snapshots").json()
+    assert len(data) == 2
+    assert data[0]["bundle_path"] == "/b"
+    assert data[1]["bundle_path"] == "/a"
+    # payload_json never leaks through this endpoint
+    assert all("payload_json" not in row for row in data)

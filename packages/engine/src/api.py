@@ -6,9 +6,12 @@ from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
+from bundle import build_bundle_payload
 from coach import COACHING_GUIDANCE, detect_patterns
 from insights import InsightGenerator
 from models import (
@@ -310,6 +313,52 @@ def snapshot_chain_status() -> dict:
     """Walks the entire chain detecting tampering. Diagnostic endpoint —
     consumed by `devprofile verify --chain` and future health checks."""
     return db.validate_chain()
+
+
+@app.post("/snapshot/payload")
+def snapshot_payload() -> dict:
+    """Build the signable half of a .dpbundle from current DB state.
+
+    Returns the BundlePayload as-is (unsigned). The CLI canonicalizes, hashes,
+    signs with Ed25519, and POSTs the result back to /snapshot/save.
+    """
+    try:
+        payload = build_bundle_payload(db, VERSION)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return dataclasses.asdict(payload)
+
+
+class SnapshotSaveBody(BaseModel):
+    hash: str = Field(..., pattern=r"^sha256:[0-9a-f]{64}$")
+    previous_hash: Optional[str] = Field(None, pattern=r"^sha256:[0-9a-f]{64}$")
+    payload_json: str
+    bundle_path: Optional[str] = None
+
+
+@app.post("/snapshot/save")
+def snapshot_save(body: SnapshotSaveBody) -> dict:
+    """Persist a signed snapshot referenced by hash. Idempotent at the SQL
+    level via UNIQUE(hash) — second save with the same hash returns 409."""
+    try:
+        snap_id = db.save_snapshot(
+            bundle_hash=body.hash,
+            previous_hash=body.previous_hash,
+            payload_json=body.payload_json,
+            bundle_path=body.bundle_path,
+        )
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            raise HTTPException(status_code=409, detail="snapshot already saved")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "id": snap_id, "hash": body.hash}
+
+
+@app.get("/snapshots")
+def snapshots_list(limit: int = 100) -> list[dict]:
+    """Newest-first history. payload_json is NOT included — that's local-only
+    state used for chain validation."""
+    return db.list_snapshots(limit)
 
 
 @app.get("/export")

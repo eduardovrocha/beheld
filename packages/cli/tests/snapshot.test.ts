@@ -1,0 +1,302 @@
+import { test, expect, describe, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { payloadHash, payloadToCanonical } from "../src/bundle/canonical";
+import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../src/bundle/types";
+
+// ── shared fixture payload (matches the contract test in bundle.test.ts) ────
+
+function fixturePayload(opts: Partial<BundlePayload> = {}): BundlePayload {
+  return {
+    created_at: "2026-05-14T03:00:00+00:00",
+    devprofile_version: "0.2.0",
+    previous_hash: null,
+    scores: {
+      date: "2026-05-13",
+      prompt_quality: 50,
+      test_maturity: 20,
+      tech_breadth: 40,
+      growth_rate: 30,
+      overall: 35,
+      sessions_analyzed: 30,
+    },
+    signals: {
+      platforms: { docker: 10 },
+      ecosystems: { rails: 8 },
+      workflow_distribution: { tdd: 0.2 },
+      project_categories: { saas_b2b: 1.0 },
+      workflow_metrics: {
+        test_after_ratio: 0.6,
+        test_first_ratio: 0,
+        median_test_delay_min: 0,
+        edit_to_test_lag_min: 0,
+        bash_to_read_ratio: 0,
+        prompt_avg_chars: 0,
+        prompt_median_chars: 0,
+        session_avg_duration_min: 0,
+        tool_variety_avg: 0,
+        ecosystem_concentration: 0,
+      },
+      sessions_analyzed: 30,
+      period_days: 30,
+    },
+    ...opts,
+  };
+}
+
+// ── mock engine: serves /snapshot/payload, /snapshot/save, /snapshots ───────
+
+const MOCK_PORT = 17400;
+let server: ReturnType<typeof Bun.serve>;
+let workDir: string;
+let savedEnvDir: string | undefined;
+let savedEnvUrl: string | undefined;
+let payloadResponder: () => Response;
+let saveBodies: unknown[];
+let savedHashes: string[];
+let listResponder: () => Response;
+
+beforeAll(async () => {
+  savedEnvUrl = process.env.DEVPROFILE_ENGINE_URL;
+  process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  server = Bun.serve({
+    port: MOCK_PORT,
+    hostname: "127.0.0.1",
+    fetch: async (req) => {
+      const url = new URL(req.url);
+      if (req.method === "POST" && url.pathname === "/snapshot/payload") {
+        return payloadResponder();
+      }
+      if (req.method === "POST" && url.pathname === "/snapshot/save") {
+        const body = await req.json();
+        saveBodies.push(body);
+        savedHashes.push((body as { hash: string }).hash);
+        return new Response(JSON.stringify({ ok: true, id: 1, hash: (body as { hash: string }).hash }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (req.method === "GET" && url.pathname === "/snapshots") {
+        return listResponder();
+      }
+      return new Response("Not Found", { status: 404 });
+    },
+  });
+  await Bun.sleep(20);
+});
+
+afterAll(() => {
+  server.stop(true);
+  if (savedEnvUrl === undefined) delete process.env.DEVPROFILE_ENGINE_URL;
+  else process.env.DEVPROFILE_ENGINE_URL = savedEnvUrl;
+});
+
+beforeEach(() => {
+  workDir = mkdtempSync(join(tmpdir(), "devprofile-snap-"));
+  savedEnvDir = process.env.DEVPROFILE_DATA_DIR;
+  process.env.DEVPROFILE_DATA_DIR = workDir;
+  saveBodies = [];
+  savedHashes = [];
+  payloadResponder = () =>
+    new Response(JSON.stringify(fixturePayload()), {
+      headers: { "Content-Type": "application/json" },
+    });
+  listResponder = () =>
+    new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+});
+
+afterEach(() => {
+  if (savedEnvDir === undefined) delete process.env.DEVPROFILE_DATA_DIR;
+  else process.env.DEVPROFILE_DATA_DIR = savedEnvDir;
+  rmSync(workDir, { recursive: true, force: true });
+});
+
+// ── snapshot generation ─────────────────────────────────────────────────────
+
+describe("snapshotCommand — generate", () => {
+  test("writes a .dpbundle file under ~/.devprofile/snapshots/", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=gen1");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    expect(existsSync(snapDir)).toBe(true);
+    const files = readdirSync(snapDir).filter((f) => f.endsWith(".dpbundle"));
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/^\d{8}_[0-9a-f]{8}\.dpbundle$/);
+  });
+
+  test("snapshots directory has 0700 permissions", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=gen-perms");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    expect(statSync(snapDir).mode & 0o777).toBe(0o700);
+  });
+
+  test("bundle has version, payload, hash, signature, public_key", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=gen2");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.version).toBe(BUNDLE_VERSION);
+    expect(bundle.payload).toBeDefined();
+    expect(bundle.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(bundle.signature).toMatch(/^ed25519:[0-9a-f]{128}$/); // 64 bytes hex
+    expect(bundle.public_key).toMatch(/^ed25519:[A-Za-z0-9_-]+$/);
+  });
+
+  test("hash matches recomputed canonical payload hash (determinism)", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=gen3");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    const expected = await payloadHash(bundle.payload);
+    expect(bundle.hash).toBe(expected);
+  });
+
+  test("signature verifies against the embedded public_key", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=gen4");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+
+    const pubX = bundle.public_key.replace(/^ed25519:/, "");
+    const pubKey = await crypto.subtle.importKey(
+      "jwk",
+      { kty: "OKP", crv: "Ed25519", x: pubX },
+      { name: "Ed25519" },
+      true,
+      ["verify"],
+    );
+    const sigHex = bundle.signature.replace(/^ed25519:/, "");
+    const sigBytes = Uint8Array.from(sigHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+    const canonical = new TextEncoder().encode(payloadToCanonical(bundle.payload));
+    const ok = await crypto.subtle.verify({ name: "Ed25519" }, pubKey, sigBytes, canonical);
+    expect(ok).toBe(true);
+  });
+
+  test("--output writes a second copy", async () => {
+    const out = join(workDir, "elsewhere.dpbundle");
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=out");
+    await snapshotCommand({ output: out });
+    expect(existsSync(out)).toBe(true);
+    // Both copies have identical content
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const primary = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    expect(readFileSync(join(snapDir, primary), "utf8")).toBe(readFileSync(out, "utf8"));
+  });
+
+  test("registers the snapshot with /snapshot/save (with bundle_path)", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=save1");
+    await snapshotCommand();
+    expect(saveBodies.length).toBe(1);
+    const body = saveBodies[0] as Record<string, unknown>;
+    expect(body.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(typeof body.payload_json).toBe("string");
+    expect(typeof body.bundle_path).toBe("string");
+    expect((body.bundle_path as string).endsWith(".dpbundle")).toBe(true);
+  });
+
+  test("filename uses YYYYMMDD_<hash8>.dpbundle convention", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=fname");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    expect(file.startsWith("20260514_")).toBe(true);
+  });
+
+  test("auto-generates keys if missing (init hook fallback)", async () => {
+    // workDir starts empty, no keys present
+    const keysDir = join(workDir, ".devprofile", "keys");
+    expect(existsSync(keysDir)).toBe(false);
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=ensurekeys");
+    await snapshotCommand();
+    expect(existsSync(join(keysDir, "private.jwk"))).toBe(true);
+    expect(existsSync(join(keysDir, "public.jwk"))).toBe(true);
+  });
+});
+
+// ── error paths ─────────────────────────────────────────────────────────────
+
+describe("snapshotCommand — error handling", () => {
+  test("exits 1 with friendly message on engine 409 (no scores yet)", async () => {
+    payloadResponder = () =>
+      new Response(JSON.stringify({ detail: "no scores available" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=409");
+    let exitCode: number | null = null;
+    const realExit = process.exit;
+    process.exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("EXIT");
+    }) as typeof process.exit;
+    try {
+      await snapshotCommand();
+    } catch (e) {
+      expect((e as Error).message).toBe("EXIT");
+    } finally {
+      process.exit = realExit;
+    }
+    expect(exitCode).toBe(1);
+  });
+});
+
+// ── list ────────────────────────────────────────────────────────────────────
+
+describe("snapshotListCommand", () => {
+  test("prints 'Nenhum snapshot' when list is empty", async () => {
+    const { snapshotListCommand } = await import("../src/commands/snapshot?v=list-empty");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await snapshotListCommand();
+    } finally {
+      console.log = realLog;
+    }
+    expect(logs.join("\n")).toContain("Nenhum snapshot");
+  });
+
+  test("prints entries with date, short hash and bundle path", async () => {
+    listResponder = () =>
+      new Response(
+        JSON.stringify([
+          {
+            id: 2,
+            hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            previous_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            created_at: "2026-05-14T03:00:00+00:00",
+            bundle_path: "/tmp/b.dpbundle",
+          },
+          {
+            id: 1,
+            hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            previous_hash: null,
+            created_at: "2026-05-14T02:00:00+00:00",
+            bundle_path: "/tmp/a.dpbundle",
+          },
+        ]),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    const { snapshotListCommand } = await import("../src/commands/snapshot?v=list-rows");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await snapshotListCommand();
+    } finally {
+      console.log = realLog;
+    }
+    const out = logs.join("\n");
+    expect(out).toContain("2 snapshot");
+    expect(out).toContain("bbbbbbbbbbbb");      // newest short hash
+    expect(out).toContain("aaaaaaaaaaaa");      // genesis short hash
+    expect(out).toContain("/tmp/a.dpbundle");
+    expect(out).toContain("•");                  // genesis marker
+    expect(out).toContain("→");                  // linked marker
+  });
+});

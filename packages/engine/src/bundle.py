@@ -24,8 +24,9 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from models import (
+    BundleL1Section,
+    BundleL2Section,
     BundlePayload,
-    BundleSignals,
     Scores,
     WorkflowMetrics,
 )
@@ -132,7 +133,7 @@ def build_bundle_payload(
     latest_snapshot = db.get_latest_snapshot()
     previous_hash = latest_snapshot["hash"] if latest_snapshot else None
 
-    signals = BundleSignals(
+    l2 = BundleL2Section(
         platforms=platforms,
         ecosystems=ecosystems,
         workflow_distribution=wf_dist,
@@ -142,10 +143,35 @@ def build_bundle_payload(
         period_days=period_days,
     )
 
+    l1 = _build_l1_section(db)
+
     return BundlePayload(
         created_at=datetime.now(timezone.utc).isoformat(),
         devprofile_version=devprofile_version,
         previous_hash=previous_hash,
         scores=scores,
-        signals=signals,
+        l1=l1,
+        l2=l2,
+    )
+
+
+def _build_l1_section(db) -> BundleL1Section:
+    """Aggregate L1 signals into the canonical bundle section.
+
+    Returns an empty section (zeros / empty lists / null timestamps) when no
+    repository has been imported — the L1 key is always present in v2 payloads.
+    Privacy: no URLs, names, or paths — only root commit hashes."""
+    summary = db.get_l1_summary()
+    repos = db.get_l1_repositories()
+    # Sorted so the canonical JSON is deterministic across runs.
+    root_hashes = sorted(r["root_commit_hash"] for r in repos)
+    return BundleL1Section(
+        total_repos=int(summary.get("total_repos") or 0),
+        total_commits=int(summary.get("total_commits") or 0),
+        earliest_commit=summary.get("earliest_commit"),
+        latest_commit=summary.get("latest_commit"),
+        ecosystems=dict(summary.get("ecosystems_merged") or {}),
+        platforms=dict(summary.get("platforms_merged") or {}),
+        avg_test_ratio=float(summary.get("avg_test_ratio") or 0.0),
+        root_commit_hashes=root_hashes,
     )

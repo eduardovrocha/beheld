@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { summarize, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
+import { composition, summarize, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
 import type { Bundle } from "../bundle/types";
 
 interface VerifyOptions {
@@ -67,6 +67,20 @@ export async function verifyCommand(
   console.log(`    ${mark(result.checks.hash.ok)} hash      ${result.checks.hash.reason ?? ""}`);
   console.log(`    ${mark(result.checks.signature.ok)} signature ${result.checks.signature.reason ?? ""}`);
 
+  // L1 / L2 section status (Phase 6 / F6.8).
+  const l1 = result.checks.l1_section;
+  const l2 = result.checks.l2_section;
+  if (l1.ok) {
+    console.log(`    ${mark(true)} L1        ${l1.repo_count ?? 0} repositórios`);
+  } else {
+    console.log(`    \x1b[33m⚠\x1b[0m L1        ${l1.reason ?? "ausente"}`);
+  }
+  if (l2.ok) {
+    console.log(`    ${mark(true)} L2        ${l2.session_count ?? 0} sessões`);
+  } else {
+    console.log(`    ${mark(false)} L2        ${l2.reason ?? "ausente"}`);
+  }
+
   let chainOk = true;
   if (opts.chain && result.ok) {
     const chainResult = await verifyChain(raw as Bundle, localResolver());
@@ -81,8 +95,11 @@ export async function verifyCommand(
   }
 
   if (result.ok) {
+    const comp = composition((raw as Bundle).payload as unknown as Record<string, unknown>);
     console.log("");
     console.log(`  ${summarize((raw as Bundle).payload)}`);
+    console.log(`    Base histórica:       ${comp.base}`);
+    console.log(`    Trajetória observada: ${comp.trajectory}`);
   }
   console.log("");
 

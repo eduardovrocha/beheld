@@ -215,13 +215,27 @@ class CoachPayload:
 # commit — the cross-language canonical hash test (test_bundle_contract) catches
 # drift.
 
-BUNDLE_VERSION = "1"
+BUNDLE_VERSION = "2"
 
 
 @dataclass(frozen=True)
-class BundleSignals:
-    """Aggregate signals over the snapshot period. All values are scalars or
-    flat dicts of scalars — canonical JSON ordering is trivial."""
+class BundleL1Section:
+    """Git-history signals (Phase 6 / L1). Empty values when no repository has
+    been imported — never absent from a v2 payload."""
+    total_repos: int
+    total_commits: int
+    earliest_commit: Optional[str]
+    latest_commit: Optional[str]
+    ecosystems: dict[str, bool]
+    platforms: dict[str, bool]
+    avg_test_ratio: float
+    root_commit_hashes: list[str]
+
+
+@dataclass(frozen=True)
+class BundleL2Section:
+    """Session signals (Phase 2–5 / L2). Same shape as the legacy
+    `BundleSignals` — the rename reflects the new layered model."""
     platforms: dict[str, int]
     ecosystems: dict[str, int]
     workflow_distribution: dict[str, float]
@@ -231,16 +245,24 @@ class BundleSignals:
     period_days: int
 
 
+# Back-compat alias for any external code that imported the old name.
+BundleSignals = BundleL2Section
+
+
 @dataclass(frozen=True)
 class BundlePayload:
     """The signed half of a .dpbundle. SHA-256 of canonical_json(payload) is
     embedded in the parent Bundle.hash; that same canonical_json is what
-    Ed25519 signs."""
+    Ed25519 signs.
+
+    Schema v2 (Phase 6): `signals` was replaced by separate `l1` and `l2`
+    sections so verifiers can inspect each layer independently."""
     created_at: str
     devprofile_version: str
     previous_hash: Optional[str]
     scores: Scores
-    signals: BundleSignals
+    l1: BundleL1Section
+    l2: BundleL2Section
 
 
 @dataclass(frozen=True)

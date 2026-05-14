@@ -42,7 +42,17 @@ function fixturePayload(previousHash: string | null = null): BundlePayload {
       prompt_quality: 50, test_maturity: 20, tech_breadth: 40,
       growth_rate: 30, overall: 35, sessions_analyzed: 30,
     },
-    signals: {
+    l1: {
+      total_repos: 0,
+      total_commits: 0,
+      earliest_commit: null,
+      latest_commit: null,
+      ecosystems: {},
+      platforms: {},
+      avg_test_ratio: 0,
+      root_commit_hashes: [],
+    },
+    l2: {
       platforms: { docker: 10 },
       ecosystems: { rails: 8 },
       workflow_distribution: { tdd: 0.2 },
@@ -377,5 +387,104 @@ describe("verifyCommand — file I/O", () => {
     expect(out.replace(/\x1b\[[0-9;]*m/g, "")).toContain("✓ hash");
     expect(out.replace(/\x1b\[[0-9;]*m/g, "")).toContain("✓ signature");
     expect(out).toContain("score 35/100");
+  });
+});
+
+// ── F6.8: L1 / L2 validation in verifyBundle ────────────────────────────────
+
+describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
+  test("reports L1 ok with repo_count when present", async () => {
+    const payload = fixturePayload();
+    payload.l1 = {
+      total_repos: 7,
+      total_commits: 42,
+      earliest_commit: null,
+      latest_commit: null,
+      ecosystems: {},
+      platforms: {},
+      avg_test_ratio: 0,
+      root_commit_hashes: [],
+    };
+    const bundle = await buildValidBundle(payload);
+    const result = await verifyBundle(bundle);
+    expect(result.checks.l1_section.ok).toBe(true);
+    expect(result.checks.l1_section.repo_count).toBe(7);
+    expect(result.checks.l2_section.ok).toBe(true);
+    expect(result.checks.l2_section.session_count).toBe(30);
+  });
+
+  test("warns (does not fail) when L1 section is absent", async () => {
+    // Build a v1-style payload manually (omit l1, use legacy `signals` key).
+    const v1Payload = {
+      created_at: "2026-05-14T03:00:00+00:00",
+      devprofile_version: "0.2.0",
+      previous_hash: null,
+      scores: {
+        date: "2026-05-13",
+        prompt_quality: 50, test_maturity: 20, tech_breadth: 40,
+        growth_rate: 30, overall: 35, sessions_analyzed: 30,
+      },
+      signals: {
+        platforms: {}, ecosystems: {}, workflow_distribution: {},
+        project_categories: {},
+        workflow_metrics: {
+          test_after_ratio: 0, test_first_ratio: 0,
+          median_test_delay_min: 0, edit_to_test_lag_min: 0,
+          bash_to_read_ratio: 0, prompt_avg_chars: 0,
+          prompt_median_chars: 0, session_avg_duration_min: 0,
+          tool_variety_avg: 0, ecosystem_concentration: 0,
+        },
+        sessions_analyzed: 30, period_days: 30,
+      },
+    };
+    const bundle = await buildValidBundle(v1Payload as unknown as BundlePayload);
+    const result = await verifyBundle(bundle);
+    expect(result.ok).toBe(true);
+    expect(result.checks.l1_section.ok).toBe(false);
+    expect(result.warnings.some((w) => w.includes("L1 ausente"))).toBe(true);
+    // L2 still parses via the legacy `signals` key.
+    expect(result.checks.l2_section.ok).toBe(true);
+    expect(result.checks.l2_section.session_count).toBe(30);
+  });
+
+  test("verifyCommand surfaces ⚠ L1 line when section is missing", async () => {
+    const v1Payload = {
+      created_at: "2026-05-14T03:00:00+00:00",
+      devprofile_version: "0.2.0",
+      previous_hash: null,
+      scores: {
+        date: "2026-05-13",
+        prompt_quality: 50, test_maturity: 20, tech_breadth: 40,
+        growth_rate: 30, overall: 35, sessions_analyzed: 30,
+      },
+      signals: {
+        platforms: {}, ecosystems: {}, workflow_distribution: {},
+        project_categories: {},
+        workflow_metrics: {
+          test_after_ratio: 0, test_first_ratio: 0,
+          median_test_delay_min: 0, edit_to_test_lag_min: 0,
+          bash_to_read_ratio: 0, prompt_avg_chars: 0,
+          prompt_median_chars: 0, session_avg_duration_min: 0,
+          tool_variety_avg: 0, ecosystem_concentration: 0,
+        },
+        sessions_analyzed: 30, period_days: 30,
+      },
+    };
+    const bundle = await buildValidBundle(v1Payload as unknown as BundlePayload);
+    const file = join(workDir, "v1.dpbundle");
+    writeFileSync(file, JSON.stringify(bundle, null, 2));
+
+    const { verifyCommand } = await import("../src/commands/verify?v=verify-cmd-l1");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await verifyCommand(file);
+    } finally {
+      console.log = realLog;
+    }
+    const out = logs.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    expect(out).toContain("⚠ L1");
+    expect(out).toContain("Seção L1 ausente");
   });
 });

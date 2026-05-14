@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../bundle/types";
 import { payloadHash, payloadToCanonical } from "../bundle/canonical";
+import { composition } from "../bundle/verify";
 import { renderQr, uploadBundle } from "../bundle/share";
 import {
   ensureKeys,
@@ -161,6 +162,14 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   if (desktopPath) console.log(`    desktop:      ${desktopPath}`);
   if (outputPath) console.log(`    cópia:        ${outputPath}`);
   console.log(`    assinado por: ${fp}`);
+
+  // L1 / L2 composition surfaced from the just-signed payload (Phase 6 / F6.8).
+  const comp = composition(payload as unknown as Record<string, unknown>);
+  console.log("");
+  console.log("  Perfil capturado:");
+  console.log(`    Base histórica:       ${comp.base}`);
+  console.log(`    Trajetória observada: ${comp.trajectory}`);
+
   if (!saveOk) {
     console.log("");
     console.log("  ⚠️  Bundle criado no disco mas não registrado na chain.");

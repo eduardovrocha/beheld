@@ -20,8 +20,9 @@ from bundle import canonical_json, payload_hash, payload_to_canonical
 from models import (
     BUNDLE_VERSION,
     Bundle,
+    BundleL1Section,
+    BundleL2Section,
     BundlePayload,
-    BundleSignals,
     Scores,
     WorkflowMetrics,
 )
@@ -40,7 +41,17 @@ def _fixture_payload() -> BundlePayload:
             prompt_quality=50, test_maturity=20, tech_breadth=40,
             growth_rate=30, overall=35, sessions_analyzed=30,
         ),
-        signals=BundleSignals(
+        l1=BundleL1Section(
+            total_repos=2,
+            total_commits=1200,
+            earliest_commit="2023-01-01T00:00:00+00:00",
+            latest_commit="2026-05-13T00:00:00+00:00",
+            ecosystems={"python": True, "rails": True},
+            platforms={"docker": True, "github": True},
+            avg_test_ratio=0.42,
+            root_commit_hashes=["a" * 40, "b" * 40],
+        ),
+        l2=BundleL2Section(
             platforms={"docker": 10, "github": 5},
             ecosystems={"rails": 8, "react": 4},
             workflow_distribution={"tdd": 0.2, "test-after": 0.6},
@@ -57,11 +68,15 @@ def _fixture_payload() -> BundlePayload:
 #   PYTHONPATH=src python -c "..."  (see commit message of the change)
 EXPECTED_CANONICAL = (
     '{"created_at":"2026-05-14T00:00:00+00:00","devprofile_version":"0.2.0",'
-    '"previous_hash":null,'
-    '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,'
-    '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,'
-    '"test_maturity":20},'
-    '"signals":{"ecosystems":{"rails":8,"react":4},"period_days":30,'
+    '"l1":{"avg_test_ratio":0.42,'
+    '"earliest_commit":"2023-01-01T00:00:00+00:00",'
+    '"ecosystems":{"python":true,"rails":true},'
+    '"latest_commit":"2026-05-13T00:00:00+00:00",'
+    '"platforms":{"docker":true,"github":true},'
+    '"root_commit_hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+    '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],'
+    '"total_commits":1200,"total_repos":2},'
+    '"l2":{"ecosystems":{"rails":8,"react":4},"period_days":30,'
     '"platforms":{"docker":10,"github":5},"project_categories":{"saas_b2b":1},'
     '"sessions_analyzed":30,'
     '"workflow_distribution":{"tdd":0.2,"test-after":0.6},'
@@ -69,17 +84,21 @@ EXPECTED_CANONICAL = (
     '"edit_to_test_lag_min":0,"median_test_delay_min":0,'
     '"prompt_avg_chars":0,"prompt_median_chars":0,'
     '"session_avg_duration_min":0,"test_after_ratio":0.6,'
-    '"test_first_ratio":0,"tool_variety_avg":0}}}'
+    '"test_first_ratio":0,"tool_variety_avg":0}},'
+    '"previous_hash":null,'
+    '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,'
+    '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,'
+    '"test_maturity":20}}'
 )
 
-EXPECTED_HASH = "sha256:97900282ff61e4d0a05c41c33b44ad57787096d1fdcfc51b6ffbb1a48c25d341"
+EXPECTED_HASH = "sha256:60168f63bb60ff60bcbfb382733f2da1813284ee75ab03459c02ca6cd7abb509"
 
 
 # ── canonical_json basics ────────────────────────────────────────────────────
 
 
-def test_bundle_version_is_one() -> None:
-    assert BUNDLE_VERSION == "1"
+def test_bundle_version_is_two() -> None:
+    assert BUNDLE_VERSION == "2"
 
 
 def test_canonical_sorts_keys_alphabetically() -> None:
@@ -134,7 +153,7 @@ def test_fixture_canonical_matches_expected() -> None:
     verify in the Rails verification page (Phase 5 G)."""
     actual = payload_to_canonical(_fixture_payload())
     assert actual == EXPECTED_CANONICAL
-    assert len(actual) == 708
+    assert len(actual) == 1052
 
 
 def test_fixture_hash_matches_expected() -> None:
@@ -166,7 +185,8 @@ def test_changing_any_field_changes_hash() -> None:
             overall=base.scores.overall,
             sessions_analyzed=base.scores.sessions_analyzed,
         ),
-        signals=base.signals,
+        l1=base.l1,
+        l2=base.l2,
     )
     assert payload_hash(base) != payload_hash(tampered)
 
@@ -187,7 +207,7 @@ def test_bundle_wrapper_serializes_with_payload_inside() -> None:
         public_key="ed25519:beef",
     )
     out = json.loads(canonical_json(dataclasses.asdict(bundle)))
-    assert out["version"] == "1"
+    assert out["version"] == "2"
     assert out["hash"] == EXPECTED_HASH
     assert out["signature"] == "ed25519:dead"
     assert out["public_key"] == "ed25519:beef"

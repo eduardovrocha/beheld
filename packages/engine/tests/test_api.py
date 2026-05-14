@@ -599,15 +599,16 @@ def test_snapshot_payload_builds_valid_shape(
     assert "devprofile_version" in data
     assert "previous_hash" in data
     assert "scores" in data
-    assert "signals" in data
-    # signals contains the 7 documented fields
-    sig = data["signals"]
+    assert "l1" in data
+    assert "l2" in data
+    # l2 contains the same 7 fields the old `signals` did
+    l2 = data["l2"]
     for key in (
         "platforms", "ecosystems", "workflow_distribution",
         "project_categories", "workflow_metrics",
         "sessions_analyzed", "period_days",
     ):
-        assert key in sig
+        assert key in l2
     # previous_hash is null for the first ever snapshot
     assert data["previous_hash"] is None
 
@@ -625,7 +626,7 @@ def test_snapshot_payload_carries_persisted_workflow_metrics(
         sessions_analyzed=10,
     )
     data = client.post("/snapshot/payload").json()
-    wm = data["signals"]["workflow_metrics"]
+    wm = data["l2"]["workflow_metrics"]
     assert wm["test_after_ratio"] == 0.78
     assert wm["bash_to_read_ratio"] == 4.2
 

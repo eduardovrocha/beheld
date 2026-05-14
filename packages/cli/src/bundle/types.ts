@@ -5,7 +5,7 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-export const BUNDLE_VERSION = "1";
+export const BUNDLE_VERSION = "2";
 
 export interface BundleScores {
   date: string;
@@ -30,7 +30,22 @@ export interface BundleWorkflowMetrics {
   ecosystem_concentration: number;
 }
 
-export interface BundleSignals {
+/** L1 — git-history signals (Phase 6). Always present in v2 payloads;
+ *  empty (zeros / empty lists / null timestamps) when no repo has been imported. */
+export interface BundleL1Section {
+  total_repos: number;
+  total_commits: number;
+  earliest_commit: string | null;
+  latest_commit: string | null;
+  ecosystems: Record<string, boolean>;
+  platforms: Record<string, boolean>;
+  avg_test_ratio: number;
+  root_commit_hashes: string[];
+}
+
+/** L2 — session signals (Phase 2–5). Same shape as the legacy `signals`
+ *  field; renamed to surface the layered model. */
+export interface BundleL2Section {
   platforms: Record<string, number>;
   ecosystems: Record<string, number>;
   workflow_distribution: Record<string, number>;
@@ -40,12 +55,26 @@ export interface BundleSignals {
   period_days: number;
 }
 
+/** Back-compat alias. New code should use BundleL2Section. */
+export type BundleSignals = BundleL2Section;
+
 export interface BundlePayload {
   created_at: string;
   devprofile_version: string;
   previous_hash: string | null;
   scores: BundleScores;
-  signals: BundleSignals;
+  l1: BundleL1Section;
+  l2: BundleL2Section;
+}
+
+/** Legacy v1 payload shape — only used by `verifyBundle` to detect bundles
+ *  generated before Phase 6 and emit a friendly warning. */
+export interface BundlePayloadV1 {
+  created_at: string;
+  devprofile_version: string;
+  previous_hash: string | null;
+  scores: BundleScores;
+  signals: BundleL2Section;
 }
 
 export interface Bundle {

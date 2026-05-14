@@ -21,7 +21,13 @@ function dummyBundle(overrides: Partial<Bundle> = {}): Bundle {
         prompt_quality: 50, test_maturity: 20, tech_breadth: 40,
         growth_rate: 30, overall: 35, sessions_analyzed: 30,
       },
-      signals: {
+      l1: {
+        total_repos: 0, total_commits: 0,
+        earliest_commit: null, latest_commit: null,
+        ecosystems: {}, platforms: {},
+        avg_test_ratio: 0, root_commit_hashes: [],
+      },
+      l2: {
         platforms: {}, ecosystems: {}, workflow_distribution: {},
         project_categories: {},
         workflow_metrics: {

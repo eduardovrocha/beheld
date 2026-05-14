@@ -22,7 +22,17 @@ function fixturePayload(opts: Partial<BundlePayload> = {}): BundlePayload {
       overall: 35,
       sessions_analyzed: 30,
     },
-    signals: {
+    l1: {
+      total_repos: 0,
+      total_commits: 0,
+      earliest_commit: null,
+      latest_commit: null,
+      ecosystems: {},
+      platforms: {},
+      avg_test_ratio: 0,
+      root_commit_hashes: [],
+    },
+    l2: {
       platforms: { docker: 10 },
       ecosystems: { rails: 8 },
       workflow_distribution: { tdd: 0.2 },
@@ -455,5 +465,87 @@ describe("snapshotListCommand", () => {
     expect(out).toContain("/tmp/a.dpbundle");
     expect(out).toContain("•");                  // genesis marker
     expect(out).toContain("→");                  // linked marker
+  });
+});
+
+// ── F6.8: L1/L2 composition surfaced by `devprofile snapshot` ────────────────
+
+describe("snapshotCommand — L1/L2 composition output", () => {
+  test("shows the composition block (Base histórica + Trajetória observada)", async () => {
+    const originalLog = console.log;
+    const captured: string[] = [];
+    console.log = (...args) => captured.push(args.join(" "));
+    try {
+      const { snapshotCommand } = await import("../src/commands/snapshot?v=compose1");
+      await snapshotCommand();
+    } finally {
+      console.log = originalLog;
+    }
+    const out = captured.join("\n");
+    expect(out).toContain("Perfil capturado:");
+    expect(out).toContain("Base histórica:");
+    expect(out).toContain("Trajetória observada:");
+  });
+
+  test("falls back to 'não disponível' when L1 is empty", async () => {
+    // The default mock payload has total_repos = 0 → empty L1.
+    const originalLog = console.log;
+    const captured: string[] = [];
+    console.log = (...args) => captured.push(args.join(" "));
+    try {
+      const { snapshotCommand } = await import("../src/commands/snapshot?v=compose2");
+      await snapshotCommand();
+    } finally {
+      console.log = originalLog;
+    }
+    const out = captured.join("\n");
+    expect(out).toContain("não disponível (execute devprofile import)");
+  });
+
+  test("shows repo and commit counts when L1 has data", async () => {
+    // Swap in a payload with populated L1.
+    const previousResponder = payloadResponder;
+    payloadResponder = () => {
+      const populated = fixturePayload({
+        l1: {
+          total_repos: 12,
+          total_commits: 4832,
+          earliest_commit: "2022-01-01T00:00:00+00:00",
+          latest_commit: "2026-05-10T00:00:00+00:00",
+          ecosystems: { python: true, rails: true },
+          platforms: { docker: true },
+          avg_test_ratio: 0.4,
+          root_commit_hashes: ["a".repeat(40), "b".repeat(40)],
+        },
+      });
+      return new Response(JSON.stringify(populated), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const originalLog = console.log;
+    const captured: string[] = [];
+    console.log = (...args) => captured.push(args.join(" "));
+    try {
+      const { snapshotCommand } = await import("../src/commands/snapshot?v=compose3");
+      await snapshotCommand();
+    } finally {
+      console.log = originalLog;
+      payloadResponder = previousResponder;
+    }
+    const out = captured.join("\n");
+    expect(out).toContain("12 repositórios");
+    expect(out).toContain("commits");
+  });
+
+  test("bundle on disk has separate l1 and l2 keys", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=compose4");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.payload).toHaveProperty("l1");
+    expect(bundle.payload).toHaveProperty("l2");
+    expect(bundle.payload).not.toHaveProperty("signals");
   });
 });

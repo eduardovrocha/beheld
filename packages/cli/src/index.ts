@@ -58,7 +58,18 @@ program
   .option("--json", "Output as JSON")
   .option("--scores-only", "Output scores as space-separated numbers")
   .option("--refresh", "Process pending events before displaying profile")
-  .action(async (opts: { json?: boolean; scoresOnly?: boolean; refresh?: boolean }) => {
+  .option("--coach", "Show coaching context (patterns + suggestions) instead of full profile")
+  .option(
+    "--session-hint <phase>",
+    "Hint about current session phase (feature_work | debug | refactor | exploration | unknown)",
+  )
+  .action(async (opts: {
+    json?: boolean;
+    scoresOnly?: boolean;
+    refresh?: boolean;
+    coach?: boolean;
+    sessionHint?: string;
+  }) => {
     const { viewCommand } = await import("./commands/view");
     await viewCommand(opts);
   });

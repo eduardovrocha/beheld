@@ -83,3 +83,43 @@ export async function engineStatus(): Promise<EngineStatus | null> {
 export async function readiness(): Promise<EngineReadiness | null> {
   return get<EngineReadiness>("/profile/readiness");
 }
+
+export interface CoachPattern {
+  id: string;
+  label: string;
+  evidence: string;
+  metric: Record<string, number>;
+  confidence: number;
+  trend_30d: string;
+  severity: string;
+  applies_to_current_session: boolean;
+}
+
+export interface CoachPayload {
+  version: number;
+  as_of: string;
+  data_freshness: "live" | "cache" | "insufficient";
+  scores: {
+    overall: number;
+    sessions_analyzed: number;
+    [k: string]: unknown;
+  };
+  context_for_session: {
+    current_project_category: string;
+    ecosystems_recent: string[];
+    session_phase_hint: string;
+  };
+  patterns: CoachPattern[];
+  coaching_guidance: {
+    tone: string;
+    must: string[];
+    must_not: string[];
+    good_example: string;
+    bad_example: string;
+  };
+  suggested_followups: string[];
+}
+
+export async function coach(sessionHint = "unknown"): Promise<CoachPayload | null> {
+  return get<CoachPayload>(`/coach?session_hint=${encodeURIComponent(sessionHint)}`);
+}

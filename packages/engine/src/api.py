@@ -290,6 +290,28 @@ def coach(session_hint: str = "unknown") -> dict:
     return dataclasses.asdict(payload)
 
 
+@app.get("/snapshot/latest")
+def snapshot_latest() -> dict:
+    """Tip of the snapshot chain — consumed by `devprofile snapshot` to set
+    `previous_hash` on the next bundle. Returns nulls if no snapshot exists
+    (genesis case)."""
+    latest = db.get_latest_snapshot()
+    if latest is None:
+        return {"hash": None, "previous_hash": None, "created_at": None}
+    return {
+        "hash": latest["hash"],
+        "previous_hash": latest["previous_hash"],
+        "created_at": latest["created_at"],
+    }
+
+
+@app.get("/snapshot/chain/status")
+def snapshot_chain_status() -> dict:
+    """Walks the entire chain detecting tampering. Diagnostic endpoint —
+    consumed by `devprofile verify --chain` and future health checks."""
+    return db.validate_chain()
+
+
 @app.get("/export")
 def export_data() -> dict:
     scores = db.get_current_scores()

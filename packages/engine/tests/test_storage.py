@@ -30,6 +30,7 @@ def test_init_schema_creates_tables(db: DevProfileDB) -> None:
         "profile",
         "workflow_metrics",
         "schema_version",
+        "snapshots",
     } <= tables
 
 
@@ -376,6 +377,145 @@ def test_pre_v2_db_gains_workflow_metrics_table(db_path: Path) -> None:
         assert "workflow_metrics" in tables
     finally:
         db.close()
+
+
+# ── snapshots (chain) ─────────────────────────────────────────────────────────
+
+
+import hashlib
+
+
+def _hash_of(payload: str) -> str:
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_snapshots_table_exists(db: DevProfileDB) -> None:
+    conn = db.connect()
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    assert "snapshots" in tables
+
+
+def test_save_and_get_latest_snapshot(db: DevProfileDB) -> None:
+    payload = '{"k":"v"}'
+    h = _hash_of(payload)
+    db.save_snapshot(h, previous_hash=None, payload_json=payload, bundle_path="/tmp/a.dpbundle")
+    latest = db.get_latest_snapshot()
+    assert latest is not None
+    assert latest["hash"] == h
+    assert latest["previous_hash"] is None
+    assert latest["bundle_path"] == "/tmp/a.dpbundle"
+
+
+def test_get_latest_snapshot_returns_none_when_empty(db: DevProfileDB) -> None:
+    assert db.get_latest_snapshot() is None
+
+
+def test_snapshots_are_returned_newest_first(db: DevProfileDB) -> None:
+    a, b, c = '{"i":1}', '{"i":2}', '{"i":3}'
+    db.save_snapshot(_hash_of(a), None, a)
+    db.save_snapshot(_hash_of(b), _hash_of(a), b)
+    db.save_snapshot(_hash_of(c), _hash_of(b), c)
+    listing = db.list_snapshots()
+    assert len(listing) == 3
+    # newest first
+    assert listing[0]["hash"] == _hash_of(c)
+    assert listing[2]["hash"] == _hash_of(a)
+
+
+def test_get_snapshot_by_hash(db: DevProfileDB) -> None:
+    payload = '{"k":"v"}'
+    h = _hash_of(payload)
+    db.save_snapshot(h, None, payload)
+    found = db.get_snapshot_by_hash(h)
+    assert found is not None
+    assert found["payload_json"] == payload
+
+
+def test_hash_uniqueness_enforced(db: DevProfileDB) -> None:
+    payload = '{"k":"v"}'
+    h = _hash_of(payload)
+    db.save_snapshot(h, None, payload)
+    with pytest.raises(Exception):  # UNIQUE constraint violation
+        db.save_snapshot(h, None, payload)
+
+
+def test_count_snapshots(db: DevProfileDB) -> None:
+    db.save_snapshot(_hash_of('{"a":1}'), None, '{"a":1}')
+    db.save_snapshot(_hash_of('{"a":2}'), _hash_of('{"a":1}'), '{"a":2}')
+    assert db.count_snapshots() == 2
+
+
+# ── chain validation ─────────────────────────────────────────────────────────
+
+
+def _build_chain(db: DevProfileDB, n: int) -> list[str]:
+    """Helper: build a valid n-link chain, return the hashes in order."""
+    hashes: list[str] = []
+    prev: Optional[str] = None
+    for i in range(n):
+        payload = '{"i":' + str(i) + '}'
+        h = _hash_of(payload)
+        db.save_snapshot(h, prev, payload)
+        hashes.append(h)
+        prev = h
+    return hashes
+
+
+from typing import Optional  # noqa: E402 (kept near use site for clarity)
+
+
+def test_validate_chain_returns_ok_for_empty_db(db: DevProfileDB) -> None:
+    result = db.validate_chain()
+    assert result["ok"] is True
+    assert result["snapshots_checked"] == 0
+    assert result["broken_at"] is None
+
+
+def test_validate_chain_returns_ok_for_well_formed_chain(db: DevProfileDB) -> None:
+    _build_chain(db, 5)
+    result = db.validate_chain()
+    assert result["ok"] is True
+    assert result["snapshots_checked"] == 5
+
+
+def test_validate_chain_detects_content_mismatch(db: DevProfileDB) -> None:
+    """F5.2.5: someone alters payload_json in place without re-hashing."""
+    hashes = _build_chain(db, 3)
+    # Tamper: change payload_json of snapshot 2 (middle one)
+    db.connect().execute(
+        "UPDATE snapshots SET payload_json = ? WHERE hash = ?",
+        ('{"tampered":true}', hashes[1]),
+    )
+    db.connect().commit()
+    result = db.validate_chain()
+    assert result["ok"] is False
+    assert result["broken_at"]["reason"] == "content_mismatch"
+    assert result["broken_at"]["hash"] == hashes[1]
+
+
+def test_validate_chain_detects_link_mismatch(db: DevProfileDB) -> None:
+    """F5.2.6: deleting an intermediate snapshot breaks the chain."""
+    hashes = _build_chain(db, 4)
+    # Remove the 2nd snapshot — 3rd's previous_hash now points to a missing one
+    db.connect().execute("DELETE FROM snapshots WHERE hash = ?", (hashes[1],))
+    db.connect().commit()
+    result = db.validate_chain()
+    assert result["ok"] is False
+    assert result["broken_at"]["reason"] == "link_mismatch"
+    # Failure happens at the snapshot whose previous_hash no longer matches the prior row
+    assert result["broken_at"]["hash"] == hashes[2]
+
+
+def test_validate_chain_detects_forged_first_snapshot(db: DevProfileDB) -> None:
+    """If the first snapshot has a non-null previous_hash, the chain is broken."""
+    payload = '{"k":"v"}'
+    db.save_snapshot(_hash_of(payload), previous_hash="sha256:dead", payload_json=payload)
+    result = db.validate_chain()
+    assert result["ok"] is False
+    assert result["broken_at"]["reason"] == "link_mismatch"
 
 
 def test_already_migrated_db_records_version_once(db_path: Path) -> None:

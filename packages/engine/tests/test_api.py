@@ -499,3 +499,69 @@ def test_coach_suggested_followups_present_in_live_mode(
     followups = resp.json()["suggested_followups"]
     assert len(followups) >= 1
     assert all(isinstance(f, str) for f in followups)
+
+
+# ── /snapshot/latest & /snapshot/chain/status (Phase 5 — F5.2.4, F5.2.5) ─────
+
+
+import hashlib as _hashlib
+
+
+def _h(payload: str) -> str:
+    return "sha256:" + _hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_snapshot_latest_returns_nulls_when_empty(client: TestClient) -> None:
+    resp = client.get("/snapshot/latest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"hash": None, "previous_hash": None, "created_at": None}
+
+
+def test_snapshot_latest_returns_tip_of_chain(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    a, b = '{"i":1}', '{"i":2}'
+    test_db.save_snapshot(_h(a), None, a)
+    test_db.save_snapshot(_h(b), _h(a), b)
+    resp = client.get("/snapshot/latest")
+    data = resp.json()
+    assert data["hash"] == _h(b)
+    assert data["previous_hash"] == _h(a)
+    assert data["created_at"]  # ISO timestamp present
+
+
+def test_snapshot_latest_never_leaks_payload_or_bundle_path(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """Endpoint is for chain tip metadata only — payload_json and bundle_path
+    stay internal."""
+    payload = '{"secret":"do not expose"}'
+    test_db.save_snapshot(_h(payload), None, payload, bundle_path="/tmp/x.dpbundle")
+    data = client.get("/snapshot/latest").json()
+    assert "payload_json" not in data
+    assert "bundle_path" not in data
+    assert "do not expose" not in str(data)
+
+
+def test_chain_status_ok_for_empty(client: TestClient) -> None:
+    data = client.get("/snapshot/chain/status").json()
+    assert data["ok"] is True
+    assert data["snapshots_checked"] == 0
+
+
+def test_chain_status_detects_tampering(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    a, b = '{"i":1}', '{"i":2}'
+    test_db.save_snapshot(_h(a), None, a)
+    test_db.save_snapshot(_h(b), _h(a), b)
+    # Tamper the payload of snapshot a without re-hashing
+    test_db.connect().execute(
+        "UPDATE snapshots SET payload_json = ? WHERE hash = ?",
+        ('{"changed":true}', _h(a)),
+    )
+    test_db.connect().commit()
+    data = client.get("/snapshot/chain/status").json()
+    assert data["ok"] is False
+    assert data["broken_at"]["reason"] == "content_mismatch"

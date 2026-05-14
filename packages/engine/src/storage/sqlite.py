@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -80,6 +81,18 @@ CREATE TABLE IF NOT EXISTS workflow_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed_at
     ON workflow_metrics(computed_at);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash TEXT NOT NULL UNIQUE,
+    previous_hash TEXT,
+    created_at TEXT NOT NULL,
+    bundle_path TEXT,
+    payload_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at);
+CREATE INDEX IF NOT EXISTS idx_snapshots_previous_hash ON snapshots(previous_hash);
 """
 
 
@@ -112,9 +125,27 @@ def _migration_2_add_workflow_metrics(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_3_add_snapshots(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT NOT NULL UNIQUE,
+            previous_hash TEXT,
+            created_at TEXT NOT NULL,
+            bundle_path TEXT,
+            payload_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at);
+        CREATE INDEX IF NOT EXISTS idx_snapshots_previous_hash ON snapshots(previous_hash);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
+    Migration(3, "add snapshots table (chain of .dpbundle)", _migration_3_add_snapshots),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
@@ -447,6 +478,94 @@ class DevProfileDB:
             "SELECT COUNT(*) AS n FROM workflow_metrics"
         ).fetchone()
         return row["n"] if row else 0
+
+    # ── snapshots (Phase 5 — .dpbundle chain) ─────────────────────────────────
+
+    def save_snapshot(
+        self,
+        bundle_hash: str,
+        previous_hash: Optional[str],
+        payload_json: str,
+        bundle_path: Optional[str] = None,
+    ) -> int:
+        """Persist a snapshot entry; returns the new row id.
+
+        `bundle_hash` is the SHA-256 of `payload_json` prefixed with 'sha256:'.
+        `previous_hash` is None only for the genesis snapshot.
+        `bundle_path` may be None if the bundle file is managed elsewhere.
+        """
+        conn = self.connect()
+        now = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            """
+            INSERT INTO snapshots (hash, previous_hash, created_at, bundle_path, payload_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (bundle_hash, previous_hash, now, bundle_path, payload_json),
+        )
+        conn.commit()
+        return cur.lastrowid or 0
+
+    def get_latest_snapshot(self) -> Optional[dict]:
+        row = self.connect().execute(
+            "SELECT * FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_snapshot_by_hash(self, bundle_hash: str) -> Optional[dict]:
+        row = self.connect().execute(
+            "SELECT * FROM snapshots WHERE hash = ?", (bundle_hash,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_snapshots(self, limit: int = 100) -> list[dict]:
+        rows = self.connect().execute(
+            "SELECT id, hash, previous_hash, created_at, bundle_path "
+            "FROM snapshots ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_snapshots(self) -> int:
+        row = self.connect().execute("SELECT COUNT(*) AS n FROM snapshots").fetchone()
+        return row["n"] if row else 0
+
+    def validate_chain(self) -> dict:
+        """Walk all snapshots in creation order; detect tampering.
+
+        Two failure modes:
+          - content_mismatch: stored `hash` doesn't match SHA-256 of `payload_json`
+            (someone changed the payload but didn't re-hash).
+          - link_mismatch:    `previous_hash` doesn't point to the prior row's hash
+            (chain link broken — snapshot inserted, removed, or reordered).
+
+        Returns {ok, snapshots_checked, broken_at?}.
+        """
+        rows = self.connect().execute(
+            "SELECT id, hash, previous_hash, payload_json "
+            "FROM snapshots ORDER BY id ASC"
+        ).fetchall()
+
+        prev_hash: Optional[str] = None
+        for i, row in enumerate(rows):
+            stored_hash = row["hash"]
+            payload = row["payload_json"]
+            computed = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if computed != stored_hash:
+                return {
+                    "ok": False,
+                    "snapshots_checked": i,
+                    "broken_at": {"hash": stored_hash, "reason": "content_mismatch"},
+                }
+            if row["previous_hash"] != prev_hash:
+                return {
+                    "ok": False,
+                    "snapshots_checked": i,
+                    "broken_at": {"hash": stored_hash, "reason": "link_mismatch"},
+                }
+            prev_hash = stored_hash
+
+        return {"ok": True, "snapshots_checked": len(rows), "broken_at": None}
 
     # ── profile ───────────────────────────────────────────────────────────────
 

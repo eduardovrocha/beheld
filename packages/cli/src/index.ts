@@ -78,7 +78,8 @@ const snapshotCmd = program
   .command("snapshot")
   .description("Generate a signed .dpbundle of your current profile")
   .option("--output <path>", "Also write the bundle to this path")
-  .action(async (opts: { output?: string }) => {
+  .option("--share", "Upload to the portal and print a QR + short URL")
+  .action(async (opts: { output?: string; share?: boolean }) => {
     const { snapshotCommand } = await import("./commands/snapshot");
     await snapshotCommand(opts);
   });

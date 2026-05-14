@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../bundle/types";
 import { payloadHash, payloadToCanonical } from "../bundle/canonical";
+import { renderQr, uploadBundle } from "../bundle/share";
 import {
   ensureKeys,
   loadPrivateKey,
@@ -15,6 +16,7 @@ const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface SnapshotOptions {
   output?: string;
+  share?: boolean;
 }
 
 interface SnapshotRow {
@@ -131,6 +133,37 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
     console.log("  ⚠️  Bundle criado no disco mas não registrado na chain.");
     console.log("     Execute `devprofile snapshot` novamente quando o engine subir.");
   }
+  console.log("");
+
+  if (opts.share === true) {
+    await shareBundle(bundle);
+  }
+}
+
+async function shareBundle(bundle: Bundle): Promise<void> {
+  const result = await uploadBundle(bundle);
+  if (!result.ok) {
+    console.log("  ⚠️  Upload falhou — o bundle local continua válido.");
+    if (result.error.kind === "network") {
+      console.log(`     Rede: ${result.error.message}`);
+    } else {
+      console.log(`     HTTP ${result.error.status}: ${result.error.body.slice(0, 200)}`);
+    }
+    console.log("");
+    return;
+  }
+
+  const { id, url, ttl_days, deduplicated } = result.data;
+  const qr = await renderQr(url, { small: true });
+
+  console.log(qr);
+  console.log(`  ${url}`);
+  if (ttl_days !== null) {
+    console.log(`  TTL: ${ttl_days} dias${deduplicated ? " (deduplicado — já existia)" : ""}`);
+  } else if (deduplicated) {
+    console.log("  (deduplicado — já existia)");
+  }
+  console.log(`  id: ${id}`);
   console.log("");
 }
 

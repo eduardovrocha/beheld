@@ -57,10 +57,16 @@ let payloadResponder: () => Response;
 let saveBodies: unknown[];
 let savedHashes: string[];
 let listResponder: () => Response;
+let bundleUploadResponder: () => Response;
+let lastUploadBody: string | null;
+let savedEnvPortal: string | undefined;
 
 beforeAll(async () => {
   savedEnvUrl = process.env.DEVPROFILE_ENGINE_URL;
+  savedEnvPortal = process.env.DEVPROFILE_PORTAL_URL;
   process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  // The portal lives on the same mock — keeps the test serial-safe.
+  process.env.DEVPROFILE_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}`;
   server = Bun.serve({
     port: MOCK_PORT,
     hostname: "127.0.0.1",
@@ -77,6 +83,10 @@ beforeAll(async () => {
           headers: { "Content-Type": "application/json" },
         });
       }
+      if (req.method === "POST" && url.pathname === "/bundles") {
+        lastUploadBody = await req.text();
+        return bundleUploadResponder();
+      }
       if (req.method === "GET" && url.pathname === "/snapshots") {
         return listResponder();
       }
@@ -90,6 +100,8 @@ afterAll(() => {
   server.stop(true);
   if (savedEnvUrl === undefined) delete process.env.DEVPROFILE_ENGINE_URL;
   else process.env.DEVPROFILE_ENGINE_URL = savedEnvUrl;
+  if (savedEnvPortal === undefined) delete process.env.DEVPROFILE_PORTAL_URL;
+  else process.env.DEVPROFILE_PORTAL_URL = savedEnvPortal;
 });
 
 beforeEach(() => {
@@ -98,12 +110,23 @@ beforeEach(() => {
   process.env.DEVPROFILE_DATA_DIR = workDir;
   saveBodies = [];
   savedHashes = [];
+  lastUploadBody = null;
   payloadResponder = () =>
     new Response(JSON.stringify(fixturePayload()), {
       headers: { "Content-Type": "application/json" },
     });
   listResponder = () =>
     new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  bundleUploadResponder = () =>
+    new Response(
+      JSON.stringify({
+        id: "abc123",
+        url: "http://127.0.0.1/v/abc123",
+        ttl_days: 30,
+        created_at: "2026-05-14T00:00:00Z",
+      }),
+      { status: 201, headers: { "Content-Type": "application/json", "X-TTL": "30" } },
+    );
 });
 
 afterEach(() => {
@@ -215,6 +238,81 @@ describe("snapshotCommand — generate", () => {
     await snapshotCommand();
     expect(existsSync(join(keysDir, "private.jwk"))).toBe(true);
     expect(existsSync(join(keysDir, "public.jwk"))).toBe(true);
+  });
+});
+
+// ── share flag ──────────────────────────────────────────────────────────────
+
+describe("snapshotCommand — --share", () => {
+  test("uploads the bundle and prints the short URL", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=share1");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await snapshotCommand({ share: true });
+    } finally {
+      console.log = realLog;
+    }
+    const out = logs.join("\n");
+    expect(out).toContain("http://127.0.0.1/v/abc123");
+    expect(out).toContain("id: abc123");
+    expect(out).toContain("TTL: 30 dias");
+    // QR rendering produces block characters
+    expect(out).toMatch(/[█▀▄]/);
+    // The actual bundle was uploaded
+    expect(lastUploadBody).not.toBeNull();
+    const uploaded = JSON.parse(lastUploadBody!);
+    expect(uploaded.hash).toMatch(/^sha256:/);
+    expect(uploaded.signature).toMatch(/^ed25519:/);
+  });
+
+  test("does not abort the snapshot when upload fails", async () => {
+    bundleUploadResponder = () =>
+      new Response(JSON.stringify({ error: "ouch" }), { status: 500 });
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=share2");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await snapshotCommand({ share: true });
+    } finally {
+      console.log = realLog;
+    }
+    const out = logs.join("\n");
+    expect(out).toContain("✓ Snapshot gerado");      // local bundle still produced
+    expect(out).toContain("Upload falhou");
+    expect(out).toContain("HTTP 500");
+  });
+
+  test("highlights deduplicated when server returns it", async () => {
+    bundleUploadResponder = () =>
+      new Response(
+        JSON.stringify({
+          id: "alreadyHere",
+          url: "http://127.0.0.1/v/alreadyHere",
+          ttl_days: 25,
+          created_at: "2026-05-10T00:00:00Z",
+          deduplicated: true,
+        }),
+        { status: 200 },
+      );
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=share3");
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+    try {
+      await snapshotCommand({ share: true });
+    } finally {
+      console.log = realLog;
+    }
+    expect(logs.join("\n")).toContain("deduplicado");
+  });
+
+  test("does NOT upload when --share is omitted", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=no-share");
+    await snapshotCommand({});
+    expect(lastUploadBody).toBeNull();
   });
 });
 

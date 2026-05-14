@@ -80,6 +80,13 @@ devprofile view               # Display your profile in the terminal
 devprofile view --json        # Output full profile as JSON
 devprofile view --scores-only # Output 4 scores as space-separated numbers
 devprofile view --coach       # Show coaching context (patterns + suggestions)
+devprofile keys show          # Display the Ed25519 public key + fingerprint
+devprofile keys import <p>    # Import an existing key (JWK or PEM)
+devprofile keys rotate        # Generate a new key pair (archives the current one)
+devprofile snapshot           # Generate a signed .dpbundle
+devprofile snapshot --share   # Generate + upload to the portal + print a QR
+devprofile snapshot list      # List previously generated snapshots
+devprofile verify <file>      # Verify a .dpbundle offline (schema + hash + signature)
 devprofile update             # Download and install the latest version
 devprofile delete --local     # Delete ~/.devprofile/ (keeps hooks)
 devprofile delete --all       # Delete data + remove all hooks (full uninstall)
@@ -322,6 +329,7 @@ devprofile/
 | `DEVPROFILE_PORT` | `7337` | MCP server port |
 | `DEVPROFILE_ENGINE_URL` | `http://127.0.0.1:7338` | Engine base URL (for testing) |
 | `DEVPROFILE_MCP_URL` | `http://127.0.0.1:7337` | MCP base URL (for testing) |
+| `DEVPROFILE_PORTAL_URL` | `https://devprofile.app` | Portal base URL for `snapshot --share` |
 
 ---
 

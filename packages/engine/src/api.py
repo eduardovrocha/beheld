@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from bundle import build_bundle_payload
 from coach import COACHING_GUIDANCE, detect_patterns
 from insights import InsightGenerator
+from l1.importer import L1Importer
 from models import (
     COACH_PAYLOAD_VERSION,
     CoachPayload,
@@ -31,6 +32,7 @@ db = DevProfileDB(DB_PATH)
 _reader = JsonlReader(SESSIONS_DIR, CURSOR_FILE)
 processor = Processor(db, _reader)
 insights_gen = InsightGenerator(db)
+l1_importer = L1Importer(db)
 
 
 # ── status helpers ────────────────────────────────────────────────────────────
@@ -396,6 +398,32 @@ def l1_delete_repository(root_hash: str) -> dict:
     if not removed:
         raise HTTPException(status_code=404, detail="repository not found")
     return {"ok": True, "root_commit_hash": root_hash}
+
+
+class L1ImportBody(BaseModel):
+    repo_url: str = Field(..., min_length=1)
+    author_email: str = Field(..., min_length=1)
+    pat: Optional[str] = None
+
+
+@app.post("/l1/import", status_code=202)
+def l1_import_endpoint(body: L1ImportBody, background_tasks: BackgroundTasks) -> dict:
+    """Kick off an L1 ingestion in the background and return 202 immediately.
+
+    Progress is observable via GET /l1/import/status. The PAT (if supplied)
+    is consumed by the background task and never persisted."""
+    background_tasks.add_task(
+        l1_importer.import_repository,
+        body.repo_url,
+        body.author_email,
+        body.pat,
+    )
+    return {"status": "processing", "repo_url": body.repo_url}
+
+
+@app.get("/l1/import/status")
+def l1_import_status_endpoint() -> dict:
+    return l1_importer.get_import_status()
 
 
 @app.get("/export")

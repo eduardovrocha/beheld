@@ -91,6 +91,15 @@ snapshotCmd
     await snapshotListCommand();
   });
 
+program
+  .command("verify <file>")
+  .description("Verify a .dpbundle offline (schema + hash + signature)")
+  .option("--chain", "Also walk previous_hash links resolving from ~/.devprofile/snapshots/")
+  .action(async (file: string, opts: { chain?: boolean }) => {
+    const { verifyCommand } = await import("./commands/verify");
+    await verifyCommand(file, opts);
+  });
+
 const keysCmd = program
   .command("keys")
   .description("Manage Ed25519 keys used to sign .dpbundle snapshots");

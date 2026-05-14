@@ -1,5 +1,6 @@
-import { scoresCurrent, profileSummary, insights, engineStatus, processNew, readiness } from "../client/engine-client";
+import { coach, scoresCurrent, profileSummary, insights, engineStatus, processNew, readiness } from "../client/engine-client";
 import { mcpSessionCurrent } from "../client/mcp-client";
+import { renderCoachText } from "../ui/coach-view";
 import { renderProfile, renderCollecting } from "../ui/profile-view";
 import type { ProfileData, ViewFlags } from "../types";
 
@@ -7,6 +8,8 @@ interface ViewOptions {
   json?: boolean;
   scoresOnly?: boolean;
   refresh?: boolean;
+  coach?: boolean;
+  sessionHint?: string;
 }
 
 // In machine-readable modes (--json, --scores-only) diagnostic messages go to
@@ -35,6 +38,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const VALID_HINTS = new Set([
+  "feature_work",
+  "debug",
+  "refactor",
+  "exploration",
+  "unknown",
+]);
+
+async function renderCoachView(sessionHint: string, flags: ViewFlags): Promise<void> {
+  const hint = VALID_HINTS.has(sessionHint) ? sessionHint : "unknown";
+  const payload = await coach(hint);
+  if (!payload) {
+    warn("\n  ✗ Engine offline — coaching context indisponível.", flags);
+    warn("  Execute: devprofile start\n", flags);
+    process.exit(1);
+  }
+
+  if (flags.json) {
+    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+    return;
+  }
+
+  console.log(renderCoachText(payload));
+}
+
 async function waitForProcessing(timeoutMs = 30_000, intervalMs = 1_000): Promise<"done" | "timeout"> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -50,6 +78,11 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
     json: opts.json ?? false,
     scoresOnly: opts.scoresOnly ?? false,
   };
+
+  if (opts.coach === true) {
+    await renderCoachView(opts.sessionHint ?? "unknown", flags);
+    return;
+  }
 
   const status = await engineStatus();
   const hasOrphans = status !== null && status.unprocessed_events > 0;

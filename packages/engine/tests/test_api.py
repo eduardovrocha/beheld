@@ -307,3 +307,392 @@ def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessio
     scores = test_db.get_current_scores()
     assert scores is not None
     assert scores.sessions_analyzed == 2
+
+
+def test_process_persists_workflow_metrics(
+    client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path,
+) -> None:
+    from reader.jsonl_reader import JsonlReader
+    from processor import Processor
+
+    cursor = tmp_path / ".test_cursor_metrics"
+    reader = JsonlReader(sessions_dir, cursor)
+    new_processor = Processor(test_db, reader)
+    with patch("api.processor", new_processor):
+        client.post("/process")
+
+    latest = test_db.get_latest_workflow_metrics()
+    assert latest is not None
+    assert latest["period_days"] == 30
+    assert latest["sessions_analyzed"] >= 1
+    # Metrics object is a real WorkflowMetrics (not just a dict)
+    from models import WorkflowMetrics
+    assert isinstance(latest["metrics"], WorkflowMetrics)
+
+
+# ── /metrics/workflow ─────────────────────────────────────────────────────────
+
+
+def test_metrics_workflow_empty_returns_zero_metrics(client: TestClient) -> None:
+    resp = client.get("/metrics/workflow")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["computed_at"] is None
+    assert data["period_days"] == 30
+    assert data["sessions_analyzed"] == 0
+    # All 10 metric fields present and zero
+    assert data["metrics"]["test_after_ratio"] == 0.0
+    assert data["metrics"]["bash_to_read_ratio"] == 0.0
+    assert data["metrics"]["ecosystem_concentration"] == 0.0
+
+
+def test_metrics_workflow_returns_persisted_values(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import WorkflowMetrics
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=7.8),
+        period_days=30,
+        sessions_analyzed=42,
+    )
+    resp = client.get("/metrics/workflow")
+    data = resp.json()
+    assert data["sessions_analyzed"] == 42
+    assert data["metrics"]["test_after_ratio"] == 0.78
+    assert data["metrics"]["bash_to_read_ratio"] == 7.8
+
+
+def test_metrics_workflow_response_is_canonical_serializable(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The `metrics` block must round-trip through sort_keys without losing info
+    — that's what F5 depends on for hash stability."""
+    from models import WorkflowMetrics
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.5, prompt_avg_chars=120.0),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+    resp = client.get("/metrics/workflow")
+    data = resp.json()
+    canonical = json.dumps(data["metrics"], sort_keys=True, separators=(",", ":"))
+    assert json.loads(canonical) == data["metrics"]
+
+
+# ── /coach ────────────────────────────────────────────────────────────────────
+
+
+def test_coach_insufficient_when_no_scores(client: TestClient) -> None:
+    resp = client.get("/coach")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["version"] == 1
+    assert data["data_freshness"] == "insufficient"
+    assert data["patterns"] == []
+    assert data["scores"]["sessions_analyzed"] == 0
+    # Guidance is always present so the host LLM has its instructions
+    assert data["coaching_guidance"]["tone"].startswith("pt-BR")
+    assert len(data["coaching_guidance"]["must"]) >= 3
+
+
+def test_coach_insufficient_when_below_min_sessions(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=2,  # below MIN_SESSIONS=3
+    ))
+    resp = client.get("/coach")
+    assert resp.json()["data_freshness"] == "insufficient"
+
+
+def test_coach_live_with_data_returns_patterns(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40, growth_rate=30,
+        overall=35, sessions_analyzed=30,
+    ))
+    # Metrics that will trigger test_after_dominant + debug_driven_bash_heavy
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(
+            test_after_ratio=0.8,
+            median_test_delay_min=12.0,
+            bash_to_read_ratio=6.0,
+        ),
+        period_days=30,
+        sessions_analyzed=30,
+    )
+
+    resp = client.get("/coach?session_hint=feature_work")
+    data = resp.json()
+    assert data["data_freshness"] == "live"
+    assert data["context_for_session"]["session_phase_hint"] == "feature_work"
+    pattern_ids = [p["id"] for p in data["patterns"]]
+    assert "test_after_dominant" in pattern_ids
+    assert "debug_driven_bash_heavy" in pattern_ids
+
+
+def test_coach_invalid_session_hint_is_coerced_to_unknown(client: TestClient) -> None:
+    resp = client.get("/coach?session_hint=lol_not_a_hint")
+    data = resp.json()
+    assert data["context_for_session"]["session_phase_hint"] == "unknown"
+
+
+def test_coach_response_is_fully_json_serializable(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The whole payload must roundtrip through json.dumps without errors —
+    no dataclass leaks, no Decimal, no datetime objects."""
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40, growth_rate=30,
+        overall=35, sessions_analyzed=30,
+    ))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.7),
+        period_days=30,
+        sessions_analyzed=30,
+    )
+    resp = client.get("/coach")
+    data = resp.json()
+    # If we got here, FastAPI already serialized it. Sanity check we can
+    # round-trip without loss.
+    roundtrip = json.loads(json.dumps(data, sort_keys=True))
+    assert roundtrip["version"] == 1
+    assert "coaching_guidance" in roundtrip
+
+
+def test_coach_payload_includes_coaching_guidance_constants(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """The guidance block must be present in BOTH insufficient and live modes —
+    it's how the host LLM knows how to behave even when no patterns fire."""
+    resp_insufficient = client.get("/coach")
+    assert resp_insufficient.json()["coaching_guidance"]["good_example"]
+
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=30,
+    ))
+    resp_live = client.get("/coach")
+    assert resp_live.json()["coaching_guidance"]["bad_example"]
+
+
+def test_coach_suggested_followups_present_in_live_mode(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=50, tech_breadth=50, growth_rate=50,
+        overall=50, sessions_analyzed=30,
+    ))
+    resp = client.get("/coach")
+    followups = resp.json()["suggested_followups"]
+    assert len(followups) >= 1
+    assert all(isinstance(f, str) for f in followups)
+
+
+# ── /snapshot/latest & /snapshot/chain/status (Phase 5 — F5.2.4, F5.2.5) ─────
+
+
+import hashlib as _hashlib
+
+
+def _h(payload: str) -> str:
+    return "sha256:" + _hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_snapshot_latest_returns_nulls_when_empty(client: TestClient) -> None:
+    resp = client.get("/snapshot/latest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"hash": None, "previous_hash": None, "created_at": None}
+
+
+def test_snapshot_latest_returns_tip_of_chain(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    a, b = '{"i":1}', '{"i":2}'
+    test_db.save_snapshot(_h(a), None, a)
+    test_db.save_snapshot(_h(b), _h(a), b)
+    resp = client.get("/snapshot/latest")
+    data = resp.json()
+    assert data["hash"] == _h(b)
+    assert data["previous_hash"] == _h(a)
+    assert data["created_at"]  # ISO timestamp present
+
+
+def test_snapshot_latest_never_leaks_payload_or_bundle_path(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    """Endpoint is for chain tip metadata only — payload_json and bundle_path
+    stay internal."""
+    payload = '{"secret":"do not expose"}'
+    test_db.save_snapshot(_h(payload), None, payload, bundle_path="/tmp/x.dpbundle")
+    data = client.get("/snapshot/latest").json()
+    assert "payload_json" not in data
+    assert "bundle_path" not in data
+    assert "do not expose" not in str(data)
+
+
+def test_chain_status_ok_for_empty(client: TestClient) -> None:
+    data = client.get("/snapshot/chain/status").json()
+    assert data["ok"] is True
+    assert data["snapshots_checked"] == 0
+
+
+def test_chain_status_detects_tampering(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    a, b = '{"i":1}', '{"i":2}'
+    test_db.save_snapshot(_h(a), None, a)
+    test_db.save_snapshot(_h(b), _h(a), b)
+    # Tamper the payload of snapshot a without re-hashing
+    test_db.connect().execute(
+        "UPDATE snapshots SET payload_json = ? WHERE hash = ?",
+        ('{"changed":true}', _h(a)),
+    )
+    test_db.connect().commit()
+    data = client.get("/snapshot/chain/status").json()
+    assert data["ok"] is False
+    assert data["broken_at"]["reason"] == "content_mismatch"
+
+
+# ── POST /snapshot/payload + /snapshot/save + GET /snapshots (Phase 5 / F5.3) ──
+
+
+def test_snapshot_payload_returns_409_when_no_scores(client: TestClient) -> None:
+    resp = client.post("/snapshot/payload")
+    assert resp.status_code == 409
+    assert "no scores" in resp.json()["detail"].lower()
+
+
+def test_snapshot_payload_builds_valid_shape(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(
+        date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40,
+        growth_rate=30, overall=35, sessions_analyzed=10,
+    ))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.6),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+
+    resp = client.post("/snapshot/payload")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Top-level shape per the contract (Etapa C)
+    assert "created_at" in data
+    assert "devprofile_version" in data
+    assert "previous_hash" in data
+    assert "scores" in data
+    assert "signals" in data
+    # signals contains the 7 documented fields
+    sig = data["signals"]
+    for key in (
+        "platforms", "ecosystems", "workflow_distribution",
+        "project_categories", "workflow_metrics",
+        "sessions_analyzed", "period_days",
+    ):
+        assert key in sig
+    # previous_hash is null for the first ever snapshot
+    assert data["previous_hash"] is None
+
+
+def test_snapshot_payload_carries_persisted_workflow_metrics(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores, WorkflowMetrics
+    test_db.save_scores(Scores(date="2026-05-14",
+        prompt_quality=50, test_maturity=20, tech_breadth=40,
+        growth_rate=30, overall=35, sessions_analyzed=10))
+    test_db.save_workflow_metrics(
+        WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=4.2),
+        period_days=30,
+        sessions_analyzed=10,
+    )
+    data = client.post("/snapshot/payload").json()
+    wm = data["signals"]["workflow_metrics"]
+    assert wm["test_after_ratio"] == 0.78
+    assert wm["bash_to_read_ratio"] == 4.2
+
+
+def test_snapshot_payload_chains_to_previous(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    from models import Scores
+    test_db.save_scores(Scores(date="2026-05-14",
+        prompt_quality=10, test_maturity=10, tech_breadth=10,
+        growth_rate=10, overall=10, sessions_analyzed=5))
+    # Pre-existing snapshot in DB → next payload should reference it
+    test_db.save_snapshot(_h('{"prev":1}'), None, '{"prev":1}')
+    data = client.post("/snapshot/payload").json()
+    assert data["previous_hash"] == _h('{"prev":1}')
+
+
+def test_snapshot_save_rejects_invalid_hash_format(client: TestClient) -> None:
+    resp = client.post(
+        "/snapshot/save",
+        json={"hash": "not-a-hash", "payload_json": "{}"},
+    )
+    assert resp.status_code == 422  # pydantic validation
+
+
+def test_snapshot_save_persists_to_db(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    payload = '{"x":1}'
+    h = _h(payload)
+    resp = client.post(
+        "/snapshot/save",
+        json={"hash": h, "payload_json": payload, "bundle_path": "/tmp/a.dpbundle"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["hash"] == h
+    assert test_db.count_snapshots() == 1
+
+
+def test_snapshot_save_returns_409_on_duplicate(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    payload = '{"x":1}'
+    h = _h(payload)
+    body = {"hash": h, "payload_json": payload}
+    r1 = client.post("/snapshot/save", json=body)
+    assert r1.status_code == 200
+    r2 = client.post("/snapshot/save", json=body)
+    assert r2.status_code == 409
+
+
+def test_snapshots_list_empty(client: TestClient) -> None:
+    resp = client.get("/snapshots")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_snapshots_list_newest_first(
+    client: TestClient, test_db: DevProfileDB,
+) -> None:
+    test_db.save_snapshot(_h('{"i":1}'), None, '{"i":1}', bundle_path="/a")
+    test_db.save_snapshot(_h('{"i":2}'), _h('{"i":1}'), '{"i":2}', bundle_path="/b")
+    data = client.get("/snapshots").json()
+    assert len(data) == 2
+    assert data[0]["bundle_path"] == "/b"
+    assert data[1]["bundle_path"] == "/a"
+    # payload_json never leaks through this endpoint
+    assert all("payload_json" not in row for row in data)

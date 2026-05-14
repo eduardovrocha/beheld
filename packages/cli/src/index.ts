@@ -58,9 +58,75 @@ program
   .option("--json", "Output as JSON")
   .option("--scores-only", "Output scores as space-separated numbers")
   .option("--refresh", "Process pending events before displaying profile")
-  .action(async (opts: { json?: boolean; scoresOnly?: boolean; refresh?: boolean }) => {
+  .option("--coach", "Show coaching context (patterns + suggestions) instead of full profile")
+  .option(
+    "--session-hint <phase>",
+    "Hint about current session phase (feature_work | debug | refactor | exploration | unknown)",
+  )
+  .action(async (opts: {
+    json?: boolean;
+    scoresOnly?: boolean;
+    refresh?: boolean;
+    coach?: boolean;
+    sessionHint?: string;
+  }) => {
     const { viewCommand } = await import("./commands/view");
     await viewCommand(opts);
+  });
+
+const snapshotCmd = program
+  .command("snapshot")
+  .description("Generate a signed .dpbundle of your current profile")
+  .option("--output <path>", "Also write the bundle to this path")
+  .option("--share", "Upload to the portal and print a QR + short URL")
+  .action(async (opts: { output?: string; share?: boolean }) => {
+    const { snapshotCommand } = await import("./commands/snapshot");
+    await snapshotCommand(opts);
+  });
+
+snapshotCmd
+  .command("list")
+  .description("List previously generated snapshots")
+  .action(async () => {
+    const { snapshotListCommand } = await import("./commands/snapshot");
+    await snapshotListCommand();
+  });
+
+program
+  .command("verify <file>")
+  .description("Verify a .dpbundle offline (schema + hash + signature)")
+  .option("--chain", "Also walk previous_hash links resolving from ~/.devprofile/snapshots/")
+  .action(async (file: string, opts: { chain?: boolean }) => {
+    const { verifyCommand } = await import("./commands/verify");
+    await verifyCommand(file, opts);
+  });
+
+const keysCmd = program
+  .command("keys")
+  .description("Manage Ed25519 keys used to sign .dpbundle snapshots");
+
+keysCmd
+  .command("show")
+  .description("Display the current public key (Ed25519, JWK)")
+  .action(async () => {
+    const { keysShowCommand } = await import("./commands/keys");
+    await keysShowCommand();
+  });
+
+keysCmd
+  .command("import <path>")
+  .description("Import an existing Ed25519 private key (JWK or PEM)")
+  .action(async (path: string) => {
+    const { keysImportCommand } = await import("./commands/keys");
+    await keysImportCommand(path);
+  });
+
+keysCmd
+  .command("rotate")
+  .description("Generate a new key pair; current pair is archived (snapshots stay verifiable)")
+  .action(async () => {
+    const { keysRotateCommand } = await import("./commands/keys");
+    await keysRotateCommand();
   });
 
 program

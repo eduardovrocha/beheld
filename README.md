@@ -79,6 +79,14 @@ devprofile status             # Show daemon health, session, and today's stats
 devprofile view               # Display your profile in the terminal
 devprofile view --json        # Output full profile as JSON
 devprofile view --scores-only # Output 4 scores as space-separated numbers
+devprofile view --coach       # Show coaching context (patterns + suggestions)
+devprofile keys show          # Display the Ed25519 public key + fingerprint
+devprofile keys import <p>    # Import an existing key (JWK or PEM)
+devprofile keys rotate        # Generate a new key pair (archives the current one)
+devprofile snapshot           # Generate a signed .dpbundle
+devprofile snapshot --share   # Generate + upload to the portal + print a QR
+devprofile snapshot list      # List previously generated snapshots
+devprofile verify <file>      # Verify a .dpbundle offline (schema + hash + signature)
 devprofile update             # Download and install the latest version
 devprofile delete --local     # Delete ~/.devprofile/ (keeps hooks)
 devprofile delete --all       # Delete data + remove all hooks (full uninstall)
@@ -104,6 +112,31 @@ Perfil técnico
   Total sessões: 847
 ```
 
+### devprofile view --coach
+
+Coaching context derived from real usage. Patterns are detected deterministically (no LLM call), and a `✓` marks each pattern relevant to the current session's ecosystem.
+
+```
+DevProfile · coach (v1 · live)
+
+Padrões (2):
+
+✓ [high  ] Testes escritos após o código  conf 0.84
+   80% das sessões classificadas como test-after, mediana 12 min.
+
+  [low   ] Loop de debug com pouca leitura prévia  conf 0.60
+   Bash representa 6.0x o uso de Read.
+
+Contexto: feature_work · rails · react
+Score: 35/100 · 30 sessões
+```
+
+```sh
+devprofile view --coach                          # render ANSI (above)
+devprofile view --coach --session-hint debug     # tag the phase
+devprofile view --coach --json                   # raw CoachPayload (for jq / debug)
+```
+
 ### /devprofile in Claude Code
 
 After `devprofile init`, the `/devprofile` slash command is available directly in Claude Code chat:
@@ -114,6 +147,35 @@ After `devprofile init`, the `/devprofile` slash command is available directly i
 | `/devprofile scores` | Score table with progress bars |
 | `/devprofile insight` | Next recommended action |
 | `/devprofile full` | Complete profile (scores + platforms + ecosystems) |
+
+### MCP tools exposed to the host LLM
+
+The `mcp-server` registers three tools your IDE's LLM can call. The agent layer is **the LLM you're already using** — DevProfile only provides context, never calls an external API itself.
+
+| Tool | Purpose |
+|------|---------|
+| `devprofile` | On-demand score + insights (the data behind `/devprofile`) |
+| `devprofile_coach` | Coaching context: patterns + guidance for the host LLM to act on |
+| `devprofile_status` | Compact score for sidebars (Continue.dev) |
+
+#### How `devprofile_coach` works
+
+1. Engine computes `WorkflowMetrics` every scoring cycle — 10 deterministic scalars over the last 30 days (ratios, medians, concentration index).
+2. `detect_patterns()` derives behavioural patterns from those metrics (e.g. `test_after_dominant`, `debug_driven_bash_heavy`). No LLM; pattern matching only.
+3. The tool returns a text block followed by a delimited JSON contract:
+
+   ```
+   DevProfile · coaching context (v1)
+   Padrões detectados (N): ...
+
+   ---DEVPROFILE-JSON---
+   { "version": 1, "patterns": [...], "coaching_guidance": {...}, ... }
+   ---END-JSON---
+   ```
+
+4. The host LLM reads the JSON, follows `coaching_guidance.must`/`must_not`, and surfaces **at most one pattern** matching `applies_to_current_session AND confidence >= 0.6`.
+
+The tool description tells the host **when not to call it** (during debug sessions, after recent invocation, for pure execution tasks). Privacy posture is preserved: no data leaves the machine, the LLM is whatever you're already paying for in your IDE.
 
 ---
 
@@ -184,9 +246,12 @@ Scoring Engine (Python FastAPI · localhost:7338)
   → extractors: commands, file extensions, tools, timing
   → classifiers: project type, platform, workflow pattern
   → scorers: prompt_quality, test_maturity, tech_breadth, growth_rate
-  → persists to ~/.devprofile/profile.db (SQLite)
+  → coach pipeline: compute_workflow_metrics + detect_patterns (deterministic, no LLM)
+  → persists to ~/.devprofile/profile.db (SQLite, versioned schema)
         ↓
 CLI (devprofile view) and Continue.dev sidebar (via MCP server · localhost:7337)
+        ↓
+Host LLM (Claude Code, Cursor, …) calls devprofile_coach → applies coaching guidance
 ```
 
 The MCP server captures events from Claude Code hooks and Continue.dev, sanitises them, and writes JSONL. The scoring engine processes JSONL incrementally every 60 seconds. The CLI reads from both over HTTP.
@@ -237,8 +302,9 @@ devprofile/
 │   │       ├── extractors/        # commands, files, timing, tools
 │   │       ├── classifiers/       # project type, platform, workflow
 │   │       ├── scorers/           # 4 scorer classes
-│   │       ├── processor.py       # classify → score pipeline
-│   │       └── storage/sqlite.py  # SQLite persistence
+│   │       ├── coach.py           # compute_workflow_metrics + detect_patterns
+│   │       ├── processor.py       # classify → score → metrics pipeline
+│   │       └── storage/sqlite.py  # SQLite persistence (versioned migrations)
 │   └── cli/           # TypeScript (Bun) · standalone binary
 │       └── src/
 │           ├── index.ts           # commander entry point
@@ -263,6 +329,7 @@ devprofile/
 | `DEVPROFILE_PORT` | `7337` | MCP server port |
 | `DEVPROFILE_ENGINE_URL` | `http://127.0.0.1:7338` | Engine base URL (for testing) |
 | `DEVPROFILE_MCP_URL` | `http://127.0.0.1:7337` | MCP base URL (for testing) |
+| `DEVPROFILE_PORTAL_URL` | `https://devprofile.app` | Portal base URL for `snapshot --share` |
 
 ---
 

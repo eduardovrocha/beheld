@@ -78,6 +78,22 @@ describe("stdio-server tool list", () => {
     const { statusTool } = await import("../src/tools/status-tool?v=stdio-reg1");
     expect(statusTool.name).toBe("devprofile_status");
   });
+
+  test("devprofile_coach tool is named correctly", async () => {
+    const { devprofileCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg1");
+    expect(devprofileCoachTool.name).toBe("devprofile_coach");
+  });
+
+  test("devprofile_coach has session_hint enum in inputSchema", async () => {
+    const { devprofileCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg2");
+    const hint = devprofileCoachTool.inputSchema.properties["session_hint"] as Record<string, unknown>;
+    expect(hint).toBeDefined();
+    const enums = hint["enum"] as string[];
+    expect(enums).toContain("feature_work");
+    expect(enums).toContain("debug");
+    expect(enums).toContain("unknown");
+  });
+
 });
 
 // ── Handler wrapping ──────────────────────────────────────────────────────────

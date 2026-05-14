@@ -6,10 +6,21 @@ from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
+from bundle import build_bundle_payload
+from coach import COACHING_GUIDANCE, detect_patterns
 from insights import InsightGenerator
+from models import (
+    COACH_PAYLOAD_VERSION,
+    CoachPayload,
+    Scores,
+    SessionContext,
+    WorkflowMetrics,
+)
 from processor import Processor
 from reader.jsonl_reader import CURSOR_FILE, SESSIONS_DIR, JsonlReader
 from storage.sqlite import DB_PATH, DevProfileDB
@@ -184,6 +195,170 @@ def insights() -> dict:
         return insights_gen.generate()
     except Exception:
         return {"insights": [], "generated_at": None}
+
+
+_VALID_SESSION_HINTS = {"feature_work", "debug", "refactor", "exploration", "unknown"}
+
+
+@app.get("/metrics/workflow")
+def metrics_workflow() -> dict:
+    """Latest WorkflowMetrics + metadata.
+
+    Consumers: MCP coach tool, future .dpbundle generator (F5). The `metrics`
+    block is canonical (scalars only, sort_keys serializable) — safe to embed
+    in a signed snapshot.
+    """
+    latest = db.get_latest_workflow_metrics()
+    if latest is None:
+        return {
+            "computed_at": None,
+            "period_days": 30,
+            "sessions_analyzed": 0,
+            "metrics": dataclasses.asdict(WorkflowMetrics()),
+        }
+    return {
+        "computed_at": latest["computed_at"],
+        "period_days": latest["period_days"],
+        "sessions_analyzed": latest["sessions_analyzed"],
+        "metrics": dataclasses.asdict(latest["metrics"]),
+    }
+
+
+def _build_session_context(session_hint: str) -> SessionContext:
+    """Derive SessionContext from profile summary + caller-provided hint."""
+    summary = profile_summary()
+    ecosystems = list(summary.get("ecosystems", []))[:3]
+    categories = summary.get("project_categories", {}) or {}
+    top_category = next(iter(categories.keys()), "unknown")
+    return SessionContext(
+        current_project_category=top_category,
+        ecosystems_recent=ecosystems,
+        session_phase_hint=session_hint,
+    )
+
+
+def _empty_scores() -> Scores:
+    return Scores(
+        date="",
+        prompt_quality=0,
+        test_maturity=0,
+        tech_breadth=0,
+        growth_rate=0,
+        overall=0,
+        sessions_analyzed=0,
+    )
+
+
+@app.get("/coach")
+def coach(session_hint: str = "unknown") -> dict:
+    """Coach payload — patterns + scores + guidance for the host LLM.
+
+    Schema: see models.CoachPayload (versioned via COACH_PAYLOAD_VERSION).
+    """
+    hint = session_hint if session_hint in _VALID_SESSION_HINTS else "unknown"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    scores = db.get_current_scores()
+    if scores is None or scores.sessions_analyzed < MIN_SESSIONS:
+        payload = CoachPayload(
+            version=COACH_PAYLOAD_VERSION,
+            as_of=now_iso,
+            data_freshness="insufficient",
+            scores=scores or _empty_scores(),
+            context_for_session=SessionContext(session_phase_hint=hint),
+            patterns=[],
+            coaching_guidance=COACHING_GUIDANCE,
+            suggested_followups=[],
+        )
+        return dataclasses.asdict(payload)
+
+    latest = db.get_latest_workflow_metrics()
+    metrics = latest["metrics"] if latest else WorkflowMetrics()
+    context = _build_session_context(hint)
+    patterns = detect_patterns(metrics, scores, context)
+
+    payload = CoachPayload(
+        version=COACH_PAYLOAD_VERSION,
+        as_of=now_iso,
+        data_freshness="live",
+        scores=scores,
+        context_for_session=context,
+        patterns=patterns,
+        coaching_guidance=COACHING_GUIDANCE,
+        suggested_followups=[
+            "Quer ver as sessões que mais puxaram esse padrão?",
+            "Quer ajustar o tom do coaching ou desativar nesta sessão?",
+        ],
+    )
+    return dataclasses.asdict(payload)
+
+
+@app.get("/snapshot/latest")
+def snapshot_latest() -> dict:
+    """Tip of the snapshot chain — consumed by `devprofile snapshot` to set
+    `previous_hash` on the next bundle. Returns nulls if no snapshot exists
+    (genesis case)."""
+    latest = db.get_latest_snapshot()
+    if latest is None:
+        return {"hash": None, "previous_hash": None, "created_at": None}
+    return {
+        "hash": latest["hash"],
+        "previous_hash": latest["previous_hash"],
+        "created_at": latest["created_at"],
+    }
+
+
+@app.get("/snapshot/chain/status")
+def snapshot_chain_status() -> dict:
+    """Walks the entire chain detecting tampering. Diagnostic endpoint —
+    consumed by `devprofile verify --chain` and future health checks."""
+    return db.validate_chain()
+
+
+@app.post("/snapshot/payload")
+def snapshot_payload() -> dict:
+    """Build the signable half of a .dpbundle from current DB state.
+
+    Returns the BundlePayload as-is (unsigned). The CLI canonicalizes, hashes,
+    signs with Ed25519, and POSTs the result back to /snapshot/save.
+    """
+    try:
+        payload = build_bundle_payload(db, VERSION)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return dataclasses.asdict(payload)
+
+
+class SnapshotSaveBody(BaseModel):
+    hash: str = Field(..., pattern=r"^sha256:[0-9a-f]{64}$")
+    previous_hash: Optional[str] = Field(None, pattern=r"^sha256:[0-9a-f]{64}$")
+    payload_json: str
+    bundle_path: Optional[str] = None
+
+
+@app.post("/snapshot/save")
+def snapshot_save(body: SnapshotSaveBody) -> dict:
+    """Persist a signed snapshot referenced by hash. Idempotent at the SQL
+    level via UNIQUE(hash) — second save with the same hash returns 409."""
+    try:
+        snap_id = db.save_snapshot(
+            bundle_hash=body.hash,
+            previous_hash=body.previous_hash,
+            payload_json=body.payload_json,
+            bundle_path=body.bundle_path,
+        )
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            raise HTTPException(status_code=409, detail="snapshot already saved")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "id": snap_id, "hash": body.hash}
+
+
+@app.get("/snapshots")
+def snapshots_list(limit: int = 100) -> list[dict]:
+    """Newest-first history. payload_json is NOT included — that's local-only
+    state used for chain validation."""
+    return db.list_snapshots(limit)
 
 
 @app.get("/export")

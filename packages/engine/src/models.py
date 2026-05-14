@@ -109,3 +109,146 @@ class ProjectClassification:
     category: str
     confidence: float
     signals_used: list[str] = field(default_factory=list)
+
+
+# ── coach feature ─────────────────────────────────────────────────────────────
+#
+# Types below back the /coach endpoint and the devprofile_coach MCP tool.
+# Design constraints (see Phase 5 — .dpbundle):
+# - WorkflowMetrics fields are scalars only (deterministic JSON canonical form).
+# - Pattern objects are derived, never persisted; they don't enter the bundle.
+# - CoachPayload is the wire format consumed by host LLMs (Claude Code etc.).
+
+# Allowed values (documentation; not enforced at type level to keep the dataclass
+# style consistent with the rest of the module):
+#   data_freshness:    "live" | "cache" | "insufficient"
+#   trend_30d:         "up" | "stable" | "down"
+#   severity:          "low" | "medium" | "high"
+#   session_phase_hint:"feature_work" | "debug" | "refactor" | "exploration" | "unknown"
+
+COACH_PAYLOAD_VERSION = 1
+
+
+@dataclass(frozen=True)
+class WorkflowMetrics:
+    """Aggregated, deterministic metrics over a window of sessions.
+
+    All fields are scalars in stable units (ratios in [0,1], minutes, counts).
+    Defaults are 0.0 — callers should check `sessions_analyzed` on the parent
+    record to know whether metrics are meaningful.
+    """
+    test_after_ratio: float = 0.0
+    test_first_ratio: float = 0.0
+    median_test_delay_min: float = 0.0
+    edit_to_test_lag_min: float = 0.0
+    bash_to_read_ratio: float = 0.0
+    prompt_avg_chars: float = 0.0
+    prompt_median_chars: float = 0.0
+    session_avg_duration_min: float = 0.0
+    tool_variety_avg: float = 0.0
+    ecosystem_concentration: float = 0.0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> WorkflowMetrics:
+        valid = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: float(d.get(k, 0.0)) for k in valid})
+
+
+@dataclass(frozen=True)
+class Pattern:
+    """A behavioural pattern detected from workflow_metrics + summary.
+
+    Derived (never persisted). `metric` carries only the numbers cited in
+    `evidence` so the LLM can quote without hallucinating.
+    """
+    id: str
+    label: str
+    evidence: str
+    metric: dict[str, float] = field(default_factory=dict)
+    confidence: float = 0.0
+    trend_30d: str = "stable"
+    severity: str = "low"
+    applies_to_current_session: bool = False
+
+
+@dataclass(frozen=True)
+class SessionContext:
+    """Hints about the session in which coach was invoked.
+
+    Allows `detect_patterns` to mark `applies_to_current_session` accurately.
+    """
+    current_project_category: str = "unknown"
+    ecosystems_recent: list[str] = field(default_factory=list)
+    session_phase_hint: str = "unknown"
+
+
+@dataclass(frozen=True)
+class CoachingGuidance:
+    """Constant instructions for the host LLM on how to use the payload.
+
+    Versioned with the engine; not user-editable.
+    """
+    tone: str
+    must: list[str]
+    must_not: list[str]
+    good_example: str
+    bad_example: str
+
+
+@dataclass(frozen=True)
+class CoachPayload:
+    """Top-level response of GET /coach. Consumed by devprofile_coach MCP tool."""
+    version: int
+    as_of: str
+    data_freshness: str
+    scores: Scores
+    context_for_session: SessionContext
+    patterns: list[Pattern]
+    coaching_guidance: CoachingGuidance
+    suggested_followups: list[str] = field(default_factory=list)
+
+
+# ── signed snapshot (.dpbundle) — Phase 5 ─────────────────────────────────────
+#
+# Wire format contract. Identical shape in TypeScript (cli/src/bundle/types.ts).
+# Any change here MUST bump BUNDLE_VERSION and update the TS twin in the same
+# commit — the cross-language canonical hash test (test_bundle_contract) catches
+# drift.
+
+BUNDLE_VERSION = "1"
+
+
+@dataclass(frozen=True)
+class BundleSignals:
+    """Aggregate signals over the snapshot period. All values are scalars or
+    flat dicts of scalars — canonical JSON ordering is trivial."""
+    platforms: dict[str, int]
+    ecosystems: dict[str, int]
+    workflow_distribution: dict[str, float]
+    project_categories: dict[str, float]
+    workflow_metrics: WorkflowMetrics
+    sessions_analyzed: int
+    period_days: int
+
+
+@dataclass(frozen=True)
+class BundlePayload:
+    """The signed half of a .dpbundle. SHA-256 of canonical_json(payload) is
+    embedded in the parent Bundle.hash; that same canonical_json is what
+    Ed25519 signs."""
+    created_at: str
+    devprofile_version: str
+    previous_hash: Optional[str]
+    scores: Scores
+    signals: BundleSignals
+
+
+@dataclass(frozen=True)
+class Bundle:
+    """Top-level .dpbundle wire format. `version` is the bundle schema version,
+    independent of devprofile_version (which tracks the app)."""
+    version: str
+    payload: BundlePayload
+    hash: str          # "sha256:<hex>"
+    signature: str     # "ed25519:<hex>"
+    public_key: str    # "ed25519:<base64url-x>"

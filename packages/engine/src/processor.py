@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from classifiers.project_type import classify
+from coach import compute_workflow_metrics
 from extractors.commands import detect_platforms
 from extractors.tools import build_tool_sequence, detect_workflow
 from extractors.files import detect_ecosystems, detect_languages
@@ -118,3 +119,13 @@ class Processor:
         self.db.set_profile("total_sessions", str(len(all_sessions)))
         self.db.set_profile("last_scored_at", now.isoformat())
         self.db.set_profile("overall_score", str(overall))
+
+        # Workflow metrics over the recent window — feeds coach + .dpbundle (F5).
+        # Falls back to full history when recent window is sparse to avoid flaky values.
+        metrics_window = recent if len(recent) >= 5 else all_sessions
+        wf_metrics = compute_workflow_metrics(metrics_window)
+        self.db.save_workflow_metrics(
+            wf_metrics,
+            period_days=30,
+            sessions_analyzed=len(metrics_window),
+        )

@@ -1,4 +1,12 @@
-import type { Insight, ProcessResult, ProfileSummary, Scores } from "../types";
+import type {
+  Insight,
+  L1ImportResponse,
+  L1ImportStatus,
+  L1Repository,
+  ProcessResult,
+  ProfileSummary,
+  Scores,
+} from "../types";
 import { getLastCachedScores, type CachedScores } from "../storage/local-cache";
 
 export interface EngineStatus {
@@ -122,4 +130,50 @@ export interface CoachPayload {
 
 export async function coach(sessionHint = "unknown"): Promise<CoachPayload | null> {
   return get<CoachPayload>(`/coach?session_hint=${encodeURIComponent(sessionHint)}`);
+}
+
+// ── L1 (Phase 6 — git repository import) ─────────────────────────────────────
+
+/** POST /l1/import — the engine returns 202 immediately; orchestration runs
+ *  in a background task. Poll `getImportStatus()` to observe completion. */
+export async function importRepository(
+  repoUrl: string,
+  authorEmail: string,
+  pat?: string | null,
+): Promise<L1ImportResponse | null> {
+  try {
+    const res = await fetch(`${BASE}/l1/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: repoUrl, author_email: authorEmail, pat: pat ?? null }),
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as L1ImportResponse;
+  } catch {
+    return null;
+  }
+}
+
+/** GET /l1/import/status — current state of the single-slot importer. */
+export async function getImportStatus(): Promise<L1ImportStatus | null> {
+  return get<L1ImportStatus>("/l1/import/status");
+}
+
+/** GET /l1/repositories — list of imported repos (opaque root hashes only). */
+export async function getL1Repositories(): Promise<L1Repository[] | null> {
+  return get<L1Repository[]>("/l1/repositories");
+}
+
+/** DELETE /l1/repositories/{hash} — returns true on success, false on 404. */
+export async function deleteL1Repository(rootHash: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/l1/repositories/${encodeURIComponent(rootHash)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

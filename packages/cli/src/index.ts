@@ -130,6 +130,21 @@ keysCmd
   });
 
 program
+  .command("import [url]")
+  .description("Import repositories into L1 (git history bootstrap)")
+  .option("--list", "List imported repositories")
+  .option("--remove <hash>", "Remove an imported repository by its root commit hash")
+  .option("--github", "Select from your GitHub repositories (uses gh CLI)")
+  .option("--gitlab", "Select from your GitLab projects (uses glab CLI)")
+  .action(async (
+    url: string | undefined,
+    opts: { list?: boolean; remove?: string; github?: boolean; gitlab?: boolean },
+  ) => {
+    const { runImport } = await import("./commands/import");
+    await runImport({ ...opts, url });
+  });
+
+program
   .command("update")
   .description("Update DevProfile to the latest version")
   .action(async () => {

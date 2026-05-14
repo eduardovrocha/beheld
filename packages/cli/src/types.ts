@@ -76,4 +76,36 @@ export interface DevProfileConfig {
   initialized_at: string;
   dimensions: WizardDimensions;
   environments: WizardEnvironments;
+  /** Author email used to filter commits during L1 import. */
+  author_email?: string;
+}
+
+export interface L1ImportResponse {
+  status: "processing";
+  repo_url: string;
+}
+
+export interface L1ImportStatus {
+  status: "idle" | "processing" | "done" | "error";
+  repo_url: string | null;
+  progress_pct: number;
+  result:
+    | null
+    | {
+        status:
+          | "imported"
+          | "already_imported"
+          | "author_not_found"
+          | "needs_pat"
+          | "clone_error";
+        root_commit_hash?: string;
+        commit_count?: number;
+        detail?: string;
+      };
+}
+
+export interface L1Repository {
+  root_commit_hash: string;
+  imported_at: string;
+  commit_count: number;
 }

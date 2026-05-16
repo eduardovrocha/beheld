@@ -19,8 +19,32 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run tests
-        run: bun test
+      - name: Run unit tests (skips long-running integration scenario)
+        run: SKIP_INTEGRATION=1 bun test
+
+  test-ts-integration:
+    name: TypeScript integration (long-running scenario)
+    # Runs on every push to main + every PR targeting main. Feature branches
+    # skip this to keep their CI cycle short — the unit suite still covers
+    # B14/B16/B17/B18 individually; this job catches their interaction.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run integration test
+        run: bun test packages/cli/tests/integration/ --timeout 90000
 
   test-python:
     name: Python tests

@@ -7,6 +7,18 @@ const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 
 export async function startCommand(): Promise<void> {
+  // Pre-check so we only show the "this might take a while" hint when we're
+  // actually about to wait. Engine cold start (PyInstaller bundle extraction
+  // on first run) is the slow path — up to ~30s on macOS.
+  const [mcpUp, engineUp] = await Promise.all([
+    daemonManager.isMcpRunning(),
+    daemonManager.isEngineRunning(),
+  ]);
+
+  if (!engineUp) {
+    console.log(`\n  ${DIM}Iniciando daemons (engine pode levar 15-30s no primeiro start)…${RESET}`);
+  }
+
   const result = await daemonManager.start();
 
   if (result.alreadyRunning) {

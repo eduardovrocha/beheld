@@ -1,7 +1,8 @@
 import { coach, scoresCurrent, profileSummary, insights, engineStatus, processNew, readiness } from "../client/engine-client";
-import { mcpSessionCurrent } from "../client/mcp-client";
+import { mcpSessionCurrent, mcpStatus } from "../client/mcp-client";
 import { renderCoachText } from "../ui/coach-view";
 import { renderProfile, renderCollecting } from "../ui/profile-view";
+import { renderAlertBox } from "../ui/alert-box";
 import type { ProfileData, ViewFlags } from "../types";
 
 interface ViewOptions {
@@ -61,6 +62,59 @@ async function renderCoachView(sessionHint: string, flags: ViewFlags): Promise<v
   }
 
   console.log(renderCoachText(payload));
+}
+
+function formatBrazilianDate(iso: string | null): string {
+  if (!iso) return "data desconhecida";
+  // Accept ISO date or full timestamp; use only the date part
+  const datePart = iso.length >= 10 ? iso.slice(0, 10) : iso;
+  const [y, m, d] = datePart.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+async function maybeRenderStaleAlert(
+  source: "live" | "cache",
+  updatedAt: string | null,
+): Promise<void> {
+  // Score "date" stores the local-day-equivalent UTC date — when the user is
+  // east of UTC (e.g. GMT-3) a fresh score generated late at night UTC reads
+  // as "tomorrow" relative to local. Tolerate up to 1 day diff in either
+  // direction so we don't flag the boundary case as stale.
+  const cacheDate = updatedAt && updatedAt.length >= 10 ? updatedAt.slice(0, 10) : null;
+  const today = new Date();
+  let isStale = false;
+  if (cacheDate !== null) {
+    const [cy, cm, cd] = cacheDate.split("-").map(Number);
+    const cacheMs = Date.UTC(cy, cm - 1, cd);
+    const todayMs = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const diffDays = Math.abs(cacheMs - todayMs) / (24 * 3600 * 1000);
+    isStale = diffDays > 1;
+  }
+  const isOffline = source === "cache";
+
+  if (!isOffline && !isStale) return;
+
+  const status = await mcpStatus();
+  const eventsToday = status?.events_today;
+
+  const title = isOffline ? "ENGINE OFFLINE" : "SCORE DESATUALIZADO";
+  const body: string[] = [];
+  body.push(`Você está vendo cache de ${formatBrazilianDate(updatedAt)}.`);
+  if (eventsToday !== undefined && eventsToday > 0) {
+    body.push(`${eventsToday} eventos coletados podem estar pendentes.`);
+  }
+
+  console.log("");
+  console.log(renderAlertBox({
+    title,
+    body,
+    suggestions: [
+      { label: "Para diagnosticar", command: "devprofile doctor" },
+      { label: "Para reiniciar",    command: "devprofile restart" },
+    ],
+  }));
+  console.log("");
 }
 
 async function waitForProcessing(timeoutMs = 30_000, intervalMs = 1_000): Promise<"done" | "timeout"> {
@@ -133,10 +187,8 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
     }
   }
 
-  if (scores.source === "cache" && !flags.json && !flags.scoresOnly) {
-    console.log(`\n  ⚠️  Engine offline — exibindo último score salvo.`);
-    console.log(`  Referente a: ${scores.updated_at}`);
-    console.log("  Execute: devprofile start para atualizar.\n");
+  if (!flags.json && !flags.scoresOnly) {
+    await maybeRenderStaleAlert(scores.source, scores.updated_at);
   }
 
   const data: ProfileData = {

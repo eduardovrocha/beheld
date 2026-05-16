@@ -10,14 +10,16 @@ import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import { notificationService } from "./notifications";
 import { triggerEngineProcessing } from "./engine-trigger";
+import { Counters } from "./counters";
 import type { DevProfileEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const TOOLS: McpTool[] = [devprofileTool, devprofileCoachTool, statusTool];
 const startedAt = Date.now();
 
 const writer = new JsonlWriter(getDevProfileDir());
+const counters = new Counters(path.join(getDevProfileDir(), "sessions"));
 
 
 // ─── In-memory session state ────────────────────────────────────────────────
@@ -32,8 +34,6 @@ interface SessionMeta {
 }
 
 const sessions = new Map<string, SessionMeta>();
-let eventsToday = 0;
-let sessionsToday = 0;
 
 function trackEvent(event: DevProfileEvent): void {
   if (!sessions.has(event.session_id)) {
@@ -44,13 +44,12 @@ function trackEvent(event: DevProfileEvent): void {
       tools_seen: new Set(),
       has_test_context: false,
     });
-    sessionsToday++;
   }
   const s = sessions.get(event.session_id)!;
   s.event_count++;
   if (event.tool_name) { s.last_tool = event.tool_name; s.tools_seen.add(event.tool_name); }
   if (event.has_test_context) s.has_test_context = true;
-  eventsToday++;
+  counters.track(event);
 }
 
 function latestSession(): SessionMeta | null {
@@ -127,6 +126,7 @@ function badRequest(msg: string): Response {
 
 export function startServer(): ReturnType<typeof Bun.serve> {
   const port = parseInt(process.env.DEVPROFILE_PORT ?? "7337", 10);
+  counters.rebuild();
   return Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -144,8 +144,8 @@ export function startServer(): ReturnType<typeof Bun.serve> {
         return json({
           running: true,
           session_active: current !== null,
-          events_today: eventsToday,
-          sessions_today: sessionsToday,
+          events_today: counters.eventsToday(),
+          sessions_today: counters.sessionsToday(),
           pid: process.pid,
         });
       }

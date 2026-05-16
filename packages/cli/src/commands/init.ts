@@ -8,7 +8,7 @@ import * as daemonManager from "../daemon-manager";
 import { ensureSecurePermissions } from "../daemon-manager";
 import type { DevProfileConfig } from "../types";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 function configPath(): string {
   return join(homedir(), ".devprofile", "config.json");

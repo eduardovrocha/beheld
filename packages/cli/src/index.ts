@@ -1,6 +1,6 @@
 import { Command } from "commander";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 const program = new Command();
 
@@ -36,12 +36,10 @@ program
 
 program
   .command("restart")
-  .description("Restart the DevProfile daemon")
+  .description("Restart the DevProfile daemon (graceful stop + fresh start, validates via /health)")
   .action(async () => {
-    const { stopCommand } = await import("./commands/stop");
-    const { startCommand } = await import("./commands/start");
-    await stopCommand();
-    await startCommand();
+    const { restartCommand } = await import("./commands/restart");
+    await restartCommand();
   });
 
 program
@@ -50,6 +48,14 @@ program
   .action(async () => {
     const { statusCommand } = await import("./commands/status");
     await statusCommand();
+  });
+
+program
+  .command("doctor")
+  .description("Diagnose DevProfile health (daemons, PID file, codesign, JSONL, orphans)")
+  .action(async () => {
+    const { doctorCommand } = await import("./commands/doctor");
+    await doctorCommand();
   });
 
 program

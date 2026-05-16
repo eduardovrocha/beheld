@@ -3,7 +3,7 @@ import { chmod, rename, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import * as daemonManager from "../daemon-manager";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const API_BASE = "https://devprofile.app/api";
 const RELEASES_BASE = "https://github.com/ioit-solutions/devprofile/releases/download";
 

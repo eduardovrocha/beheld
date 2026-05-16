@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, openSync, c
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { ensureEngine } from "./engine-extractor";
 import { mcpHealth } from "./client/mcp-client";
 import { engineHealth } from "./client/engine-client";
@@ -150,10 +150,40 @@ export async function start(): Promise<StartResult> {
 
   writePids(pids);
 
-  const mcp = mcpAlreadyUp || await waitForHealthPort(7337);
-  const engine = engineAlreadyUp || await waitForHealthPort(7338);
+  // MCP is Bun and binds in <100ms; 10s is plenty.
+  // Engine is a PyInstaller bundle that extracts itself to /tmp/_MEI* on first
+  // run (cold start ~12-15s on macOS). After the cache is warm, < 1s. Wait up
+  // to 30s for the engine; running in parallel with MCP keeps the perceived
+  // start time short on warm starts.
+  const [mcp, engine] = await Promise.all([
+    mcpAlreadyUp ? Promise.resolve(true) : waitForHealthPort(7337, 10_000),
+    engineAlreadyUp ? Promise.resolve(true) : waitForHealthPort(7338, 30_000),
+  ]);
+
+  // Fix the PID file: PyInstaller's bootloader (the PID we got from spawn())
+  // execs/forks into the real Python interpreter, which gets a different PID.
+  // The bootloader exits, lsof sees the inner process. Without this update,
+  // doctor will report "PID drift" forever and `restart` won't fix it.
+  if (engine && !engineAlreadyUp) {
+    const realEnginePid = pidListeningOn(7338);
+    if (realEnginePid !== undefined && realEnginePid !== pids.engine) {
+      pids.engine = realEnginePid;
+      writePids(pids);
+    }
+  }
 
   return { mcp, engine, alreadyRunning: false };
+}
+
+function pidListeningOn(port: number): number | undefined {
+  const res = spawnSync("lsof", ["-i", `:${port}`, "-P", "-n", "-sTCP:LISTEN", "-t"], {
+    stdio: "pipe",
+  });
+  if (res.status !== 0) return undefined;
+  const out = (res.stdout?.toString() ?? "").trim();
+  if (!out) return undefined;
+  const n = parseInt(out.split("\n")[0]!, 10);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export async function stop(): Promise<void> {

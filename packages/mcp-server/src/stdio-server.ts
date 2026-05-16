@@ -9,7 +9,7 @@ import { devprofileTool } from "./tools/devprofile-tool";
 import { statusTool } from "./tools/status-tool";
 import type { McpTool } from "./tools/types";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const TOOLS: McpTool[] = [devprofileTool, devprofileCoachTool, statusTool];
 
 export async function startStdioServer(): Promise<void> {

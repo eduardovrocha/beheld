@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { getDevProfileDir } from "./daemon";
 
 const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 interface NotificationState {
   [type: string]: string;

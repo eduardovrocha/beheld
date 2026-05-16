@@ -26,7 +26,7 @@ from processor import Processor
 from reader.jsonl_reader import CURSOR_FILE, SESSIONS_DIR, JsonlReader
 from storage.sqlite import DB_PATH, DevProfileDB
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 db = DevProfileDB(DB_PATH)
 _reader = JsonlReader(SESSIONS_DIR, CURSOR_FILE)

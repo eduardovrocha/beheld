@@ -526,7 +526,7 @@ describe("view readiness gate", () => {
     const exit = await proc.exited;
     expect(exit).toBe(0);
     expect(output).not.toContain("Coletando dados");
-    expect(output).toContain("Engine offline");
+    expect(output.toLowerCase()).toContain("engine offline");
     rmSync(dbPath, { force: true });
   }, 15000);
 });
@@ -577,7 +577,10 @@ describe("scoresCurrent offline fallback", () => {
     const output = await new Response(proc.stdout).text();
     const exit = await proc.exited;
     expect(exit).toBe(0);
-    expect(output).toContain("Engine offline");
+    // New B18 alert box uses uppercase title; older score date also triggers it
+    expect(output.toLowerCase()).toContain("engine offline");
+    expect(output).toContain("devprofile doctor");
+    expect(output).toContain("devprofile restart");
     rmSync(dbPath, { force: true });
   }, 15000);
 
@@ -727,6 +730,31 @@ describe("daemon start — já em execução", () => {
 
     const { isMcpRunning } = await import("../src/daemon-manager");
     expect(await isMcpRunning()).toBe(false);
+  });
+
+  test("isEngineRunning retorna false quando o servidor demora mais que o timeout", async () => {
+    globalThis.fetch = mock((_url: string | URL | Request, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal) {
+          const onAbort = () => {
+            const err = new Error("The operation was aborted");
+            (err as Error & { name: string }).name = "AbortError";
+            reject(err);
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+    }) as typeof fetch;
+
+    const { isEngineRunning } = await import("../src/daemon-manager");
+    const t0 = Date.now();
+    const result = await isEngineRunning();
+    const elapsed = Date.now() - t0;
+    expect(result).toBe(false);
+    // Timeout interno é 1s; permitir folga de schedulers lentos
+    expect(elapsed).toBeLessThan(2500);
   });
 });
 

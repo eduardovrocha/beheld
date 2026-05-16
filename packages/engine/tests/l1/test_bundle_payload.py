@@ -32,7 +32,7 @@ def db_with_scores() -> DevProfileDB:
 
 
 def _payload_dict(db: DevProfileDB) -> dict:
-    return dataclasses.asdict(build_bundle_payload(db, "0.1.0"))
+    return dataclasses.asdict(build_bundle_payload(db, "0.1.1"))
 
 
 # ── L1 presence ──────────────────────────────────────────────────────────────

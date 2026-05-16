@@ -210,8 +210,10 @@ describe("triggerEngineProcessing", () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = process.env.DEVPROFILE_ENGINE_URL;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19998"; // dead port
+    const { _resetCoalesceState } = await import("../src/engine-trigger");
+    _resetCoalesceState();
   });
 
   afterEach(() => {
@@ -266,6 +268,68 @@ describe("triggerEngineProcessing", () => {
     const start = Date.now();
     await triggerEngineProcessing("sess-fast");
     expect(Date.now() - start).toBeLessThan(200);
+  });
+
+  test("coalesces 5 sequential calls for the same session into 1 fetch", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+    }) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    for (let i = 0; i < 5; i++) {
+      await triggerEngineProcessing("sess-coalesce");
+    }
+    expect(callCount).toBe(1);
+  });
+
+  test("coalesces 5 parallel calls for the same session into 1 fetch", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      // Tiny delay so the in-flight check has time to fire for siblings
+      await new Promise((r) => setTimeout(r, 20));
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+    }) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await Promise.all([
+      triggerEngineProcessing("sess-parallel"),
+      triggerEngineProcessing("sess-parallel"),
+      triggerEngineProcessing("sess-parallel"),
+      triggerEngineProcessing("sess-parallel"),
+      triggerEngineProcessing("sess-parallel"),
+    ]);
+    expect(callCount).toBe(1);
+  });
+
+  test("does NOT coalesce different session_ids", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+    }) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    await triggerEngineProcessing("sess-A");
+    await triggerEngineProcessing("sess-B");
+    await triggerEngineProcessing("sess-C");
+    expect(callCount).toBe(3);
+  });
+
+  test("coalesces even when engine is offline (no log spam)", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      throw new Error("ECONNREFUSED");
+    }) as typeof fetch;
+
+    const { triggerEngineProcessing } = await import("../src/engine-trigger");
+    for (let i = 0; i < 8; i++) {
+      await triggerEngineProcessing("sess-burst-offline");
+    }
+    expect(callCount).toBe(1);
   });
 });
 

@@ -3,7 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { composition, summarize, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
+import { verifyAttestation } from "../bundle/attestation-verify";
 import type { Bundle } from "../bundle/types";
+import { fail, brand, GREEN, RED, YELLOW, DIM, RESET } from "../ui/styles";
 
 interface VerifyOptions {
   chain?: boolean;
@@ -35,19 +37,21 @@ function localResolver(): BundleResolver {
 }
 
 function mark(ok: boolean): string {
-  return ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
+  return ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
 }
 
 export async function verifyCommand(
   filePath: string,
   opts: VerifyOptions = {},
 ): Promise<void> {
+  console.log(brand("checando autenticidade"));
   if (!filePath) {
-    console.error("✗ Caminho do bundle é obrigatório: devprofile verify <arquivo.dpbundle>");
+    console.error(fail("Caminho do bundle é obrigatório"));
+    console.error(`     ${DIM}Uso: devprofile verify <arquivo.dpbundle>${RESET}`);
     process.exit(1);
   }
   if (!existsSync(filePath)) {
-    console.error(`✗ Arquivo não encontrado: ${filePath}`);
+    console.error(fail(`Arquivo não encontrado: ${filePath}`));
     process.exit(1);
   }
 
@@ -55,13 +59,12 @@ export async function verifyCommand(
   try {
     raw = JSON.parse(readFileSync(filePath, "utf8"));
   } catch (e) {
-    console.error(`✗ JSON inválido: ${(e as Error).message}`);
+    console.error(fail(`JSON inválido: ${(e as Error).message}`));
     process.exit(1);
   }
 
   const result = await verifyBundle(raw);
 
-  console.log("");
   console.log(`  Verificação: ${filePath}`);
   console.log(`    ${mark(result.checks.schema.ok)} schema    ${result.checks.schema.reason ?? ""}`);
   console.log(`    ${mark(result.checks.hash.ok)} hash      ${result.checks.hash.reason ?? ""}`);
@@ -73,7 +76,7 @@ export async function verifyCommand(
   if (l1.ok) {
     console.log(`    ${mark(true)} L1        ${l1.repo_count ?? 0} repositórios`);
   } else {
-    console.log(`    \x1b[33m⚠\x1b[0m L1        ${l1.reason ?? "ausente"}`);
+    console.log(`    ${YELLOW}⚠${RESET} L1        ${l1.reason ?? "ausente"}`);
   }
   if (l2.ok) {
     console.log(`    ${mark(true)} L2        ${l2.session_count ?? 0} sessões`);
@@ -90,8 +93,37 @@ export async function verifyCommand(
       : chainResult.reason ?? "?";
     console.log(`    ${mark(chainResult.ok)} chain     ${detail}`);
   } else if (opts.chain) {
-    console.log(`    \x1b[33m–\x1b[0m chain     skipped (bundle itself failed)`);
+    console.log(`    ${YELLOW}–${RESET} chain     skipped (bundle itself failed)`);
     chainOk = false;
+  }
+
+  // Identity attestation (Phase 5 / F5.6.1). Optional — bundles without one
+  // are still cryptographically valid; we just report identity_unverified.
+  const attCheck = result.checks.schema.ok
+    ? await verifyAttestation(raw as Bundle)
+    : null;
+  if (attCheck) {
+    if (!attCheck.present) {
+      console.log(`    ${YELLOW}–${RESET} identity  ausente (bundle sem attestation — identity_unverified)`);
+    } else if (!attCheck.payload_valid) {
+      console.log(`    ${mark(false)} identity  ${attCheck.reason ?? "payload inválido"}`);
+    } else {
+      const allGood = attCheck.signature_valid && attCheck.dev_pubkey_matches && attCheck.key_status === "active";
+      const gh = attCheck.github;
+      const ghLabel = gh ? `${gh.login} (id=${gh.user_id})` : "?";
+      console.log(`    ${mark(allGood)} identity  github: ${ghLabel}`);
+      console.log(`      ${mark(attCheck.signature_valid)} platform signature${attCheck.reason && !attCheck.signature_valid ? `  ${DIM}${attCheck.reason}${RESET}` : ""}`);
+      console.log(`      ${mark(!!attCheck.dev_pubkey_matches)} dev pubkey bind`);
+      const status = attCheck.key_status ?? "?";
+      const statusMark = status === "active" ? mark(true)
+        : status === "rotated" ? `${YELLOW}~${RESET}`
+        : status === "revoked" ? mark(false)
+        : `${YELLOW}?${RESET}`;
+      const statusDetail = status === "revoked" && attCheck.revoked_reason
+        ? `  ${DIM}${attCheck.revoked_reason}${RESET}`
+        : "";
+      console.log(`      ${statusMark} platform key status: ${status}${statusDetail}`);
+    }
   }
 
   if (result.ok) {

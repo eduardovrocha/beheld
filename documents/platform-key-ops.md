@@ -321,6 +321,35 @@ Importante: rotação programada NÃO é revogação. Atestações de chaves
 rotacionadas continuam válidas — apenas não emitimos mais com elas.
 Atestações de chaves revogadas exigem ação do dev (reissuance).
 
+### Cascade automática (F5.6.1)
+
+Atestações **não** carregam `revoked` no próprio registro. O status é
+derivado em tempo de verificação a partir do `info.json` da chave que
+assinou:
+
+| Estado da chave em `info.json` | `key_status` reportado pelo `/api/attestation/verify` |
+|--------------------------------|-------------------------------------------------------|
+| `active: true`                 | `active`                                              |
+| `active: false, revoked: false`| `rotated`                                             |
+| `active: false, revoked: true` | `revoked` (+ `revoked_reason`)                        |
+| chave ausente do registro      | `unknown`                                             |
+
+Conclusão operacional: pra revogar **todas** as atestações sob uma
+chave comprometida, basta editar o `info.json` da chave (`active: false`,
+`revoked: true`, `revoked_at`, `revoked_reason`), commitar e deployar.
+A próxima chamada de `/verify` em qualquer atestação dessa chave já
+reportará `key_status: revoked` sem nenhuma migration ou update bulk no
+banco.
+
+Pra inspecionar o impacto antes ou depois da edição, rodar no backend:
+
+```sh
+bin/rails platform_key:list_revoked_attestations
+```
+
+Lista cada chave revogada + GitHub login / user_id / fingerprint do dev
+de cada atestação afetada — útil pra comunicar reissuance aos usuários.
+
 ---
 
 ## Triggers de upgrade de infra

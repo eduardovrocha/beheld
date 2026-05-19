@@ -12,7 +12,12 @@
 import { test, expect, describe } from "bun:test";
 
 import { canonicalJson, payloadHash, payloadToCanonical } from "../src/bundle/canonical";
-import { BUNDLE_VERSION, type BundlePayload } from "../src/bundle/types";
+import {
+  BUNDLE_VERSION,
+  type Bundle,
+  type BundleAttestation,
+  type BundlePayload,
+} from "../src/bundle/types";
 
 // ── shared fixture (mirror in packages/engine/tests/test_bundle.py) ─────────
 
@@ -93,8 +98,8 @@ const EXPECTED_HASH =
 // ── canonical_json basics ────────────────────────────────────────────────────
 
 describe("canonicalJson — primitives", () => {
-  test("BUNDLE_VERSION is '2'", () => {
-    expect(BUNDLE_VERSION).toBe("2");
+  test("BUNDLE_VERSION is '3'", () => {
+    expect(BUNDLE_VERSION).toBe("3");
   });
 
   test("sorts keys alphabetically", () => {
@@ -175,5 +180,61 @@ describe("bundle contract", () => {
       created_at: base.created_at,
     };
     expect(await payloadHash(shuffled)).toBe(await payloadHash(base));
+  });
+});
+
+// ── attestation wrapper (Phase 5 / F5.6) ──────────────────────────────────────
+
+function fixtureAttestation(): BundleAttestation {
+  return {
+    payload: {
+      type: "devprofile-identity-attestation/v1",
+      platform_key_id: "devprofile-platform-2026-q2",
+      dev_pubkey: "ed25519-pub:AAAA",
+      github: { user_id: 12345, login: "octocat", verified_at: "2026-05-19T18:00:00Z" },
+      attested_at: "2026-05-19T18:00:00Z",
+    },
+    signature: "ed25519:AAAA",
+  };
+}
+
+describe("Bundle wrapper — attestation field (Phase 5 / F5.6)", () => {
+  test("attestation field is optional on Bundle", () => {
+    const bundle: Bundle = {
+      version: BUNDLE_VERSION,
+      payload: fixturePayload(),
+      hash: "sha256:dead",
+      signature: "ed25519:dead",
+      public_key: "ed25519:beef",
+    };
+    expect(bundle.attestation).toBeUndefined();
+  });
+
+  test("adding attestation at wrapper does NOT change payload hash", async () => {
+    const payload = fixturePayload();
+    const hashWithout = await payloadHash(payload);
+    const bundle: Bundle = {
+      version: BUNDLE_VERSION,
+      payload,
+      hash: hashWithout,
+      signature: "ed25519:dead",
+      public_key: "ed25519:beef",
+      attestation: fixtureAttestation(),
+    };
+    expect(await payloadHash(bundle.payload)).toBe(hashWithout);
+  });
+
+  test("attestation survives canonicalization of full bundle wrapper", () => {
+    const bundle: Bundle = {
+      version: BUNDLE_VERSION,
+      payload: fixturePayload(),
+      hash: "sha256:dead",
+      signature: "ed25519:dead",
+      public_key: "ed25519:beef",
+      attestation: fixtureAttestation(),
+    };
+    const out = JSON.parse(canonicalJson(bundle));
+    expect(out.attestation.payload.github.login).toBe("octocat");
+    expect(out.attestation.signature).toBe("ed25519:AAAA");
   });
 });

@@ -5,7 +5,7 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-export const BUNDLE_VERSION = "2";
+export const BUNDLE_VERSION = "3";
 
 export interface BundleScores {
   date: string;
@@ -77,10 +77,35 @@ export interface BundlePayloadV1 {
   signals: BundleL2Section;
 }
 
+/** Identity attestation issued by the DevProfile platform key
+ *  (Phase 5 / F5.6). Lives at the WRAPPER level — sibling of hash and
+ *  signature — so adding it to a bundle does not change the bundle hash.
+ *  Bundles without an attestation field are still valid; verifiers report
+ *  them as `identity_unverified`. */
+export interface AttestationGithub {
+  user_id: number;
+  login: string;
+  verified_at: string;
+}
+
+export interface AttestationPayload {
+  type: string;            // "devprofile-identity-attestation/v1"
+  platform_key_id: string; // joins to GET /api/platform-keys + embedded keys
+  dev_pubkey: string;      // "ed25519-pub:<std-base64>"
+  github: AttestationGithub;
+  attested_at: string;
+}
+
+export interface BundleAttestation {
+  payload: AttestationPayload;
+  signature: string; // "ed25519:<base64>" — Ed25519 sig over canonical(payload)
+}
+
 export interface Bundle {
   version: string;
   payload: BundlePayload;
   hash: string;        // "sha256:<hex>"
   signature: string;   // "ed25519:<hex>"
   public_key: string;  // "ed25519:<base64url-x>"
+  attestation?: BundleAttestation | null;  // F5.6 — optional, wrapper-level
 }

@@ -215,7 +215,7 @@ class CoachPayload:
 # commit — the cross-language canonical hash test (test_bundle_contract) catches
 # drift.
 
-BUNDLE_VERSION = "2"
+BUNDLE_VERSION = "3"
 
 
 @dataclass(frozen=True)
@@ -266,11 +266,47 @@ class BundlePayload:
 
 
 @dataclass(frozen=True)
+class AttestationGithub:
+    """Snapshot of the GitHub identity bound to a developer's pubkey at
+    attestation time (Phase 5 / F5.6)."""
+    user_id: int
+    login: str
+    verified_at: str
+
+
+@dataclass(frozen=True)
+class AttestationPayload:
+    """Signed half of an identity attestation. The verifier reconstructs the
+    canonical JSON of this object and checks the signature against the
+    platform key identified by `platform_key_id`."""
+    type: str
+    platform_key_id: str
+    dev_pubkey: str
+    github: AttestationGithub
+    attested_at: str
+
+
+@dataclass(frozen=True)
+class BundleAttestation:
+    """Wrapper-level identity attestation. Optional — bundles without one
+    verify as `identity_unverified`. Adding one does NOT change the bundle
+    payload hash (the hash is over `payload` only)."""
+    payload: AttestationPayload
+    signature: str  # "ed25519:<base64>"
+
+
+@dataclass(frozen=True)
 class Bundle:
     """Top-level .dpbundle wire format. `version` is the bundle schema version,
-    independent of devprofile_version (which tracks the app)."""
+    independent of devprofile_version (which tracks the app).
+
+    Schema v3 (Phase 5 / F5.6) adds the optional `attestation` field at the
+    wrapper level. v1, v2, and v3 are all readable by current verifiers; the
+    presence or absence of attestation just shifts the identity-verification
+    tier reported to the user."""
     version: str
     payload: BundlePayload
     hash: str          # "sha256:<hex>"
     signature: str     # "ed25519:<hex>"
     public_key: str    # "ed25519:<base64url-x>"
+    attestation: Optional[BundleAttestation] = None  # F5.6 — optional, wrapper-level

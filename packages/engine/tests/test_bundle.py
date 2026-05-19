@@ -19,7 +19,10 @@ import pytest
 from bundle import canonical_json, payload_hash, payload_to_canonical
 from models import (
     BUNDLE_VERSION,
+    AttestationGithub,
+    AttestationPayload,
     Bundle,
+    BundleAttestation,
     BundleL1Section,
     BundleL2Section,
     BundlePayload,
@@ -97,8 +100,8 @@ EXPECTED_HASH = "sha256:60168f63bb60ff60bcbfb382733f2da1813284ee75ab03459c02ca6c
 # ── canonical_json basics ────────────────────────────────────────────────────
 
 
-def test_bundle_version_is_two() -> None:
-    assert BUNDLE_VERSION == "2"
+def test_bundle_version_is_three() -> None:
+    assert BUNDLE_VERSION == "3"
 
 
 def test_canonical_sorts_keys_alphabetically() -> None:
@@ -207,7 +210,7 @@ def test_bundle_wrapper_serializes_with_payload_inside() -> None:
         public_key="ed25519:beef",
     )
     out = json.loads(canonical_json(dataclasses.asdict(bundle)))
-    assert out["version"] == "2"
+    assert out["version"] == "3"
     assert out["hash"] == EXPECTED_HASH
     assert out["signature"] == "ed25519:dead"
     assert out["public_key"] == "ed25519:beef"
@@ -219,3 +222,63 @@ def test_bundle_payload_dataclass_is_frozen() -> None:
     p = _fixture_payload()
     with pytest.raises(Exception):
         p.created_at = "tampered"  # type: ignore[misc]
+
+
+# ── attestation wrapper (Phase 5 / F5.6) ──────────────────────────────────────
+
+
+def _fixture_attestation() -> BundleAttestation:
+    return BundleAttestation(
+        payload=AttestationPayload(
+            type="devprofile-identity-attestation/v1",
+            platform_key_id="devprofile-platform-2026-q2",
+            dev_pubkey="ed25519-pub:AAAA",
+            github=AttestationGithub(user_id=12345, login="octocat", verified_at="2026-05-19T18:00:00Z"),
+            attested_at="2026-05-19T18:00:00Z",
+        ),
+        signature="ed25519:AAAA",
+    )
+
+
+def test_attestation_field_is_optional_on_bundle() -> None:
+    """Bundles without attestation are still valid (identity_unverified)."""
+    bundle = Bundle(
+        version=BUNDLE_VERSION,
+        payload=_fixture_payload(),
+        hash=EXPECTED_HASH,
+        signature="ed25519:dead",
+        public_key="ed25519:beef",
+    )
+    assert bundle.attestation is None
+
+
+def test_attestation_at_wrapper_does_not_change_payload_hash() -> None:
+    """The attestation lives at the wrapper level. Adding one to a bundle
+    MUST NOT alter the payload hash — the hash is over `payload` only, so
+    bundles can be signed once and attested later without re-signing."""
+    payload = _fixture_payload()
+    hash_without = payload_hash(payload)
+    bundle = Bundle(
+        version=BUNDLE_VERSION,
+        payload=payload,
+        hash=hash_without,
+        signature="ed25519:dead",
+        public_key="ed25519:beef",
+        attestation=_fixture_attestation(),
+    )
+    assert payload_hash(bundle.payload) == hash_without
+
+
+def test_attestation_appears_in_canonical_wrapper_json() -> None:
+    import dataclasses
+    bundle = Bundle(
+        version=BUNDLE_VERSION,
+        payload=_fixture_payload(),
+        hash=EXPECTED_HASH,
+        signature="ed25519:dead",
+        public_key="ed25519:beef",
+        attestation=_fixture_attestation(),
+    )
+    out = json.loads(canonical_json(dataclasses.asdict(bundle)))
+    assert out["attestation"]["payload"]["github"]["login"] == "octocat"
+    assert out["attestation"]["signature"] == "ed25519:AAAA"

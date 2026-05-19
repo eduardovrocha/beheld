@@ -6,6 +6,7 @@
   "scripts": {
     "test": "bun test",
     "build": "sh scripts/build.sh",
-    "build:cli": "bun build packages/cli/src/index.ts --compile --outfile dist/devprofile"
+    "build:cli": "bun build packages/cli/src/index.ts --compile --outfile dist/devprofile",
+    "sync:platform-keys": "bun run scripts/sync-platform-keys.ts"
   }
 }

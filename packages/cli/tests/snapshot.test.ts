@@ -325,8 +325,9 @@ describe("snapshotCommand — --share", () => {
     }
     const out = logs.join("\n");
     expect(out).toContain("http://127.0.0.1/v/abc123");
-    expect(out).toContain("id: abc123");
-    expect(out).toContain("TTL: 30 dias");
+    expect(out).toContain("id:");
+    expect(out).toContain("abc123");
+    expect(out).toContain("30 dias");
     // QR rendering produces block characters
     expect(out).toMatch(/[█▀▄]/);
     // The actual bundle was uploaded
@@ -349,7 +350,7 @@ describe("snapshotCommand — --share", () => {
       console.log = realLog;
     }
     const out = logs.join("\n");
-    expect(out).toContain("✓ Snapshot gerado");      // local bundle still produced
+    expect(out).toContain("Snapshot gerado");      // local bundle still produced
     expect(out).toContain("Upload falhou");
     expect(out).toContain("HTTP 500");
   });
@@ -482,7 +483,7 @@ describe("snapshotCommand — L1/L2 composition output", () => {
       console.log = originalLog;
     }
     const out = captured.join("\n");
-    expect(out).toContain("Perfil capturado:");
+    expect(out).toContain("Perfil capturado");
     expect(out).toContain("Base histórica:");
     expect(out).toContain("Trajetória observada:");
   });
@@ -547,5 +548,76 @@ describe("snapshotCommand — L1/L2 composition output", () => {
     expect(bundle.payload).toHaveProperty("l1");
     expect(bundle.payload).toHaveProperty("l2");
     expect(bundle.payload).not.toHaveProperty("signals");
+  });
+});
+
+// ── attestation injection (Phase 5 / F5.6.1.e) ──────────────────────────────
+
+describe("snapshotCommand — attestation injection", () => {
+  function writeAttestationCache(workDir: string, attestation: object): void {
+    const dir = join(workDir, ".devprofile");
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    require("node:fs").writeFileSync(
+      join(dir, "attestation.json"),
+      JSON.stringify(attestation, null, 2) + "\n",
+    );
+  }
+
+  const sampleAttestation = {
+    payload: {
+      type: "devprofile-identity-attestation/v1",
+      platform_key_id: "devprofile-platform-2026-q2",
+      dev_pubkey: "ed25519-pub:AAAA",
+      github: {
+        user_id: 12345,
+        login: "octocat",
+        verified_at: "2026-05-19T18:00:00Z",
+      },
+      attested_at: "2026-05-19T18:00:00Z",
+    },
+    signature: "ed25519:AAAA",
+  };
+
+  test("omits attestation field quando cache não existe", async () => {
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=att-none");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.attestation).toBeUndefined();
+  });
+
+  test("embute o conteúdo exato da cache quando ela existe", async () => {
+    writeAttestationCache(workDir, sampleAttestation);
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=att-yes");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.attestation).toEqual(sampleAttestation);
+  });
+
+  test("attestation NÃO afeta o bundle hash (vive no wrapper, fora do payload)", async () => {
+    // Snapshot sem attestation
+    const { snapshotCommand: snap1 } = await import("../src/commands/snapshot?v=att-hash-no");
+    await snap1();
+    const snapDir = join(workDir, ".devprofile", "snapshots");
+    let file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundleNoAtt = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+
+    // Cleanup
+    rmSync(snapDir, { recursive: true, force: true });
+
+    // Snapshot com attestation
+    writeAttestationCache(workDir, sampleAttestation);
+    const { snapshotCommand: snap2 } = await import("../src/commands/snapshot?v=att-hash-yes");
+    await snap2();
+    file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const bundleWithAtt = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+
+    // Same payload → same hash
+    expect(bundleWithAtt.hash).toBe(bundleNoAtt.hash);
+    expect(bundleWithAtt.attestation).toBeDefined();
+    expect(bundleNoAtt.attestation).toBeUndefined();
   });
 });

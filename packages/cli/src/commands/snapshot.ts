@@ -12,12 +12,17 @@ import {
   loadPublicJwk,
   publicKeyFingerprint,
 } from "../keys/keystore";
+import { loadAttestationCache } from "../keys/attestation-cache";
+import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET } from "../ui/styles";
+import { renderSnapshotHtml, type SnapshotHtmlData } from "../ui/snapshot-html";
 
 const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface SnapshotOptions {
   output?: string;
   share?: boolean;
+  html?: boolean;
+  authorName?: string;
 }
 
 interface SnapshotRow {
@@ -67,6 +72,7 @@ function desktopCopyDir(): string | null {
 }
 
 export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void> {
+  console.log(brand("capturando o momento"));
   await ensureKeys();
 
   // 1. Engine builds the payload (no signing yet)
@@ -80,12 +86,14 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
       process.exit(1);
     }
     if (!r.ok) {
-      console.error(`✗ Engine respondeu ${r.status}. Execute: devprofile start`);
+      console.error(fail(`Engine respondeu ${r.status}`));
+      console.error(`     ${DIM}Execute: devprofile start${RESET}`);
       process.exit(1);
     }
     payload = (await r.json()) as BundlePayload;
   } catch (err) {
-    console.error("✗ Engine offline ou inacessível. Execute: devprofile start");
+    console.error(fail("Engine offline ou inacessível"));
+    console.error(`     ${DIM}Execute: devprofile start${RESET}`);
     process.exit(1);
   }
 
@@ -100,12 +108,18 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   );
   const pubJwk = loadPublicJwk();
 
+  // Embed the identity attestation if the dev has run `devprofile attest`.
+  // The attestation lives at the wrapper level so adding it doesn't change
+  // the bundle hash (Phase 5 / F5.6.1.e).
+  const attestation = loadAttestationCache();
+
   const bundle: Bundle = {
     version: BUNDLE_VERSION,
     payload,
     hash,
     signature: `ed25519:${toHex(sigBuf)}`,
     public_key: `ed25519:${pubJwk.x}`,
+    ...(attestation ? { attestation } : {}),
   };
 
   // 3. Write bundle to disk (always to ~/.devprofile/snapshots/, plus --output if given)
@@ -156,25 +170,30 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
 
   const fp = await publicKeyFingerprint(pubJwk);
   console.log("");
-  console.log("  ✓ Snapshot gerado");
-  console.log(`    hash:         ${hash.slice(0, 24)}...`);
-  console.log(`    arquivo:      ${primaryPath}`);
-  if (desktopPath) console.log(`    desktop:      ${desktopPath}`);
-  if (outputPath) console.log(`    cópia:        ${outputPath}`);
-  console.log(`    assinado por: ${fp}`);
+  console.log(ok("Snapshot gerado"));
+  console.log(`     ${DIM}hash:${RESET}         ${bold(hash.slice(0, 24))}…`);
+  console.log(`     ${DIM}arquivo:${RESET}      ${primaryPath}`);
+  if (desktopPath) console.log(`     ${DIM}desktop:${RESET}      ${desktopPath}`);
+  if (outputPath)  console.log(`     ${DIM}cópia:${RESET}        ${outputPath}`);
+  console.log(`     ${DIM}assinado por:${RESET} ${fp}`);
 
   // L1 / L2 composition surfaced from the just-signed payload (Phase 6 / F6.8).
   const comp = composition(payload as unknown as Record<string, unknown>);
   console.log("");
-  console.log("  Perfil capturado:");
-  console.log(`    Base histórica:       ${comp.base}`);
-  console.log(`    Trajetória observada: ${comp.trajectory}`);
+  console.log(`  ${bold("Perfil capturado")}`);
+  console.log(`     ${DIM}Base histórica:${RESET}       ${comp.base}`);
+  console.log(`     ${DIM}Trajetória observada:${RESET} ${comp.trajectory}`);
 
   if (!saveOk) {
     console.log("");
-    console.log("  ⚠️  Bundle criado no disco mas não registrado na chain.");
-    console.log("     Execute `devprofile snapshot` novamente quando o engine subir.");
+    console.log(warn("Bundle criado no disco mas não registrado na chain"));
+    console.log(`     ${DIM}Execute \`devprofile snapshot\` novamente quando o engine subir.${RESET}`);
   }
+
+  if (opts.html === true) {
+    await writeHtmlRetrato(bundle, primaryPath, opts.authorName);
+  }
+
   console.log("");
 
   if (opts.share === true) {
@@ -182,14 +201,59 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   }
 }
 
+async function writeHtmlRetrato(
+  bundle: Bundle,
+  bundlePath: string,
+  authorName: string | undefined,
+): Promise<void> {
+  // Pull identity + emergent + signals from the engine. The bundle we have is
+  // the canonical signed artifact; the engine just hands us the human-facing
+  // overlays (identity phrase, temporal diff) in one extra round-trip.
+  let extras: { identity: SnapshotHtmlData["identity"]; emergent: SnapshotHtmlData["emergent"]; signals: SnapshotHtmlData["signals"] } | null = null;
+  try {
+    const r = await fetch(`${ENGINE_URL}/snapshot/html-data`, { method: "POST" });
+    if (r.ok) {
+      const body = (await r.json()) as { identity: SnapshotHtmlData["identity"]; emergent: SnapshotHtmlData["emergent"]; signals: SnapshotHtmlData["signals"] };
+      extras = { identity: body.identity, emergent: body.emergent, signals: body.signals };
+    }
+  } catch {
+    // engine offline — fall through
+  }
+
+  if (!extras) {
+    console.log("");
+    console.log(warn("Engine offline — HTML não gerado"));
+    console.log(`     ${DIM}O .dpbundle local continua válido. Tente novamente quando o engine subir.${RESET}`);
+    return;
+  }
+
+  const html = renderSnapshotHtml({
+    bundle,
+    signals: extras.signals,
+    identity: extras.identity,
+    emergent: extras.emergent,
+    authorName,
+  });
+
+  const htmlPath = bundlePath.replace(/\.dpbundle$/, ".html");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(htmlPath, html, "utf8");
+
+  console.log("");
+  console.log(ok("Retrato HTML gerado"));
+  console.log(`     ${DIM}arquivo:${RESET}    ${htmlPath}`);
+  console.log(`     ${DIM}identity:${RESET}   ${extras.identity.identity_long}`);
+  console.log(`     ${DIM}confidence:${RESET} ${extras.identity.confidence} ${meta(`(via ${extras.identity.generation_path})`)}`);
+}
+
 async function shareBundle(bundle: Bundle): Promise<void> {
   const result = await uploadBundle(bundle);
   if (!result.ok) {
-    console.log("  ⚠️  Upload falhou — o bundle local continua válido.");
+    console.log(warn("Upload falhou — o bundle local continua válido"));
     if (result.error.kind === "network") {
-      console.log(`     Rede: ${result.error.message}`);
+      console.log(`     ${DIM}Rede: ${result.error.message}${RESET}`);
     } else {
-      console.log(`     HTTP ${result.error.status}: ${result.error.body.slice(0, 200)}`);
+      console.log(`     ${DIM}HTTP ${result.error.status}:${RESET} ${result.error.body.slice(0, 200)}`);
     }
     console.log("");
     return;
@@ -199,46 +263,49 @@ async function shareBundle(bundle: Bundle): Promise<void> {
   const qr = await renderQr(url, { small: true });
 
   console.log(qr);
-  console.log(`  ${url}`);
+  console.log(`  ${bold(url)}`);
   if (ttl_days !== null) {
-    console.log(`  TTL: ${ttl_days} dias${deduplicated ? " (deduplicado — já existia)" : ""}`);
+    console.log(`  ${DIM}TTL:${RESET} ${ttl_days} dias${deduplicated ? meta("  (deduplicado — já existia)") : ""}`);
   } else if (deduplicated) {
-    console.log("  (deduplicado — já existia)");
+    console.log(`  ${meta("(deduplicado — já existia)")}`);
   }
-  console.log(`  id: ${id}`);
+  console.log(`  ${DIM}id:${RESET}  ${id}`);
   console.log("");
 }
 
 export async function snapshotListCommand(): Promise<void> {
+  console.log(brand("histórico de momentos"));
   let rows: SnapshotRow[];
   try {
     const r = await fetch(`${ENGINE_URL}/snapshots`);
     if (!r.ok) {
-      console.error(`✗ Engine respondeu ${r.status}. Execute: devprofile start`);
+      console.error(fail(`Engine respondeu ${r.status}`));
+      console.error(`     ${DIM}Execute: devprofile start${RESET}`);
       process.exit(1);
     }
     rows = (await r.json()) as SnapshotRow[];
   } catch {
-    console.error("✗ Engine offline. Execute: devprofile start");
+    console.error(fail("Engine offline"));
+    console.error(`     ${DIM}Execute: devprofile start${RESET}`);
     process.exit(1);
   }
 
   if (rows.length === 0) {
     console.log("");
-    console.log("  Nenhum snapshot ainda. Execute: devprofile snapshot");
+    console.log(`  ${DIM}Nenhum snapshot ainda.${RESET} Execute: ${bold("devprofile snapshot")}`);
     console.log("");
     return;
   }
 
   console.log("");
-  console.log(`  ${rows.length} snapshot(s):`);
+  console.log(`  ${bold(`${rows.length} snapshot(s)`)}`);
   console.log("");
   for (const row of rows) {
     const short = row.hash.slice("sha256:".length, "sha256:".length + 12);
     const date = row.created_at.slice(0, 19).replace("T", " ");
-    const marker = row.previous_hash ? "→" : "•"; // • = genesis
-    const path = row.bundle_path ?? "(arquivo removido)";
-    console.log(`  ${marker} ${date}  ${short}  ${path}`);
+    const marker = row.previous_hash ? `${DIM}→${RESET}` : `${DIM}•${RESET}`; // • = genesis
+    const path = row.bundle_path ?? `${DIM}(arquivo removido)${RESET}`;
+    console.log(`  ${marker} ${DIM}${date}${RESET}  ${short}  ${path}`);
   }
   console.log("");
 }

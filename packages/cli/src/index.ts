@@ -80,12 +80,23 @@ program
     await viewCommand(opts);
   });
 
+program
+  .command("attest")
+  .description("Bind your Ed25519 pubkey to your GitHub identity (Phase 5 / F5.6.1)")
+  .option("--url <url>", "Platform API base URL (defaults to DEVPROFILE_API_URL or http://localhost:3000)")
+  .action(async (opts: { url?: string }) => {
+    const { attestCommand } = await import("./commands/attest");
+    await attestCommand(opts);
+  });
+
 const snapshotCmd = program
   .command("snapshot")
   .description("Generate a signed .dpbundle of your current profile")
   .option("--output <path>", "Also write the bundle to this path")
   .option("--share", "Upload to the portal and print a QR + short URL")
-  .action(async (opts: { output?: string; share?: boolean }) => {
+  .option("--html", "Also generate a self-contained HTML retrato técnico")
+  .option("--author-name <name>", "Name displayed on the HTML retrato (defaults to 'dev')")
+  .action(async (opts: { output?: string; share?: boolean; html?: boolean; authorName?: string }) => {
     const { snapshotCommand } = await import("./commands/snapshot");
     await snapshotCommand(opts);
   });

@@ -2,10 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Status
-
-Pre-implementation phase. The authoritative reference for everything to be built is [documents/beheld-mvp-spec.md](documents/beheld-mvp-spec.md) (v2).
-
 ## What Beheld Is
 
 A privacy-first developer profiling system that silently captures usage metadata from Claude Code and Continue.dev to generate 4 developer scores — without ever storing conversation content, file contents, or secrets. Distributed as a single standalone binary; no Node.js, Python, or npm required on the host.

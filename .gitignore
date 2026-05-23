@@ -23,3 +23,6 @@ packages/cli/assets/beheld-engine
 
 # Separate project — Rails portal + Docker (lives at web/, tracked independently)
 web/
+
+# Local working docs / mockups — not part of the published repo
+/documents/

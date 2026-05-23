@@ -3,7 +3,7 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="beheld"
-REPO="beheld/beheld"
+REPO="eduardovrocha/beheld"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"

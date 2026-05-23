@@ -4,10 +4,10 @@
     {
       "key_id": "beheld-platform-2026-q2",
       "algorithm": "ed25519",
-      "public_key": "ed25519-pub:ao/AsOyFTMrORd9irGlQjbxI5C7Qb4TfZVi7sgnoyio=",
+      "public_key": "ed25519-pub:/TmWvvBqa9r1eCG7O85GdX8BCATXrV/G8I/8MOmlbKQ=",
       "active": true,
       "revoked": false,
-      "created_at": "2026-05-19T18:13:07Z",
+      "created_at": "2026-05-23T22:48:00Z",
       "rotated_at": null,
       "revoked_at": null,
       "revoked_reason": null

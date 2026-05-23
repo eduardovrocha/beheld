@@ -33,7 +33,7 @@ The script downloads the binary for your platform, verifies the SHA-256 checksum
 ### From source (development)
 
 ```sh
-git clone https://github.com/ioit-solutions/beheld
+git clone https://github.com/eduardovrocha/beheld
 cd beheld
 bun install
 sh scripts/build.sh          # builds dist/beheld

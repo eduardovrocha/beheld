@@ -6,7 +6,7 @@ import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 const VERSION = "0.1.1";
 const API_BASE = "https://beheld.dev/api";
-const RELEASES_BASE = "https://github.com/ioit-solutions/beheld/releases/download";
+const RELEASES_BASE = "https://github.com/eduardovrocha/beheld/releases/download";
 
 function platform(): string {
   if (process.platform === "darwin") {

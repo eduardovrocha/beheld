@@ -12,8 +12,8 @@ import os
 
 from models import Scores, Session, Signal, WorkflowMetrics
 
-_DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
-DB_PATH = _DATA_HOME / ".devprofile" / "profile.db"
+_DATA_HOME = Path(os.environ.get("BEHELD_DATA_DIR", Path.home()))
+DB_PATH = _DATA_HOME / ".beheld" / "profile.db"
 
 # `tool_sequence_json` is appended every time `save_session` merges a new
 # update.  Without a cap, a long-running session that survives many writes
@@ -105,7 +105,8 @@ CREATE TABLE IF NOT EXISTS l1_repositories (
     root_commit_hash TEXT PRIMARY KEY,
     imported_at TEXT NOT NULL,
     commit_count INTEGER NOT NULL,
-    author_email_hash TEXT NOT NULL
+    author_email_hash TEXT NOT NULL,
+    first_seen_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS l1_signals (
@@ -121,6 +122,19 @@ CREATE TABLE IF NOT EXISTS l1_signals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_l1_signals_repo ON l1_signals(root_commit_hash);
+
+CREATE TABLE IF NOT EXISTS identity_phrases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER UNIQUE REFERENCES snapshots(id),
+    long TEXT NOT NULL,
+    short TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    generation_path TEXT NOT NULL,
+    model_used TEXT,
+    generated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_identity_path ON identity_phrases(generation_path);
 
 CREATE VIEW IF NOT EXISTS l1_aggregated AS
 SELECT
@@ -247,19 +261,55 @@ def _migration_4_add_l1_tables(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_7_add_first_seen_at(conn: sqlite3.Connection) -> None:
+    """F5.7.2 — record when each repo was first imported.
+
+    Backfills existing rows from imported_at so older databases keep a stable
+    timestamp on the first migration. New rows write first_seen_at = imported_at
+    at insert time."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(l1_repositories)").fetchall()}
+    if "first_seen_at" not in cols:
+        conn.execute("ALTER TABLE l1_repositories ADD COLUMN first_seen_at TEXT")
+    conn.execute(
+        "UPDATE l1_repositories SET first_seen_at = imported_at WHERE first_seen_at IS NULL"
+    )
+
+
+def _migration_6_add_identity_phrases(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS identity_phrases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER UNIQUE REFERENCES snapshots(id),
+            long TEXT NOT NULL,
+            short TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            generation_path TEXT NOT NULL,
+            model_used TEXT,
+            generated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_identity_path
+            ON identity_phrases(generation_path);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
-    Migration(3, "add snapshots table (chain of .dpbundle)", _migration_3_add_snapshots),
+    Migration(3, "add snapshots table (chain of .beheld)", _migration_3_add_snapshots),
     Migration(4, "add L1 tables (repositories + signals + aggregated view)", _migration_4_add_l1_tables),
     Migration(5, "truncate runaway tool_sequence_json (cap to MAX_TOOL_SEQUENCE_LEN)",
               _migration_5_truncate_tool_sequences),
+    Migration(6, "add identity_phrases table", _migration_6_add_identity_phrases),
+    Migration(7, "add first_seen_at to l1_repositories (F5.7.2)", _migration_7_add_first_seen_at),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
 
 
-class DevProfileDB:
+class BeheldDB:
     def __init__(self, db_path: Union[Path, str] = DB_PATH) -> None:
         self.db_path = Path(db_path) if db_path != ":memory:" else Path(":memory:")
         self._in_memory = str(db_path) == ":memory:"
@@ -608,7 +658,7 @@ class DevProfileDB:
         ).fetchone()
         return row["n"] if row else 0
 
-    # ── snapshots (Phase 5 — .dpbundle chain) ─────────────────────────────────
+    # ── snapshots (Phase 5 — .beheld chain) ─────────────────────────────────
 
     def save_snapshot(
         self,
@@ -706,15 +756,19 @@ class DevProfileDB:
         author_email_hash: str,
     ) -> bool:
         """Idempotent insert. Returns True if a new row was created, False if a
-        repository with this root_commit_hash already exists."""
+        repository with this root_commit_hash already exists.
+
+        On first insert, first_seen_at is set equal to imported_at; on re-import
+        the existing row is preserved (INSERT OR IGNORE), so first_seen_at stays
+        anchored to the first time the repo entered the L1 (F5.7.2)."""
         conn = self.connect()
         cur = conn.execute(
             """
             INSERT OR IGNORE INTO l1_repositories
-            (root_commit_hash, imported_at, commit_count, author_email_hash)
-            VALUES (?, ?, ?, ?)
+            (root_commit_hash, imported_at, commit_count, author_email_hash, first_seen_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (root_commit_hash, imported_at, commit_count, author_email_hash),
+            (root_commit_hash, imported_at, commit_count, author_email_hash, imported_at),
         )
         conn.commit()
         return cur.rowcount > 0
@@ -803,7 +857,7 @@ class DevProfileDB:
 
     def get_l1_repositories(self) -> list[dict]:
         rows = self.connect().execute(
-            "SELECT root_commit_hash, imported_at, commit_count "
+            "SELECT root_commit_hash, imported_at, commit_count, first_seen_at "
             "FROM l1_repositories ORDER BY imported_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -818,6 +872,61 @@ class DevProfileDB:
         )
         conn.commit()
         return cur.rowcount > 0
+
+    # ── identity_phrases (Phase 6 — public portrait) ──────────────────────────
+
+    def save_identity_phrase(
+        self,
+        long: str,
+        short: str,
+        confidence: str,
+        generation_path: str,
+        model_used: Optional[str] = None,
+        snapshot_id: Optional[int] = None,
+    ) -> int:
+        """Insert or replace the identity phrase for a snapshot.
+
+        Returns the row id. Replace-on-snapshot semantics let the orchestrator
+        regenerate a portrait without leaving orphan rows behind.
+        """
+        conn = self.connect()
+        now = datetime.now(timezone.utc).isoformat()
+
+        if snapshot_id is not None:
+            conn.execute(
+                "DELETE FROM identity_phrases WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+
+        cur = conn.execute(
+            """
+            INSERT INTO identity_phrases
+            (snapshot_id, long, short, confidence, generation_path, model_used, generated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (snapshot_id, long, short, confidence, generation_path, model_used, now),
+        )
+        conn.commit()
+        return cur.lastrowid or 0
+
+    def get_identity_phrase(self, snapshot_id: int) -> Optional[dict]:
+        row = self.connect().execute(
+            "SELECT * FROM identity_phrases WHERE snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_latest_identity_phrase(self) -> Optional[dict]:
+        row = self.connect().execute(
+            "SELECT * FROM identity_phrases ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def count_identity_phrases_by_path(self) -> dict[str, int]:
+        rows = self.connect().execute(
+            "SELECT generation_path, COUNT(*) AS n FROM identity_phrases GROUP BY generation_path"
+        ).fetchall()
+        return {row["generation_path"]: row["n"] for row in rows}
 
     # ── profile ───────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import type { McpTool } from "./types";
 
-const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface EngineScores {
   overall: number;
@@ -11,8 +11,8 @@ interface EngineScores {
 }
 
 export const statusTool: McpTool = {
-  name: "devprofile_status",
-  description: "Retorna score atual do DevProfile para exibição na sidebar do Continue.dev",
+  name: "beheld_status",
+  description: "Retorna score atual do Beheld para exibição na sidebar do Continue.dev",
   inputSchema: { type: "object", properties: {} },
   async handler(_args) {
     try {
@@ -23,13 +23,13 @@ export const statusTool: McpTool = {
       const scores = (await r.json()) as EngineScores;
       return {
         score: scores.overall,
-        label: `DevProfile ${scores.overall}/100`,
+        label: `Beheld ${scores.overall}/100`,
         sessions_today: scores.sessions_today ?? scores.sessions_analyzed,
         last_updated: scores.updated_at,
         top_insight: scores.top_insight ?? null,
       };
     } catch {
-      return { error: "DevProfile engine offline" };
+      return { error: "Beheld engine offline" };
     }
   },
 };

@@ -1,6 +1,6 @@
 """F6.8 — Bundle payload integration tests.
 
-Asserts that the .dpbundle payload built by `build_bundle_payload` exposes
+Asserts that the .beheld payload built by `build_bundle_payload` exposes
 L1 and L2 as separate top-level keys, with L1 staying empty (but present)
 when no repository has been imported."""
 
@@ -12,14 +12,14 @@ import pytest
 
 from bundle import build_bundle_payload
 from models import Scores, WorkflowMetrics
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @pytest.fixture
-def db_with_scores() -> DevProfileDB:
+def db_with_scores() -> BeheldDB:
     """A minimal DB that build_bundle_payload accepts (it requires at least
     one scores row — otherwise it raises ValueError)."""
-    db = DevProfileDB(":memory:")
+    db = BeheldDB(":memory:")
     db.init_schema()
     db.save_scores(Scores(
         date="2026-05-14",
@@ -31,14 +31,14 @@ def db_with_scores() -> DevProfileDB:
     db.close()
 
 
-def _payload_dict(db: DevProfileDB) -> dict:
+def _payload_dict(db: BeheldDB) -> dict:
     return dataclasses.asdict(build_bundle_payload(db, "0.1.1"))
 
 
 # ── L1 presence ──────────────────────────────────────────────────────────────
 
 
-def test_payload_includes_l1_section(db_with_scores: DevProfileDB) -> None:
+def test_payload_includes_l1_section(db_with_scores: BeheldDB) -> None:
     db_with_scores.save_l1_repository("hash-1", "2026-05-14T00:00:00+00:00", 100, "email-hash")
     db_with_scores.save_l1_signals(
         "hash-1",
@@ -59,7 +59,7 @@ def test_payload_includes_l1_section(db_with_scores: DevProfileDB) -> None:
     assert p["l1"]["avg_test_ratio"] == pytest.approx(0.42)
 
 
-def test_payload_l1_empty_when_no_bootstrap(db_with_scores: DevProfileDB) -> None:
+def test_payload_l1_empty_when_no_bootstrap(db_with_scores: BeheldDB) -> None:
     """The L1 key is ALWAYS present in v2 payloads — empty, not absent."""
     p = _payload_dict(db_with_scores)
     assert "l1" in p
@@ -73,17 +73,18 @@ def test_payload_l1_empty_when_no_bootstrap(db_with_scores: DevProfileDB) -> Non
     assert p["l1"]["root_commit_hashes"] == []
 
 
-def test_payload_l1_contains_root_commit_hashes(db_with_scores: DevProfileDB) -> None:
+def test_payload_l1_contains_root_commit_hashes(db_with_scores: BeheldDB) -> None:
     db_with_scores.save_l1_repository("hash-A", "2026-05-14T00:00:00+00:00", 10, "e")
     db_with_scores.save_l1_signals("hash-A", {}, {}, {}, 0.0, {}, None, None)
     db_with_scores.save_l1_repository("hash-B", "2026-05-14T00:00:00+00:00", 20, "e")
     db_with_scores.save_l1_signals("hash-B", {}, {}, {}, 0.0, {}, None, None)
 
     p = _payload_dict(db_with_scores)
-    assert sorted(p["l1"]["root_commit_hashes"]) == ["hash-A", "hash-B"]
+    hashes = sorted(ref["hash"] for ref in p["l1"]["root_commit_hashes"])
+    assert hashes == ["hash-A", "hash-B"]
 
 
-def test_payload_l1_root_commit_hashes_are_sorted(db_with_scores: DevProfileDB) -> None:
+def test_payload_l1_root_commit_hashes_are_sorted(db_with_scores: BeheldDB) -> None:
     """Canonical JSON requires deterministic ordering — the list itself is
     pre-sorted so the bundle hash is reproducible regardless of import order."""
     db_with_scores.save_l1_repository("zzz", "2026-05-14T00:00:00+00:00", 1, "e")
@@ -92,13 +93,13 @@ def test_payload_l1_root_commit_hashes_are_sorted(db_with_scores: DevProfileDB) 
     db_with_scores.save_l1_signals("aaa", {}, {}, {}, 0.0, {}, None, None)
 
     p = _payload_dict(db_with_scores)
-    assert p["l1"]["root_commit_hashes"] == ["aaa", "zzz"]
+    assert [ref["hash"] for ref in p["l1"]["root_commit_hashes"]] == ["aaa", "zzz"]
 
 
 # ── privacy: only opaque values ──────────────────────────────────────────────
 
 
-def test_payload_l1_contains_no_text_fields(db_with_scores: DevProfileDB) -> None:
+def test_payload_l1_contains_no_text_fields(db_with_scores: BeheldDB) -> None:
     """No URLs, names, paths, or commit messages — only hashes, booleans,
     numbers, and ISO timestamps."""
     db_with_scores.save_l1_repository("hash-1", "2026-05-14T00:00:00+00:00", 100, "email-hash")
@@ -129,10 +130,16 @@ def test_payload_l1_contains_no_text_fields(db_with_scores: DevProfileDB) -> Non
                 assert isinstance(v, bool)
         elif key == hash_list_key:
             assert isinstance(value, list)
-            for h in value:
-                # Hashes are opaque tokens — no spaces, no slashes, no @.
-                assert isinstance(h, str)
-                assert " " not in h and "/" not in h and "@" not in h
+            for ref in value:
+                # Each ref is {hash, first_seen_at}. Hashes are opaque tokens —
+                # no spaces, no slashes, no @ — and first_seen_at is an ISO-8601
+                # timestamp (F5.7.2).
+                assert isinstance(ref, dict)
+                assert set(ref.keys()) == {"hash", "first_seen_at"}
+                assert isinstance(ref["hash"], str)
+                assert " " not in ref["hash"] and "/" not in ref["hash"] and "@" not in ref["hash"]
+                assert isinstance(ref["first_seen_at"], str)
+                assert "T" in ref["first_seen_at"]
         else:
             # Remaining fields are numeric counts / ratios.
             assert isinstance(value, (int, float))
@@ -141,7 +148,7 @@ def test_payload_l1_contains_no_text_fields(db_with_scores: DevProfileDB) -> Non
 # ── L2 continuity from Phase 5 ───────────────────────────────────────────────
 
 
-def test_payload_l2_section_unchanged_from_phase5(db_with_scores: DevProfileDB) -> None:
+def test_payload_l2_section_unchanged_from_phase5(db_with_scores: BeheldDB) -> None:
     """The L2 section preserves the exact shape that `signals` had in Phase 5
     so existing scoring and rendering code keeps working."""
     p = _payload_dict(db_with_scores)
@@ -157,7 +164,7 @@ def test_payload_l2_section_unchanged_from_phase5(db_with_scores: DevProfileDB) 
 # ── separation invariant ─────────────────────────────────────────────────────
 
 
-def test_payload_l1_and_l2_are_separate_keys(db_with_scores: DevProfileDB) -> None:
+def test_payload_l1_and_l2_are_separate_keys(db_with_scores: BeheldDB) -> None:
     """L1 and L2 are distinct top-level objects — never merged or duplicated."""
     db_with_scores.save_l1_repository("hash-1", "2026-05-14T00:00:00+00:00", 10, "e")
     db_with_scores.save_l1_signals(
@@ -187,7 +194,7 @@ def test_payload_l1_and_l2_are_separate_keys(db_with_scores: DevProfileDB) -> No
 # ── legacy key is removed ────────────────────────────────────────────────────
 
 
-def test_payload_no_legacy_signals_key(db_with_scores: DevProfileDB) -> None:
+def test_payload_no_legacy_signals_key(db_with_scores: BeheldDB) -> None:
     """`signals` was the Phase 5 name. v2 payloads must use `l2` instead."""
     p = _payload_dict(db_with_scores)
     assert "signals" not in p

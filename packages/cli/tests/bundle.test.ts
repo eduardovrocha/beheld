@@ -24,7 +24,7 @@ import {
 function fixturePayload(): BundlePayload {
   return {
     created_at: "2026-05-14T00:00:00+00:00",
-    devprofile_version: "0.2.0",
+    beheld_version: "0.2.0",
     previous_hash: null,
     scores: {
       date: "2026-05-13",
@@ -43,7 +43,10 @@ function fixturePayload(): BundlePayload {
       ecosystems: { python: true, rails: true },
       platforms: { docker: true, github: true },
       avg_test_ratio: 0.42,
-      root_commit_hashes: ["a".repeat(40), "b".repeat(40)],
+      root_commit_hashes: [
+        { hash: "a".repeat(40), first_seen_at: "2026-04-01T00:00:00+00:00" },
+        { hash: "b".repeat(40), first_seen_at: "2026-04-15T00:00:00+00:00" },
+      ],
     },
     l2: {
       platforms: { docker: 10, github: 5 },
@@ -65,18 +68,22 @@ function fixturePayload(): BundlePayload {
       sessions_analyzed: 30,
       period_days: 30,
     },
+    engine_version_hash: "0".repeat(64),
   };
 }
 
 const EXPECTED_CANONICAL =
-  '{"created_at":"2026-05-14T00:00:00+00:00","devprofile_version":"0.2.0",' +
+  '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",' +
+  '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",' +
   '"l1":{"avg_test_ratio":0.42,' +
   '"earliest_commit":"2023-01-01T00:00:00+00:00",' +
   '"ecosystems":{"python":true,"rails":true},' +
   '"latest_commit":"2026-05-13T00:00:00+00:00",' +
   '"platforms":{"docker":true,"github":true},' +
-  '"root_commit_hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",' +
-  '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],' +
+  '"root_commit_hashes":[' +
+  '{"first_seen_at":"2026-04-01T00:00:00+00:00","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},' +
+  '{"first_seen_at":"2026-04-15T00:00:00+00:00","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' +
+  '],' +
   '"total_commits":1200,"total_repos":2},' +
   '"l2":{"ecosystems":{"rails":8,"react":4},"period_days":30,' +
   '"platforms":{"docker":10,"github":5},"project_categories":{"saas_b2b":1},' +
@@ -93,7 +100,7 @@ const EXPECTED_CANONICAL =
   '"test_maturity":20}}';
 
 const EXPECTED_HASH =
-  "sha256:60168f63bb60ff60bcbfb382733f2da1813284ee75ab03459c02ca6cd7abb509";
+  "sha256:0521f98e1a40a6f0adbc605d20a4552f696c81a43a8fa21e11167c810423c4fe";
 
 // ── canonical_json basics ────────────────────────────────────────────────────
 
@@ -145,7 +152,7 @@ describe("bundle contract", () => {
   test("fixture serializes to the same canonical bytes as Python", () => {
     const actual = payloadToCanonical(fixturePayload());
     expect(actual).toBe(EXPECTED_CANONICAL);
-    expect(actual.length).toBe(1052);
+    expect(actual.length).toBe(1243);
   });
 
   test("fixture hash matches Python's hash byte-for-byte", async () => {
@@ -173,10 +180,11 @@ describe("bundle contract", () => {
     const base = fixturePayload();
     const shuffled: BundlePayload = {
       l2: base.l2,
+      engine_version_hash: base.engine_version_hash,
       l1: base.l1,
       scores: base.scores,
       previous_hash: base.previous_hash,
-      devprofile_version: base.devprofile_version,
+      beheld_version: base.beheld_version,
       created_at: base.created_at,
     };
     expect(await payloadHash(shuffled)).toBe(await payloadHash(base));
@@ -188,8 +196,8 @@ describe("bundle contract", () => {
 function fixtureAttestation(): BundleAttestation {
   return {
     payload: {
-      type: "devprofile-identity-attestation/v1",
-      platform_key_id: "devprofile-platform-2026-q2",
+      type: "beheld-identity-attestation/v1",
+      platform_key_id: "beheld-platform-2026-q2",
       dev_pubkey: "ed25519-pub:AAAA",
       github: { user_id: 12345, login: "octocat", verified_at: "2026-05-19T18:00:00Z" },
       attested_at: "2026-05-19T18:00:00Z",

@@ -5,26 +5,29 @@ import { join } from "node:path";
 import { composition, summarize, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
 import { verifyAttestation } from "../bundle/attestation-verify";
 import type { Bundle } from "../bundle/types";
-import { fail, brand, GREEN, RED, YELLOW, DIM, RESET } from "../ui/styles";
+import { fetchRekorEntry, parseRekorResponse, rekorEntryUrl } from "../lib/rekor";
+import { computeTier } from "../lib/tier";
+import { bold, fail, brand, GREEN, RED, YELLOW, DIM, RESET } from "../ui/styles";
 
 interface VerifyOptions {
   chain?: boolean;
+  verifyRekor?: boolean;
 }
 
 function snapshotsDir(): string {
-  const base = process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+  const base = process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
   return join(base, "snapshots");
 }
 
-/** Reads all .dpbundle files in ~/.devprofile/snapshots/ and indexes by hash. */
+/** Reads all .beheld files in ~/.beheld/snapshots/ and indexes by hash. */
 function localResolver(): BundleResolver {
   const dir = snapshotsDir();
   const cache = new Map<string, Bundle>();
   if (existsSync(dir)) {
     for (const fname of readdirSync(dir)) {
-      if (!fname.endsWith(".dpbundle")) continue;
+      if (!fname.endsWith(".beheld")) continue;
       try {
         const b = JSON.parse(readFileSync(join(dir, fname), "utf8")) as Bundle;
         if (typeof b.hash === "string") cache.set(b.hash, b);
@@ -47,7 +50,7 @@ export async function verifyCommand(
   console.log(brand("checando autenticidade"));
   if (!filePath) {
     console.error(fail("Caminho do bundle é obrigatório"));
-    console.error(`     ${DIM}Uso: devprofile verify <arquivo.dpbundle>${RESET}`);
+    console.error(`     ${DIM}Uso: beheld verify <arquivo.beheld>${RESET}`);
     process.exit(1);
   }
   if (!existsSync(filePath)) {
@@ -126,12 +129,44 @@ export async function verifyCommand(
     }
   }
 
-  if (result.ok) {
-    const comp = composition((raw as Bundle).payload as unknown as Record<string, unknown>);
+  // F5.8 — Rekor inclusion proof (wrapper-level, never affects payload hash).
+  const bundle = raw as Bundle;
+  if (bundle.rekor && typeof bundle.rekor.logIndex === "number") {
+    const r = bundle.rekor;
     console.log("");
-    console.log(`  ${summarize((raw as Bundle).payload)}`);
+    console.log(`  Rekor inclusion:`);
+    console.log(`    ${mark(true)} Log index: ${bold(`#${r.logIndex}`)}`);
+    console.log(`    ${mark(true)} Timestamp: ${r.integratedTime} ${DIM}(UTC, imutável)${RESET}`);
+    console.log(`    ${mark(true)} UUID: ${r.uuid}`);
+    console.log(`    ${DIM}→ Verificar em:${RESET} ${rekorEntryUrl(r.uuid)}`);
+
+    if (opts.verifyRekor) {
+      const remote = await fetchRekorEntry(r.uuid);
+      if (!remote) {
+        console.log(`    ${mark(false)} consulta online falhou (rede ou UUID inválido)`);
+      } else {
+        const parsed = parseRekorResponse(remote);
+        if (parsed && parsed.logIndex === r.logIndex && parsed.uuid === r.uuid) {
+          console.log(`    ${mark(true)} Confirmado no log público`);
+        } else {
+          console.log(`    ${mark(false)} Divergência detectada — entrada online não bate com o bundle`);
+        }
+      }
+    }
+  } else {
+    console.log("");
+    console.log(`  ${YELLOW}–${RESET} Rekor: não registrado`);
+    console.log(`    ${DIM}(execute: beheld snapshot --rekor-submit <bundle>)${RESET}`);
+  }
+
+  if (result.ok) {
+    const tier = computeTier(bundle);
+    const comp = composition(bundle.payload as unknown as Record<string, unknown>);
+    console.log("");
+    console.log(`  ${summarize(bundle.payload)}`);
     console.log(`    Base histórica:       ${comp.base}`);
     console.log(`    Trajetória observada: ${comp.trajectory}`);
+    console.log(`    Trust tier:           ${bold(tier)}`);
   }
   console.log("");
 

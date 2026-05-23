@@ -1,7 +1,7 @@
 # Integration tests
 
 End-to-end tests that boot real subprocesses (MCP server + a stub engine) on
-isolated ports against a fresh `DEVPROFILE_DATA_DIR`, drive traffic through
+isolated ports against a fresh `BEHELD_DATA_DIR`, drive traffic through
 the HTTP hooks the same way Claude Code does, and verify the system survives
 restarts and process kills.
 
@@ -40,9 +40,9 @@ necessary here, because:
 ## What "tudo verde" means in this env
 
 The test env spawns MCP and the fake engine directly, bypassing
-`devprofile start`. So the PID file under `~/.devprofile/daemon.pid` is never
+`beheld start`. So the PID file under `~/.beheld/daemon.pid` is never
 written and on macOS the codesign check finds no engine binary. Both surface
-as warnings in `devprofile doctor` — they're env noise, not regressions.
+as warnings in `beheld doctor` — they're env noise, not regressions.
 
 The test asserts the lines that matter in production:
 

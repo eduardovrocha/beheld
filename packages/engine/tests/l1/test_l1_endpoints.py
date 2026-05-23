@@ -8,19 +8,19 @@ from fastapi.testclient import TestClient
 
 from api import app
 from l1.importer import L1Importer
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @pytest.fixture
-def test_db(db_path: Path) -> DevProfileDB:
-    instance = DevProfileDB(db_path)
+def test_db(db_path: Path) -> BeheldDB:
+    instance = BeheldDB(db_path)
     instance.init_schema()
     yield instance
     instance.close()
 
 
 @pytest.fixture
-def client(test_db: DevProfileDB):
+def client(test_db: BeheldDB):
     importer = L1Importer(test_db)
     with patch("api.db", test_db), \
          patch("api.l1_importer", importer), \
@@ -140,7 +140,7 @@ def test_delete_l1_repository_not_found_returns_404(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_delete_l1_repository_success(client: TestClient, test_db: DevProfileDB) -> None:
+def test_delete_l1_repository_success(client: TestClient, test_db: BeheldDB) -> None:
     test_db.save_l1_repository("hash-x", "2026-05-14T10:00:00+00:00", 10, "e1")
     response = client.delete("/l1/repositories/hash-x")
     assert response.status_code == 200

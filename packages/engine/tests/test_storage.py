@@ -6,18 +6,18 @@ from pathlib import Path
 import pytest
 
 from models import Scores, Signal, WorkflowMetrics
-from storage.sqlite import DevProfileDB, LATEST_SCHEMA_VERSION, MIGRATIONS
+from storage.sqlite import BeheldDB, LATEST_SCHEMA_VERSION, MIGRATIONS
 
 
 @pytest.fixture
-def db(db_path: Path) -> DevProfileDB:
-    instance = DevProfileDB(db_path)
+def db(db_path: Path) -> BeheldDB:
+    instance = BeheldDB(db_path)
     instance.init_schema()
     yield instance
     instance.close()
 
 
-def test_init_schema_creates_tables(db: DevProfileDB) -> None:
+def test_init_schema_creates_tables(db: BeheldDB) -> None:
     conn = db.connect()
     tables = {
         row[0]
@@ -34,27 +34,27 @@ def test_init_schema_creates_tables(db: DevProfileDB) -> None:
     } <= tables
 
 
-def test_save_and_get_session(db: DevProfileDB, sample_session_1) -> None:
+def test_save_and_get_session(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     assert db.count_sessions() == 1
     ids = db.get_existing_session_ids()
     assert "sess-1" in ids
 
 
-def test_save_session_idempotent(db: DevProfileDB, sample_session_1) -> None:
+def test_save_session_idempotent(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     db.save_session(sample_session_1)  # second save accumulates, does not duplicate row
     assert db.count_sessions() == 1
 
 
-def test_get_existing_session_ids(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_get_existing_session_ids(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     db.save_session(sample_session_1)
     db.save_session(sample_session_2)
     ids = db.get_existing_session_ids()
     assert ids == {"sess-1", "sess-2"}
 
 
-def test_get_all_sessions_as_objects(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_get_all_sessions_as_objects(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     db.save_session(sample_session_1)
     db.save_session(sample_session_2)
     sessions = db.get_all_sessions_as_objects()
@@ -62,19 +62,19 @@ def test_get_all_sessions_as_objects(db: DevProfileDB, sample_session_1, sample_
     assert {s.session_id for s in sessions} == {"sess-1", "sess-2"}
 
 
-def test_reconstructed_session_has_no_events(db: DevProfileDB, sample_session_1) -> None:
+def test_reconstructed_session_has_no_events(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     sessions = db.get_all_sessions_as_objects()
     assert sessions[0].events == []
 
 
-def test_reconstructed_session_tools(db: DevProfileDB, sample_session_1) -> None:
+def test_reconstructed_session_tools(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     sessions = db.get_all_sessions_as_objects()
     assert "Bash" in sessions[0].tools_used
 
 
-def test_save_signals(db: DevProfileDB, sample_session_1) -> None:
+def test_save_signals(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     db.save_signals(sample_session_1.session_id, [
         Signal("platform", "docker", 3),
@@ -86,7 +86,7 @@ def test_save_signals(db: DevProfileDB, sample_session_1) -> None:
     assert types == {"platform", "ecosystem"}
 
 
-def test_save_signals_replaces_existing(db: DevProfileDB, sample_session_1) -> None:
+def test_save_signals_replaces_existing(db: BeheldDB, sample_session_1) -> None:
     db.save_session(sample_session_1)
     db.save_signals(sample_session_1.session_id, [Signal("platform", "docker", 1)])
     db.save_signals(sample_session_1.session_id, [Signal("platform", "github", 2)])
@@ -95,7 +95,7 @@ def test_save_signals_replaces_existing(db: DevProfileDB, sample_session_1) -> N
     assert signals[0]["signal_value"] == "github"
 
 
-def test_save_and_get_scores(db: DevProfileDB) -> None:
+def test_save_and_get_scores(db: BeheldDB) -> None:
     scores = Scores(
         date="2026-05-10",
         prompt_quality=75,
@@ -112,7 +112,7 @@ def test_save_and_get_scores(db: DevProfileDB) -> None:
     assert result.overall == 67
 
 
-def test_get_scores_history(db: DevProfileDB) -> None:
+def test_get_scores_history(db: BeheldDB) -> None:
     for date, pq in [("2026-05-08", 70), ("2026-05-09", 72), ("2026-05-10", 74)]:
         db.save_scores(Scores(date=date, prompt_quality=pq, test_maturity=55,
                               tech_breadth=75, growth_rate=50, overall=62, sessions_analyzed=8))
@@ -121,20 +121,20 @@ def test_get_scores_history(db: DevProfileDB) -> None:
     assert history[0].date == "2026-05-10"  # most recent first
 
 
-def test_get_scores_returns_scores_object(db: DevProfileDB) -> None:
+def test_get_scores_returns_scores_object(db: BeheldDB) -> None:
     db.save_scores(Scores("2026-05-10", 70, 60, 80, 55, 66, 5))
     result = db.get_scores("2026-05-10")
     assert isinstance(result, Scores)
     assert result.date == "2026-05-10"
 
 
-def test_count_sessions(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_count_sessions(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     db.save_session(sample_session_1)
     db.save_session(sample_session_2)
     assert db.count_sessions() == 2
 
 
-def test_count_sessions_on_date(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_count_sessions_on_date(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     db.save_session(sample_session_1)
     db.save_session(sample_session_2)
     # Both sessions are on 2026-05-10
@@ -142,22 +142,22 @@ def test_count_sessions_on_date(db: DevProfileDB, sample_session_1, sample_sessi
     assert db.count_sessions_on_date("2026-05-09") == 0
 
 
-def test_profile_key_value(db: DevProfileDB) -> None:
+def test_profile_key_value(db: BeheldDB) -> None:
     db.set_profile("test_key", "test_value")
     assert db.get_profile("test_key") == "test_value"
 
 
-def test_profile_update_replaces(db: DevProfileDB) -> None:
+def test_profile_update_replaces(db: BeheldDB) -> None:
     db.set_profile("key", "v1")
     db.set_profile("key", "v2")
     assert db.get_profile("key") == "v2"
 
 
-def test_get_profile_missing_key(db: DevProfileDB) -> None:
+def test_get_profile_missing_key(db: BeheldDB) -> None:
     assert db.get_profile("missing") is None
 
 
-def test_save_session_accumulates_event_count(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_save_session_accumulates_event_count(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     import copy
     first = copy.copy(sample_session_1)
     first.event_count = 10
@@ -169,7 +169,7 @@ def test_save_session_accumulates_event_count(db: DevProfileDB, sample_session_1
     assert sessions[0].event_count == 15
 
 
-def test_save_session_merges_tools(db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_save_session_merges_tools(db: BeheldDB, sample_session_1, sample_session_2) -> None:
     import copy
     first = copy.copy(sample_session_1)
     first.tools_used = ["Bash", "Read"]
@@ -181,7 +181,7 @@ def test_save_session_merges_tools(db: DevProfileDB, sample_session_1, sample_se
     assert set(sessions[0].tools_used) == {"Bash", "Read", "Edit"}
 
 
-def test_save_session_appends_tool_sequence(db: DevProfileDB, sample_session_1) -> None:
+def test_save_session_appends_tool_sequence(db: BeheldDB, sample_session_1) -> None:
     import copy
     first = copy.copy(sample_session_1)
     first.tool_sequence = ["Bash", "Read"]
@@ -193,7 +193,7 @@ def test_save_session_appends_tool_sequence(db: DevProfileDB, sample_session_1) 
     assert seq == ["Bash", "Read", "Edit", "Bash"]
 
 
-def test_save_session_caps_tool_sequence_length(db: DevProfileDB, sample_session_1) -> None:
+def test_save_session_caps_tool_sequence_length(db: BeheldDB, sample_session_1) -> None:
     """Regression: a long-running session must not let tool_sequence_json grow
     unbounded.  Before the cap, a real-world profile ballooned to 2 GB and
     OOM'd /snapshot/payload.  After the fix, the column stays bounded by
@@ -246,7 +246,7 @@ def test_migration_5_truncates_existing_oversized_rows(db_path) -> None:
     raw.commit()
     raw.close()
 
-    db = DevProfileDB(db_path)
+    db = BeheldDB(db_path)
     db.init_schema()
     try:
         row = db.connect().execute(
@@ -260,23 +260,23 @@ def test_migration_5_truncates_existing_oversized_rows(db_path) -> None:
         db.close()
 
 
-def test_get_session_tool_sequence_missing(db: DevProfileDB) -> None:
+def test_get_session_tool_sequence_missing(db: BeheldDB) -> None:
     assert db.get_session_tool_sequence("nonexistent") == []
 
 
-def test_get_all_profile(db: DevProfileDB) -> None:
+def test_get_all_profile(db: BeheldDB) -> None:
     db.set_profile("k1", "v1")
     db.set_profile("k2", "v2")
     profile = db.get_all_profile()
     assert profile == {"k1": "v1", "k2": "v2"}
 
 
-def test_get_current_scores_empty(db: DevProfileDB) -> None:
+def test_get_current_scores_empty(db: BeheldDB) -> None:
     assert db.get_current_scores() is None
 
 
 def test_in_memory_db() -> None:
-    mem_db = DevProfileDB(":memory:")
+    mem_db = BeheldDB(":memory:")
     mem_db.init_schema()
     mem_db.set_profile("x", "y")
     assert mem_db.get_profile("x") == "y"
@@ -286,7 +286,7 @@ def test_in_memory_db() -> None:
 # ── schema versioning ─────────────────────────────────────────────────────────
 
 
-def test_schema_version_table_exists(db: DevProfileDB) -> None:
+def test_schema_version_table_exists(db: BeheldDB) -> None:
     conn = db.connect()
     tables = {
         row[0]
@@ -295,11 +295,11 @@ def test_schema_version_table_exists(db: DevProfileDB) -> None:
     assert "schema_version" in tables
 
 
-def test_fresh_db_at_latest_version(db: DevProfileDB) -> None:
+def test_fresh_db_at_latest_version(db: BeheldDB) -> None:
     assert db.current_schema_version() == LATEST_SCHEMA_VERSION
 
 
-def test_migrations_recorded_in_history(db: DevProfileDB) -> None:
+def test_migrations_recorded_in_history(db: BeheldDB) -> None:
     conn = db.connect()
     rows = conn.execute(
         "SELECT version, description, applied_at FROM schema_version ORDER BY version"
@@ -312,11 +312,11 @@ def test_migrations_recorded_in_history(db: DevProfileDB) -> None:
 
 
 def test_reinit_is_idempotent(db_path: Path) -> None:
-    first = DevProfileDB(db_path)
+    first = BeheldDB(db_path)
     first.init_schema()
     first.close()
 
-    second = DevProfileDB(db_path)
+    second = BeheldDB(db_path)
     second.init_schema()
     rows = second.connect().execute("SELECT COUNT(*) AS n FROM schema_version").fetchone()
     assert rows["n"] == LATEST_SCHEMA_VERSION
@@ -340,7 +340,7 @@ def test_pre_versioning_db_migrates_to_latest(db_path: Path) -> None:
     conn.commit()
     conn.close()
 
-    db = DevProfileDB(db_path)
+    db = BeheldDB(db_path)
     db.init_schema()
     try:
         cols = {row[1] for row in db.connect().execute("PRAGMA table_info(sessions)").fetchall()}
@@ -353,7 +353,7 @@ def test_pre_versioning_db_migrates_to_latest(db_path: Path) -> None:
 # ── workflow_metrics ──────────────────────────────────────────────────────────
 
 
-def test_workflow_metrics_table_exists(db: DevProfileDB) -> None:
+def test_workflow_metrics_table_exists(db: BeheldDB) -> None:
     conn = db.connect()
     tables = {
         row[0]
@@ -362,7 +362,7 @@ def test_workflow_metrics_table_exists(db: DevProfileDB) -> None:
     assert "workflow_metrics" in tables
 
 
-def test_save_and_get_latest_workflow_metrics(db: DevProfileDB) -> None:
+def test_save_and_get_latest_workflow_metrics(db: BeheldDB) -> None:
     m = WorkflowMetrics(test_after_ratio=0.78, bash_to_read_ratio=7.8)
     db.save_workflow_metrics(m, period_days=30, sessions_analyzed=42)
     latest = db.get_latest_workflow_metrics()
@@ -373,11 +373,11 @@ def test_save_and_get_latest_workflow_metrics(db: DevProfileDB) -> None:
     assert latest["computed_at"]  # ISO timestamp
 
 
-def test_get_latest_workflow_metrics_returns_none_when_empty(db: DevProfileDB) -> None:
+def test_get_latest_workflow_metrics_returns_none_when_empty(db: BeheldDB) -> None:
     assert db.get_latest_workflow_metrics() is None
 
 
-def test_workflow_metrics_is_append_only(db: DevProfileDB) -> None:
+def test_workflow_metrics_is_append_only(db: BeheldDB) -> None:
     db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.5), 30, 10)
     db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.7), 30, 12)
     db.save_workflow_metrics(WorkflowMetrics(test_after_ratio=0.9), 30, 15)
@@ -387,7 +387,7 @@ def test_workflow_metrics_is_append_only(db: DevProfileDB) -> None:
     assert latest["sessions_analyzed"] == 15
 
 
-def test_workflow_metrics_persists_canonical_json(db: DevProfileDB) -> None:
+def test_workflow_metrics_persists_canonical_json(db: BeheldDB) -> None:
     """The stored metrics_json should be canonical (sort_keys, compact) so the
     bundle hash (F5.3.3) is reproducible without re-serializing."""
     m = WorkflowMetrics(test_after_ratio=0.5, bash_to_read_ratio=2.0)
@@ -408,7 +408,7 @@ def test_workflow_metrics_persists_canonical_json(db: DevProfileDB) -> None:
 
 def test_pre_v2_db_gains_workflow_metrics_table(db_path: Path) -> None:
     """An older DB at v1 should pick up the workflow_metrics table on init."""
-    pre_v2 = DevProfileDB(db_path)
+    pre_v2 = BeheldDB(db_path)
     # Simulate v1 state: only first migration ran
     pre_v2.connect().executescript(
         """
@@ -431,7 +431,7 @@ def test_pre_v2_db_gains_workflow_metrics_table(db_path: Path) -> None:
     pre_v2.connect().commit()
     pre_v2.close()
 
-    db = DevProfileDB(db_path)
+    db = BeheldDB(db_path)
     db.init_schema()
     try:
         assert db.current_schema_version() == LATEST_SCHEMA_VERSION
@@ -456,7 +456,7 @@ def _hash_of(payload: str) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def test_snapshots_table_exists(db: DevProfileDB) -> None:
+def test_snapshots_table_exists(db: BeheldDB) -> None:
     conn = db.connect()
     tables = {
         row[0]
@@ -465,22 +465,22 @@ def test_snapshots_table_exists(db: DevProfileDB) -> None:
     assert "snapshots" in tables
 
 
-def test_save_and_get_latest_snapshot(db: DevProfileDB) -> None:
+def test_save_and_get_latest_snapshot(db: BeheldDB) -> None:
     payload = '{"k":"v"}'
     h = _hash_of(payload)
-    db.save_snapshot(h, previous_hash=None, payload_json=payload, bundle_path="/tmp/a.dpbundle")
+    db.save_snapshot(h, previous_hash=None, payload_json=payload, bundle_path="/tmp/a.beheld")
     latest = db.get_latest_snapshot()
     assert latest is not None
     assert latest["hash"] == h
     assert latest["previous_hash"] is None
-    assert latest["bundle_path"] == "/tmp/a.dpbundle"
+    assert latest["bundle_path"] == "/tmp/a.beheld"
 
 
-def test_get_latest_snapshot_returns_none_when_empty(db: DevProfileDB) -> None:
+def test_get_latest_snapshot_returns_none_when_empty(db: BeheldDB) -> None:
     assert db.get_latest_snapshot() is None
 
 
-def test_snapshots_are_returned_newest_first(db: DevProfileDB) -> None:
+def test_snapshots_are_returned_newest_first(db: BeheldDB) -> None:
     a, b, c = '{"i":1}', '{"i":2}', '{"i":3}'
     db.save_snapshot(_hash_of(a), None, a)
     db.save_snapshot(_hash_of(b), _hash_of(a), b)
@@ -492,7 +492,7 @@ def test_snapshots_are_returned_newest_first(db: DevProfileDB) -> None:
     assert listing[2]["hash"] == _hash_of(a)
 
 
-def test_get_snapshot_by_hash(db: DevProfileDB) -> None:
+def test_get_snapshot_by_hash(db: BeheldDB) -> None:
     payload = '{"k":"v"}'
     h = _hash_of(payload)
     db.save_snapshot(h, None, payload)
@@ -501,7 +501,7 @@ def test_get_snapshot_by_hash(db: DevProfileDB) -> None:
     assert found["payload_json"] == payload
 
 
-def test_hash_uniqueness_enforced(db: DevProfileDB) -> None:
+def test_hash_uniqueness_enforced(db: BeheldDB) -> None:
     payload = '{"k":"v"}'
     h = _hash_of(payload)
     db.save_snapshot(h, None, payload)
@@ -509,7 +509,7 @@ def test_hash_uniqueness_enforced(db: DevProfileDB) -> None:
         db.save_snapshot(h, None, payload)
 
 
-def test_count_snapshots(db: DevProfileDB) -> None:
+def test_count_snapshots(db: BeheldDB) -> None:
     db.save_snapshot(_hash_of('{"a":1}'), None, '{"a":1}')
     db.save_snapshot(_hash_of('{"a":2}'), _hash_of('{"a":1}'), '{"a":2}')
     assert db.count_snapshots() == 2
@@ -518,7 +518,7 @@ def test_count_snapshots(db: DevProfileDB) -> None:
 # ── chain validation ─────────────────────────────────────────────────────────
 
 
-def _build_chain(db: DevProfileDB, n: int) -> list[str]:
+def _build_chain(db: BeheldDB, n: int) -> list[str]:
     """Helper: build a valid n-link chain, return the hashes in order."""
     hashes: list[str] = []
     prev: Optional[str] = None
@@ -534,21 +534,21 @@ def _build_chain(db: DevProfileDB, n: int) -> list[str]:
 from typing import Optional  # noqa: E402 (kept near use site for clarity)
 
 
-def test_validate_chain_returns_ok_for_empty_db(db: DevProfileDB) -> None:
+def test_validate_chain_returns_ok_for_empty_db(db: BeheldDB) -> None:
     result = db.validate_chain()
     assert result["ok"] is True
     assert result["snapshots_checked"] == 0
     assert result["broken_at"] is None
 
 
-def test_validate_chain_returns_ok_for_well_formed_chain(db: DevProfileDB) -> None:
+def test_validate_chain_returns_ok_for_well_formed_chain(db: BeheldDB) -> None:
     _build_chain(db, 5)
     result = db.validate_chain()
     assert result["ok"] is True
     assert result["snapshots_checked"] == 5
 
 
-def test_validate_chain_detects_content_mismatch(db: DevProfileDB) -> None:
+def test_validate_chain_detects_content_mismatch(db: BeheldDB) -> None:
     """F5.2.5: someone alters payload_json in place without re-hashing."""
     hashes = _build_chain(db, 3)
     # Tamper: change payload_json of snapshot 2 (middle one)
@@ -563,7 +563,7 @@ def test_validate_chain_detects_content_mismatch(db: DevProfileDB) -> None:
     assert result["broken_at"]["hash"] == hashes[1]
 
 
-def test_validate_chain_detects_link_mismatch(db: DevProfileDB) -> None:
+def test_validate_chain_detects_link_mismatch(db: BeheldDB) -> None:
     """F5.2.6: deleting an intermediate snapshot breaks the chain."""
     hashes = _build_chain(db, 4)
     # Remove the 2nd snapshot — 3rd's previous_hash now points to a missing one
@@ -576,7 +576,7 @@ def test_validate_chain_detects_link_mismatch(db: DevProfileDB) -> None:
     assert result["broken_at"]["hash"] == hashes[2]
 
 
-def test_validate_chain_detects_forged_first_snapshot(db: DevProfileDB) -> None:
+def test_validate_chain_detects_forged_first_snapshot(db: BeheldDB) -> None:
     """If the first snapshot has a non-null previous_hash, the chain is broken."""
     payload = '{"k":"v"}'
     db.save_snapshot(_hash_of(payload), previous_hash="sha256:dead", payload_json=payload)
@@ -603,7 +603,7 @@ def test_already_migrated_db_records_version_once(db_path: Path) -> None:
     conn.commit()
     conn.close()
 
-    db = DevProfileDB(db_path)
+    db = BeheldDB(db_path)
     db.init_schema()
     try:
         assert db.current_schema_version() == LATEST_SCHEMA_VERSION

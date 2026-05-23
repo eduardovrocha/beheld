@@ -7,12 +7,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import VERSION, app
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @pytest.fixture(autouse=True)
 def isolated_db(db_path: Path):
-    tmp = DevProfileDB(db_path)
+    tmp = BeheldDB(db_path)
     tmp.init_schema()
     with patch("api.db", tmp), \
          patch("apscheduler.schedulers.asyncio.AsyncIOScheduler.start"), \

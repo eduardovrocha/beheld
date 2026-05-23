@@ -11,7 +11,7 @@ import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../src/bundle/t
 function fixturePayload(opts: Partial<BundlePayload> = {}): BundlePayload {
   return {
     created_at: "2026-05-14T03:00:00+00:00",
-    devprofile_version: "0.2.0",
+    beheld_version: "0.2.0",
     previous_hash: null,
     scores: {
       date: "2026-05-13",
@@ -70,13 +70,20 @@ let listResponder: () => Response;
 let bundleUploadResponder: () => Response;
 let lastUploadBody: string | null;
 let savedEnvPortal: string | undefined;
+let savedEnvRekor: string | undefined;
+/** Tests inject a Rekor response by toggling this between runs. The mock
+ *  engine serves /api/v1/log/entries with whatever's currently here. */
+let rekorResponder: () => Response;
 
 beforeAll(async () => {
-  savedEnvUrl = process.env.DEVPROFILE_ENGINE_URL;
-  savedEnvPortal = process.env.DEVPROFILE_PORTAL_URL;
-  process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
-  // The portal lives on the same mock — keeps the test serial-safe.
-  process.env.DEVPROFILE_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  savedEnvUrl = process.env.BEHELD_ENGINE_URL;
+  savedEnvPortal = process.env.BEHELD_PORTAL_URL;
+  savedEnvRekor = process.env.BEHELD_REKOR_URL;
+  process.env.BEHELD_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  // The portal AND the Rekor stub all live on the same mock — keeps the test
+  // serial-safe and stops snapshot from reaching out to rekor.sigstore.dev.
+  process.env.BEHELD_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  process.env.BEHELD_REKOR_URL = `http://127.0.0.1:${MOCK_PORT}`;
   server = Bun.serve({
     port: MOCK_PORT,
     hostname: "127.0.0.1",
@@ -100,6 +107,9 @@ beforeAll(async () => {
       if (req.method === "GET" && url.pathname === "/snapshots") {
         return listResponder();
       }
+      if (req.method === "POST" && url.pathname === "/api/v1/log/entries") {
+        return rekorResponder();
+      }
       return new Response("Not Found", { status: 404 });
     },
   });
@@ -108,24 +118,26 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.stop(true);
-  if (savedEnvUrl === undefined) delete process.env.DEVPROFILE_ENGINE_URL;
-  else process.env.DEVPROFILE_ENGINE_URL = savedEnvUrl;
-  if (savedEnvPortal === undefined) delete process.env.DEVPROFILE_PORTAL_URL;
-  else process.env.DEVPROFILE_PORTAL_URL = savedEnvPortal;
+  if (savedEnvUrl === undefined) delete process.env.BEHELD_ENGINE_URL;
+  else process.env.BEHELD_ENGINE_URL = savedEnvUrl;
+  if (savedEnvPortal === undefined) delete process.env.BEHELD_PORTAL_URL;
+  else process.env.BEHELD_PORTAL_URL = savedEnvPortal;
+  if (savedEnvRekor === undefined) delete process.env.BEHELD_REKOR_URL;
+  else process.env.BEHELD_REKOR_URL = savedEnvRekor;
 });
 
 let savedDesktopOptOut: string | undefined;
 let savedDesktopDir: string | undefined;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), "devprofile-snap-"));
-  savedEnvDir = process.env.DEVPROFILE_DATA_DIR;
-  process.env.DEVPROFILE_DATA_DIR = workDir;
+  workDir = mkdtempSync(join(tmpdir(), "beheld-snap-"));
+  savedEnvDir = process.env.BEHELD_DATA_DIR;
+  process.env.BEHELD_DATA_DIR = workDir;
   // Prevent tests from writing to the real ~/Desktop. Each test that wants to
   // assert the desktop-copy behaviour will unset this and set DESKTOP_DIR.
-  savedDesktopOptOut = process.env.DEVPROFILE_NO_DESKTOP_COPY;
-  savedDesktopDir = process.env.DEVPROFILE_DESKTOP_DIR;
-  process.env.DEVPROFILE_NO_DESKTOP_COPY = "1";
+  savedDesktopOptOut = process.env.BEHELD_NO_DESKTOP_COPY;
+  savedDesktopDir = process.env.BEHELD_DESKTOP_DIR;
+  process.env.BEHELD_NO_DESKTOP_COPY = "1";
   saveBodies = [];
   savedHashes = [];
   lastUploadBody = null;
@@ -145,43 +157,46 @@ beforeEach(() => {
       }),
       { status: 201, headers: { "Content-Type": "application/json", "X-TTL": "30" } },
     );
+  // Default: pretend Rekor is unreachable so snapshots emit rekor: null. Tests
+  // that need a success path override this within the test body.
+  rekorResponder = () => new Response("upstream down", { status: 500 });
 });
 
 afterEach(() => {
-  if (savedEnvDir === undefined) delete process.env.DEVPROFILE_DATA_DIR;
-  else process.env.DEVPROFILE_DATA_DIR = savedEnvDir;
-  if (savedDesktopOptOut === undefined) delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
-  else process.env.DEVPROFILE_NO_DESKTOP_COPY = savedDesktopOptOut;
-  if (savedDesktopDir === undefined) delete process.env.DEVPROFILE_DESKTOP_DIR;
-  else process.env.DEVPROFILE_DESKTOP_DIR = savedDesktopDir;
+  if (savedEnvDir === undefined) delete process.env.BEHELD_DATA_DIR;
+  else process.env.BEHELD_DATA_DIR = savedEnvDir;
+  if (savedDesktopOptOut === undefined) delete process.env.BEHELD_NO_DESKTOP_COPY;
+  else process.env.BEHELD_NO_DESKTOP_COPY = savedDesktopOptOut;
+  if (savedDesktopDir === undefined) delete process.env.BEHELD_DESKTOP_DIR;
+  else process.env.BEHELD_DESKTOP_DIR = savedDesktopDir;
   rmSync(workDir, { recursive: true, force: true });
 });
 
 // ── snapshot generation ─────────────────────────────────────────────────────
 
 describe("snapshotCommand — generate", () => {
-  test("writes a .dpbundle file under ~/.devprofile/snapshots/", async () => {
+  test("writes a .beheld file under ~/.beheld/snapshots/", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=gen1");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const snapDir = join(workDir, ".beheld", "snapshots");
     expect(existsSync(snapDir)).toBe(true);
-    const files = readdirSync(snapDir).filter((f) => f.endsWith(".dpbundle"));
+    const files = readdirSync(snapDir).filter((f) => f.endsWith(".beheld"));
     expect(files.length).toBe(1);
-    expect(files[0]).toMatch(/^\d{8}_[0-9a-f]{8}\.dpbundle$/);
+    expect(files[0]).toMatch(/^\d{8}_[0-9a-f]{8}\.beheld$/);
   });
 
   test("snapshots directory has 0700 permissions", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=gen-perms");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const snapDir = join(workDir, ".beheld", "snapshots");
     expect(statSync(snapDir).mode & 0o777).toBe(0o700);
   });
 
   test("bundle has version, payload, hash, signature, public_key", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=gen2");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
     expect(bundle.version).toBe(BUNDLE_VERSION);
     expect(bundle.payload).toBeDefined();
@@ -193,8 +208,8 @@ describe("snapshotCommand — generate", () => {
   test("hash matches recomputed canonical payload hash (determinism)", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=gen3");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
     const expected = await payloadHash(bundle.payload);
     expect(bundle.hash).toBe(expected);
@@ -203,8 +218,8 @@ describe("snapshotCommand — generate", () => {
   test("signature verifies against the embedded public_key", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=gen4");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
 
     const pubX = bundle.public_key.replace(/^ed25519:/, "");
@@ -223,13 +238,13 @@ describe("snapshotCommand — generate", () => {
   });
 
   test("--output writes a second copy", async () => {
-    const out = join(workDir, "elsewhere.dpbundle");
+    const out = join(workDir, "elsewhere.beheld");
     const { snapshotCommand } = await import("../src/commands/snapshot?v=out");
     await snapshotCommand({ output: out });
     expect(existsSync(out)).toBe(true);
     // Both copies have identical content
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const primary = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const primary = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     expect(readFileSync(join(snapDir, primary), "utf8")).toBe(readFileSync(out, "utf8"));
   });
 
@@ -241,20 +256,20 @@ describe("snapshotCommand — generate", () => {
     expect(body.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(typeof body.payload_json).toBe("string");
     expect(typeof body.bundle_path).toBe("string");
-    expect((body.bundle_path as string).endsWith(".dpbundle")).toBe(true);
+    expect((body.bundle_path as string).endsWith(".beheld")).toBe(true);
   });
 
-  test("filename uses YYYYMMDD_<hash8>.dpbundle convention", async () => {
+  test("filename uses YYYYMMDD_<hash8>.beheld convention", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=fname");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     expect(file.startsWith("20260514_")).toBe(true);
   });
 
   test("auto-generates keys if missing (init hook fallback)", async () => {
     // workDir starts empty, no keys present
-    const keysDir = join(workDir, ".devprofile", "keys");
+    const keysDir = join(workDir, ".beheld", "keys");
     expect(existsSync(keysDir)).toBe(false);
     const { snapshotCommand } = await import("../src/commands/snapshot?v=ensurekeys");
     await snapshotCommand();
@@ -268,18 +283,18 @@ describe("snapshotCommand — generate", () => {
 // ── desktop convenience copy ────────────────────────────────────────────────
 
 describe("snapshotCommand — desktop convenience copy", () => {
-  test("writes a copy to DEVPROFILE_DESKTOP_DIR when set", async () => {
-    const desktop = mkdtempSync(join(tmpdir(), "devprofile-desktop-"));
-    delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
-    process.env.DEVPROFILE_DESKTOP_DIR = desktop;
+  test("writes a copy to BEHELD_DESKTOP_DIR when set", async () => {
+    const desktop = mkdtempSync(join(tmpdir(), "beheld-desktop-"));
+    delete process.env.BEHELD_NO_DESKTOP_COPY;
+    process.env.BEHELD_DESKTOP_DIR = desktop;
     try {
       const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop1");
       await snapshotCommand();
-      const files = readdirSync(desktop).filter((f) => f.endsWith(".dpbundle"));
+      const files = readdirSync(desktop).filter((f) => f.endsWith(".beheld"));
       expect(files.length).toBe(1);
-      // Content equals primary copy under ~/.devprofile/snapshots/
-      const snapDir = join(workDir, ".devprofile", "snapshots");
-      const primary = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+      // Content equals primary copy under ~/.beheld/snapshots/
+      const snapDir = join(workDir, ".beheld", "snapshots");
+      const primary = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
       expect(readFileSync(join(desktop, files[0]), "utf8")).toBe(
         readFileSync(join(snapDir, primary), "utf8"),
       );
@@ -288,10 +303,10 @@ describe("snapshotCommand — desktop convenience copy", () => {
     }
   });
 
-  test("does NOT copy when DEVPROFILE_NO_DESKTOP_COPY=1 (default in tests)", async () => {
-    // beforeEach already sets DEVPROFILE_NO_DESKTOP_COPY=1
-    const desktop = mkdtempSync(join(tmpdir(), "devprofile-desktop-"));
-    process.env.DEVPROFILE_DESKTOP_DIR = desktop;
+  test("does NOT copy when BEHELD_NO_DESKTOP_COPY=1 (default in tests)", async () => {
+    // beforeEach already sets BEHELD_NO_DESKTOP_COPY=1
+    const desktop = mkdtempSync(join(tmpdir(), "beheld-desktop-"));
+    process.env.BEHELD_DESKTOP_DIR = desktop;
     try {
       const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop2");
       await snapshotCommand();
@@ -301,13 +316,13 @@ describe("snapshotCommand — desktop convenience copy", () => {
     }
   });
 
-  test("silently skips when DEVPROFILE_DESKTOP_DIR points at nonexistent path", async () => {
-    delete process.env.DEVPROFILE_NO_DESKTOP_COPY;
-    process.env.DEVPROFILE_DESKTOP_DIR = join(tmpdir(), "definitely-not-a-real-dir-" + Date.now());
+  test("silently skips when BEHELD_DESKTOP_DIR points at nonexistent path", async () => {
+    delete process.env.BEHELD_NO_DESKTOP_COPY;
+    process.env.BEHELD_DESKTOP_DIR = join(tmpdir(), "definitely-not-a-real-dir-" + Date.now());
     const { snapshotCommand } = await import("../src/commands/snapshot?v=desktop3");
     // Should not throw, primary write still works
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
+    const snapDir = join(workDir, ".beheld", "snapshots");
     expect(readdirSync(snapDir).length).toBe(1);
   });
 });
@@ -438,14 +453,14 @@ describe("snapshotListCommand", () => {
             hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             previous_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             created_at: "2026-05-14T03:00:00+00:00",
-            bundle_path: "/tmp/b.dpbundle",
+            bundle_path: "/tmp/b.beheld",
           },
           {
             id: 1,
             hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             previous_hash: null,
             created_at: "2026-05-14T02:00:00+00:00",
-            bundle_path: "/tmp/a.dpbundle",
+            bundle_path: "/tmp/a.beheld",
           },
         ]),
         { headers: { "Content-Type": "application/json" } },
@@ -463,13 +478,13 @@ describe("snapshotListCommand", () => {
     expect(out).toContain("2 snapshot");
     expect(out).toContain("bbbbbbbbbbbb");      // newest short hash
     expect(out).toContain("aaaaaaaaaaaa");      // genesis short hash
-    expect(out).toContain("/tmp/a.dpbundle");
+    expect(out).toContain("/tmp/a.beheld");
     expect(out).toContain("•");                  // genesis marker
     expect(out).toContain("→");                  // linked marker
   });
 });
 
-// ── F6.8: L1/L2 composition surfaced by `devprofile snapshot` ────────────────
+// ── F6.8: L1/L2 composition surfaced by `beheld snapshot` ────────────────
 
 describe("snapshotCommand — L1/L2 composition output", () => {
   test("shows the composition block (Base histórica + Trajetória observada)", async () => {
@@ -500,7 +515,7 @@ describe("snapshotCommand — L1/L2 composition output", () => {
       console.log = originalLog;
     }
     const out = captured.join("\n");
-    expect(out).toContain("não disponível (execute devprofile import)");
+    expect(out).toContain("não disponível (execute beheld import)");
   });
 
   test("shows repo and commit counts when L1 has data", async () => {
@@ -542,8 +557,8 @@ describe("snapshotCommand — L1/L2 composition output", () => {
   test("bundle on disk has separate l1 and l2 keys", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=compose4");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
     expect(bundle.payload).toHaveProperty("l1");
     expect(bundle.payload).toHaveProperty("l2");
@@ -555,7 +570,7 @@ describe("snapshotCommand — L1/L2 composition output", () => {
 
 describe("snapshotCommand — attestation injection", () => {
   function writeAttestationCache(workDir: string, attestation: object): void {
-    const dir = join(workDir, ".devprofile");
+    const dir = join(workDir, ".beheld");
     require("node:fs").mkdirSync(dir, { recursive: true });
     require("node:fs").writeFileSync(
       join(dir, "attestation.json"),
@@ -565,8 +580,8 @@ describe("snapshotCommand — attestation injection", () => {
 
   const sampleAttestation = {
     payload: {
-      type: "devprofile-identity-attestation/v1",
-      platform_key_id: "devprofile-platform-2026-q2",
+      type: "beheld-identity-attestation/v1",
+      platform_key_id: "beheld-platform-2026-q2",
       dev_pubkey: "ed25519-pub:AAAA",
       github: {
         user_id: 12345,
@@ -581,8 +596,8 @@ describe("snapshotCommand — attestation injection", () => {
   test("omits attestation field quando cache não existe", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=att-none");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
     expect(bundle.attestation).toBeUndefined();
   });
@@ -591,8 +606,8 @@ describe("snapshotCommand — attestation injection", () => {
     writeAttestationCache(workDir, sampleAttestation);
     const { snapshotCommand } = await import("../src/commands/snapshot?v=att-yes");
     await snapshotCommand();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    const file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
     expect(bundle.attestation).toEqual(sampleAttestation);
   });
@@ -601,8 +616,8 @@ describe("snapshotCommand — attestation injection", () => {
     // Snapshot sem attestation
     const { snapshotCommand: snap1 } = await import("../src/commands/snapshot?v=att-hash-no");
     await snap1();
-    const snapDir = join(workDir, ".devprofile", "snapshots");
-    let file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    let file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundleNoAtt = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
 
     // Cleanup
@@ -612,12 +627,126 @@ describe("snapshotCommand — attestation injection", () => {
     writeAttestationCache(workDir, sampleAttestation);
     const { snapshotCommand: snap2 } = await import("../src/commands/snapshot?v=att-hash-yes");
     await snap2();
-    file = readdirSync(snapDir).find((f) => f.endsWith(".dpbundle"))!;
+    file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundleWithAtt = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
 
     // Same payload → same hash
     expect(bundleWithAtt.hash).toBe(bundleNoAtt.hash);
     expect(bundleWithAtt.attestation).toBeDefined();
     expect(bundleNoAtt.attestation).toBeUndefined();
+  });
+});
+
+// ── Rekor inclusion (Phase 5 / F5.8) ────────────────────────────────────────
+
+describe("snapshotCommand — Rekor inclusion", () => {
+  test("Rekor falha → bundle salvo com rekor: null, sem erro fatal", async () => {
+    // rekorResponder defaults to 500 in beforeEach → submitToRekor returns null
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-fail");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.rekor).toBeNull();
+  });
+
+  test("Rekor sucesso → bundle persiste logIndex + uuid + integratedTime", async () => {
+    rekorResponder = () =>
+      new Response(
+        JSON.stringify({
+          "rekor-uuid-77": {
+            integratedTime: 1748793600,
+            logIndex: 777,
+            verification: {
+              signedEntryTimestamp: "set==",
+              inclusionProof: { logIndex: 777, treeSize: 9, rootHash: "abc" },
+            },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-ok");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.rekor).not.toBeNull();
+    expect(bundle.rekor!.logIndex).toBe(777);
+    expect(bundle.rekor!.uuid).toBe("rekor-uuid-77");
+    expect(bundle.rekor!.integratedTime).toBe("2025-06-01T16:00:00.000Z");
+  });
+
+  test("--no-rekor pula a submissão e mantém rekor: null", async () => {
+    // If --no-rekor still hit the mock, the responder would log a hit — instead
+    // we toggle the responder to throw so any unexpected call fails the test.
+    rekorResponder = () => {
+      throw new Error("submitToRekor should not be called with --no-rekor");
+    };
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-skip");
+    await snapshotCommand({ noRekor: true });
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    expect(bundle.rekor).toBeNull();
+  });
+
+  test("Rekor NÃO entra no payload assinado (vive no wrapper)", async () => {
+    rekorResponder = () =>
+      new Response(
+        JSON.stringify({
+          "u-22": {
+            integratedTime: 1700000000,
+            logIndex: 22,
+            verification: { signedEntryTimestamp: "x==", inclusionProof: { logIndex: 22, treeSize: 1, rootHash: "f" } },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-payload-iso");
+    await snapshotCommand();
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
+    const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
+    // Bundle hash must still match payload canonical hash — Rekor is sibling.
+    const recomputed = await (async () => {
+      const { payloadHash } = await import("../src/bundle/canonical");
+      return payloadHash(bundle.payload);
+    })();
+    expect(bundle.hash).toBe(recomputed);
+    expect(bundle.rekor).not.toBeNull();
+  });
+
+  test("--rekor-submit promove um bundle existente sem reescrever o payload", async () => {
+    // First: generate an offline bundle (rekor null).
+    const { snapshotCommand: snap1 } = await import("../src/commands/snapshot?v=rekor-resub-1");
+    await snap1();
+    const snapDir = join(workDir, ".beheld", "snapshots");
+    const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
+    const bundlePath = join(snapDir, file);
+    const before = JSON.parse(readFileSync(bundlePath, "utf8")) as Bundle;
+    expect(before.rekor).toBeNull();
+
+    // Switch Rekor mock to success and re-submit.
+    rekorResponder = () =>
+      new Response(
+        JSON.stringify({
+          "u-promoted": {
+            integratedTime: 1748800000,
+            logIndex: 9001,
+            verification: { signedEntryTimestamp: "p==", inclusionProof: { logIndex: 9001, treeSize: 5, rootHash: "ab" } },
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    const { snapshotCommand: snap2 } = await import("../src/commands/snapshot?v=rekor-resub-2");
+    await snap2({ rekorSubmit: bundlePath });
+
+    const after = JSON.parse(readFileSync(bundlePath, "utf8")) as Bundle;
+    expect(after.rekor).not.toBeNull();
+    expect(after.rekor!.logIndex).toBe(9001);
+    // Payload + signature unchanged.
+    expect(after.hash).toBe(before.hash);
+    expect(after.signature).toBe(before.signature);
+    expect(after.payload).toEqual(before.payload);
   });
 });

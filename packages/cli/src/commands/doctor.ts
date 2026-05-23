@@ -4,13 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mcpHealth, mcpStatus } from "../client/mcp-client";
 import { engineHealth, engineStatus } from "../client/engine-client";
-
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+import { GREEN, RED, YELLOW, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 type Severity = "ok" | "warn" | "crit";
 
@@ -21,22 +15,22 @@ interface CheckResult {
   hint?: string;
 }
 
-function devprofileDir(): string {
-  return process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+function beheldDir(): string {
+  return process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
 }
 
 function pidFilePath(): string {
-  return join(devprofileDir(), "daemon.pid");
+  return join(beheldDir(), "daemon.pid");
 }
 
 function sessionsDir(): string {
-  return join(devprofileDir(), "sessions");
+  return join(beheldDir(), "sessions");
 }
 
 function engineBinaryPath(): string {
-  return join(devprofileDir(), "bin", "engine");
+  return join(beheldDir(), "bin", "engine");
 }
 
 function readPidFile(): { mcp?: number; engine?: number } | null {
@@ -73,7 +67,7 @@ async function checkMcp(): Promise<CheckResult> {
       severity: "crit",
       label: `MCP server (porta ${port})`,
       lines: [`${RED}✗${RESET} Não responde em /health`],
-      hint: "Tentar: devprofile start",
+      hint: "Tentar: beheld start",
     };
   }
   const status = await mcpStatus();
@@ -97,7 +91,7 @@ async function checkEngine(): Promise<CheckResult & { runtimePid?: number }> {
       severity: "crit",
       label: `Scoring engine (porta ${port})`,
       lines: [`${RED}✗${RESET} Não responde em /health — está offline`],
-      hint: "Tentar: devprofile start",
+      hint: "Tentar: beheld start",
     };
   }
   const version = (health as { version?: string }).version ?? "?";
@@ -125,11 +119,11 @@ function portFromUrl(url: string | undefined, fallback: number): number {
 }
 
 function mcpPort(): number {
-  return portFromUrl(process.env.DEVPROFILE_MCP_URL, 7337);
+  return portFromUrl(process.env.BEHELD_MCP_URL, 7337);
 }
 
 function enginePort(): number {
-  return portFromUrl(process.env.DEVPROFILE_ENGINE_URL, 7338);
+  return portFromUrl(process.env.BEHELD_ENGINE_URL, 7338);
 }
 
 function pidListeningOn(port: number): number | undefined {
@@ -154,8 +148,8 @@ function checkPidFile(runtimeEnginePid: number | undefined): CheckResult {
     return {
       severity: "warn",
       label: "Arquivo de PID",
-      lines: [`${YELLOW}⚠${RESET} ~/.devprofile/daemon.pid não existe`],
-      hint: "Tentar: devprofile start",
+      lines: [`${YELLOW}⚠${RESET} ~/.beheld/daemon.pid não existe`],
+      hint: "Tentar: beheld start",
     };
   }
   const lines = [`${GREEN}✓${RESET} ${pidFilePath().replace(homedir(), "~")} existe`];
@@ -166,7 +160,7 @@ function checkPidFile(runtimeEnginePid: number | undefined): CheckResult {
       `${YELLOW}⚠${RESET} PID registrado (${pids.engine}) difere do PID real do engine (${runtimeEnginePid})`,
     );
     severity = "warn";
-    hint = "Correção sugerida: devprofile restart";
+    hint = "Correção sugerida: beheld restart";
   }
   return { severity, label: "Arquivo de PID", lines, hint };
 }
@@ -179,7 +173,7 @@ function checkCodesignMacOS(): CheckResult | null {
       severity: "warn",
       label: "Codesign (macOS)",
       lines: [`${YELLOW}⚠${RESET} Engine binary não extraído ainda em ${bin.replace(homedir(), "~")}`],
-      hint: "Execute: devprofile start (extrai o binário na primeira vez)",
+      hint: "Execute: beheld start (extrai o binário na primeira vez)",
     };
   }
   const lines: string[] = [];
@@ -198,7 +192,7 @@ function checkCodesignMacOS(): CheckResult | null {
   } else {
     lines.push(`${YELLOW}⚠${RESET} Engine não assinado (codesign falhou)`);
     severity = "warn";
-    hint = "Tentar: devprofile start (re-extrai e re-assina)";
+    hint = "Tentar: beheld start (re-extrai e re-assina)";
   }
 
   const xattrRes = spawnSync("xattr", [bin], { stdio: "pipe" });
@@ -235,7 +229,7 @@ async function checkOrphans(): Promise<CheckResult> {
     severity: "warn",
     label: "Eventos órfãos",
     lines: [`${YELLOW}⚠${RESET} ${unprocessed} bytes de eventos pendentes no JSONL`],
-    hint: "Execute: devprofile view --refresh",
+    hint: "Execute: beheld view --refresh",
   };
 }
 
@@ -298,8 +292,8 @@ async function checkJsonlToday(): Promise<CheckResult> {
     return {
       severity: "warn",
       label: "JSONL do dia",
-      lines: [`${YELLOW}⚠${RESET} ~/.devprofile/sessions/ não existe`],
-      hint: "Execute: devprofile init",
+      lines: [`${YELLOW}⚠${RESET} ~/.beheld/sessions/ não existe`],
+      hint: "Execute: beheld init",
     };
   }
   const today = localDateString();
@@ -324,7 +318,7 @@ async function checkJsonlToday(): Promise<CheckResult> {
     } else {
       lines.push(`${YELLOW}⚠${RESET} Contador in-memory (${mcpEvents}) divergente do disco (${sample.events})`);
       severity = "warn";
-      hint = "Correção sugerida: devprofile restart";
+      hint = "Correção sugerida: beheld restart";
     }
   }
 
@@ -351,7 +345,7 @@ function printResult(r: CheckResult): void {
 }
 
 export async function doctorCommand(): Promise<void> {
-  console.log("");
+  console.log(brand("checando minha saúde"));
   const mcp = await checkMcp();
   printResult(mcp);
 

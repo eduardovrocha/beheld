@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import { sanitize, sanitizeCommand, sanitizeMetadata } from "../sanitizer";
-import type { ClaudeCodeHookPayload, DevProfileEvent } from "../types";
+import type { ClaudeCodeHookPayload, BeheldEvent } from "../types";
 
 const TEST_KEYWORDS = ["rspec", "jest", "pytest", "playwright", "vitest"];
 
@@ -28,7 +28,7 @@ function cwdHash(cwd?: string): string | undefined {
   return createHash("sha256").update(cwd).digest("hex");
 }
 
-export function handlePreToolUse(body: unknown): DevProfileEvent {
+export function handlePreToolUse(body: unknown): BeheldEvent {
   const safe = sanitize(body) as ClaudeCodeHookPayload;
   const input = safe.tool_input ?? {};
   return {
@@ -50,7 +50,7 @@ export function handlePreToolUse(body: unknown): DevProfileEvent {
   };
 }
 
-export function handlePostToolUse(body: unknown): DevProfileEvent {
+export function handlePostToolUse(body: unknown): BeheldEvent {
   const safe = sanitize(body) as ClaudeCodeHookPayload & { duration_ms?: number };
   return {
     event_id: randomUUID(),
@@ -64,7 +64,7 @@ export function handlePostToolUse(body: unknown): DevProfileEvent {
   };
 }
 
-export function handleStop(body: unknown): DevProfileEvent {
+export function handleStop(body: unknown): BeheldEvent {
   const safe = sanitize(body) as ClaudeCodeHookPayload;
   return {
     event_id: randomUUID(),

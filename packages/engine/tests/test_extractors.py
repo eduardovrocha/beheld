@@ -213,10 +213,10 @@ def test_detect_workflow_unknown_single_tool() -> None:
 
 
 def test_build_tool_sequence_includes_test_suffix() -> None:
-    from models import DevProfileEvent, Session
+    from models import BeheldEvent, Session
     from datetime import datetime, timezone
 
-    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
+    events = [BeheldEvent.from_dict(e) for e in EVENTS_SESSION_1]
     session = Session(
         session_id="s",
         source="claude-code",
@@ -233,10 +233,10 @@ def test_build_tool_sequence_includes_test_suffix() -> None:
 
 
 def test_build_tool_sequence_skips_non_pre_tool_use() -> None:
-    from models import DevProfileEvent, Session
+    from models import BeheldEvent, Session
     from datetime import datetime, timezone
 
-    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
+    events = [BeheldEvent.from_dict(e) for e in EVENTS_SESSION_1]
     session = Session(
         session_id="s",
         source="claude-code",

@@ -10,19 +10,19 @@ from fastapi.testclient import TestClient
 from api import VERSION, app, count_unprocessed_events
 from models import Scores, Signal
 from processor import ProcessResult
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @pytest.fixture
-def test_db(db_path: Path) -> DevProfileDB:
-    db = DevProfileDB(db_path)
+def test_db(db_path: Path) -> BeheldDB:
+    db = BeheldDB(db_path)
     db.init_schema()
     yield db
     db.close()
 
 
 @pytest.fixture
-def client(test_db: DevProfileDB):
+def client(test_db: BeheldDB):
     """TestClient with isolated DB and no-op APScheduler; patch applied before lifespan."""
     with patch("api.db", test_db), \
          patch("api.insights_gen") as mock_ig, \
@@ -59,7 +59,7 @@ def test_scores_current_returns_zeros_when_no_data(client: TestClient) -> None:
     assert client.get("/scores/current").json()["overall"] == 0
 
 
-def test_scores_current_with_data(client: TestClient, test_db: DevProfileDB) -> None:
+def test_scores_current_with_data(client: TestClient, test_db: BeheldDB) -> None:
     test_db.save_scores(Scores("2026-05-10", 75, 60, 80, 55, 67, 10))
     data = client.get("/scores/current").json()
     assert data["overall"] == 67
@@ -75,7 +75,7 @@ def test_scores_history_empty(client: TestClient) -> None:
     assert resp.json() == []
 
 
-def test_scores_history_returns_data(client: TestClient, test_db: DevProfileDB) -> None:
+def test_scores_history_returns_data(client: TestClient, test_db: BeheldDB) -> None:
     test_db.save_scores(Scores("2026-05-10", 70, 60, 80, 55, 66, 5))
     data = client.get("/scores/history?days=10").json()
     assert len(data) == 1
@@ -91,7 +91,7 @@ def test_profile_summary_empty(client: TestClient) -> None:
     assert data["total_sessions"] == 0
 
 
-def test_profile_summary_with_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+def test_profile_summary_with_sessions(client: TestClient, test_db: BeheldDB, sample_session_1) -> None:
     test_db.save_session(sample_session_1)
     test_db.save_signals(sample_session_1.session_id, [
         Signal("platform", "testing", 2),
@@ -154,7 +154,7 @@ def test_status_unprocessed_events_field(client: TestClient) -> None:
     assert data["unprocessed_events"] == 512
 
 
-def test_status_sessions_processed_with_data(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+def test_status_sessions_processed_with_data(client: TestClient, test_db: BeheldDB, sample_session_1) -> None:
     test_db.save_session(sample_session_1)
     with patch("api.count_unprocessed_events", return_value=0):
         data = client.get("/status").json()
@@ -172,7 +172,7 @@ def test_readiness_zero_sessions(client: TestClient) -> None:
     assert data["sessions_remaining"] == 3
 
 
-def test_readiness_partial_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1) -> None:
+def test_readiness_partial_sessions(client: TestClient, test_db: BeheldDB, sample_session_1) -> None:
     test_db.save_session(sample_session_1)
     data = client.get("/profile/readiness").json()
     assert data["ready"] is False
@@ -180,7 +180,7 @@ def test_readiness_partial_sessions(client: TestClient, test_db: DevProfileDB, s
     assert data["sessions_remaining"] == 2
 
 
-def test_readiness_enough_sessions(client: TestClient, test_db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_readiness_enough_sessions(client: TestClient, test_db: BeheldDB, sample_session_1, sample_session_2) -> None:
     from models import Session
     import copy
     s3 = copy.deepcopy(sample_session_1)
@@ -200,7 +200,7 @@ def test_readiness_structure(client: TestClient) -> None:
         assert key in data
 
 
-def test_readiness_sessions_remaining_never_negative(client: TestClient, test_db: DevProfileDB, sample_session_1, sample_session_2) -> None:
+def test_readiness_sessions_remaining_never_negative(client: TestClient, test_db: BeheldDB, sample_session_1, sample_session_2) -> None:
     import copy
     for i in range(5):
         s = copy.deepcopy(sample_session_1)
@@ -267,7 +267,7 @@ def test_process_no_new_events(client: TestClient) -> None:
     assert resp.json()["processed"] == 0
 
 
-def test_process_two_sessions(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+def test_process_two_sessions(client: TestClient, test_db: BeheldDB, sessions_dir: Path, tmp_path: Path) -> None:
     from reader.jsonl_reader import JsonlReader
     from processor import Processor
 
@@ -280,7 +280,7 @@ def test_process_two_sessions(client: TestClient, test_db: DevProfileDB, session
     assert resp.json()["processed"] == 2
 
 
-def test_process_idempotent(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+def test_process_idempotent(client: TestClient, test_db: BeheldDB, sessions_dir: Path, tmp_path: Path) -> None:
     from reader.jsonl_reader import JsonlReader
     from processor import Processor
 
@@ -294,7 +294,7 @@ def test_process_idempotent(client: TestClient, test_db: DevProfileDB, sessions_
     assert r2.json()["processed"] == 0
 
 
-def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path) -> None:
+def test_process_writes_scores(client: TestClient, test_db: BeheldDB, sessions_dir: Path, tmp_path: Path) -> None:
     from reader.jsonl_reader import JsonlReader
     from processor import Processor
 
@@ -310,7 +310,7 @@ def test_process_writes_scores(client: TestClient, test_db: DevProfileDB, sessio
 
 
 def test_process_persists_workflow_metrics(
-    client: TestClient, test_db: DevProfileDB, sessions_dir: Path, tmp_path: Path,
+    client: TestClient, test_db: BeheldDB, sessions_dir: Path, tmp_path: Path,
 ) -> None:
     from reader.jsonl_reader import JsonlReader
     from processor import Processor
@@ -347,7 +347,7 @@ def test_metrics_workflow_empty_returns_zero_metrics(client: TestClient) -> None
 
 
 def test_metrics_workflow_returns_persisted_values(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import WorkflowMetrics
     test_db.save_workflow_metrics(
@@ -363,7 +363,7 @@ def test_metrics_workflow_returns_persisted_values(
 
 
 def test_metrics_workflow_response_is_canonical_serializable(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     """The `metrics` block must round-trip through sort_keys without losing info
     — that's what F5 depends on for hash stability."""
@@ -396,7 +396,7 @@ def test_coach_insufficient_when_no_scores(client: TestClient) -> None:
 
 
 def test_coach_insufficient_when_below_min_sessions(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores
     test_db.save_scores(Scores(
@@ -409,7 +409,7 @@ def test_coach_insufficient_when_below_min_sessions(
 
 
 def test_coach_live_with_data_returns_patterns(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores, WorkflowMetrics
     test_db.save_scores(Scores(
@@ -444,7 +444,7 @@ def test_coach_invalid_session_hint_is_coerced_to_unknown(client: TestClient) ->
 
 
 def test_coach_response_is_fully_json_serializable(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     """The whole payload must roundtrip through json.dumps without errors —
     no dataclass leaks, no Decimal, no datetime objects."""
@@ -469,7 +469,7 @@ def test_coach_response_is_fully_json_serializable(
 
 
 def test_coach_payload_includes_coaching_guidance_constants(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     """The guidance block must be present in BOTH insufficient and live modes —
     it's how the host LLM knows how to behave even when no patterns fire."""
@@ -487,7 +487,7 @@ def test_coach_payload_includes_coaching_guidance_constants(
 
 
 def test_coach_suggested_followups_present_in_live_mode(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores
     test_db.save_scores(Scores(
@@ -519,7 +519,7 @@ def test_snapshot_latest_returns_nulls_when_empty(client: TestClient) -> None:
 
 
 def test_snapshot_latest_returns_tip_of_chain(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     a, b = '{"i":1}', '{"i":2}'
     test_db.save_snapshot(_h(a), None, a)
@@ -532,12 +532,12 @@ def test_snapshot_latest_returns_tip_of_chain(
 
 
 def test_snapshot_latest_never_leaks_payload_or_bundle_path(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     """Endpoint is for chain tip metadata only — payload_json and bundle_path
     stay internal."""
     payload = '{"secret":"do not expose"}'
-    test_db.save_snapshot(_h(payload), None, payload, bundle_path="/tmp/x.dpbundle")
+    test_db.save_snapshot(_h(payload), None, payload, bundle_path="/tmp/x.beheld")
     data = client.get("/snapshot/latest").json()
     assert "payload_json" not in data
     assert "bundle_path" not in data
@@ -551,7 +551,7 @@ def test_chain_status_ok_for_empty(client: TestClient) -> None:
 
 
 def test_chain_status_detects_tampering(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     a, b = '{"i":1}', '{"i":2}'
     test_db.save_snapshot(_h(a), None, a)
@@ -577,7 +577,7 @@ def test_snapshot_payload_returns_409_when_no_scores(client: TestClient) -> None
 
 
 def test_snapshot_payload_builds_valid_shape(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores, WorkflowMetrics
     test_db.save_scores(Scores(
@@ -596,7 +596,7 @@ def test_snapshot_payload_builds_valid_shape(
     data = resp.json()
     # Top-level shape per the contract (Etapa C)
     assert "created_at" in data
-    assert "devprofile_version" in data
+    assert "beheld_version" in data
     assert "previous_hash" in data
     assert "scores" in data
     assert "l1" in data
@@ -614,7 +614,7 @@ def test_snapshot_payload_builds_valid_shape(
 
 
 def test_snapshot_payload_carries_persisted_workflow_metrics(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores, WorkflowMetrics
     test_db.save_scores(Scores(date="2026-05-14",
@@ -632,7 +632,7 @@ def test_snapshot_payload_carries_persisted_workflow_metrics(
 
 
 def test_snapshot_payload_chains_to_previous(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     from models import Scores
     test_db.save_scores(Scores(date="2026-05-14",
@@ -653,13 +653,13 @@ def test_snapshot_save_rejects_invalid_hash_format(client: TestClient) -> None:
 
 
 def test_snapshot_save_persists_to_db(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     payload = '{"x":1}'
     h = _h(payload)
     resp = client.post(
         "/snapshot/save",
-        json={"hash": h, "payload_json": payload, "bundle_path": "/tmp/a.dpbundle"},
+        json={"hash": h, "payload_json": payload, "bundle_path": "/tmp/a.beheld"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -669,7 +669,7 @@ def test_snapshot_save_persists_to_db(
 
 
 def test_snapshot_save_returns_409_on_duplicate(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     payload = '{"x":1}'
     h = _h(payload)
@@ -687,7 +687,7 @@ def test_snapshots_list_empty(client: TestClient) -> None:
 
 
 def test_snapshots_list_newest_first(
-    client: TestClient, test_db: DevProfileDB,
+    client: TestClient, test_db: BeheldDB,
 ) -> None:
     test_db.save_snapshot(_h('{"i":1}'), None, '{"i":1}', bundle_path="/a")
     test_db.save_snapshot(_h('{"i":2}'), _h('{"i":1}'), '{"i":2}', bundle_path="/b")

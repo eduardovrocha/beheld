@@ -1,4 +1,4 @@
-export interface DevProfileEvent {
+export interface BeheldEvent {
   event_id: string;
   session_id: string;
   source: "claude-code" | "continue-vscode";

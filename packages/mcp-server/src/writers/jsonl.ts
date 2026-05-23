@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { gzipSync } from "zlib";
-import type { DevProfileEvent } from "../types";
+import type { BeheldEvent } from "../types";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
@@ -73,7 +73,7 @@ export class JsonlWriter {
     fs.unlinkSync(filePath);
   }
 
-  async write(event: DevProfileEvent): Promise<void> {
+  async write(event: BeheldEvent): Promise<void> {
     const { session_id, timestamp } = event;
     const date = dateOf(timestamp);
 

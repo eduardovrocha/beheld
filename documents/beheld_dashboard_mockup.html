@@ -1,0 +1,159 @@
+<style>
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.score-ring { display: flex; align-items: center; justify-content: center; }
+.dim-bar { height: 6px; border-radius: 3px; background: var(--color-background-secondary); overflow: hidden; }
+.dim-fill { height: 100%; border-radius: 3px; }
+.badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--border-radius-md); display: inline-block; }
+.badge-purple { background: #EEEDFE; color: #3C3489; }
+.badge-teal { background: #E1F5EE; color: #085041; }
+.badge-amber { background: #FAEEDA; color: #633806; }
+.badge-coral { background: #FAECE7; color: #712B13; }
+.insight { border-left: 2px solid var(--color-border-secondary); padding-left: 12px; margin: 8px 0; border-radius: 0; }
+</style>
+
+<h2 class="sr-only">Dashboard de perfil do desenvolvedor baseado no uso do Claude Code</h2>
+
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:1.25rem; padding-top:0.5rem;">
+  <div style="width:44px;height:44px;border-radius:50%;background:#EEEDFE;display:flex;align-items:center;justify-content:center;font-weight:500;font-size:15px;color:#3C3489;">EO</div>
+  <div>
+    <p style="font-weight:500;font-size:15px;margin:0;color:var(--color-text-primary)">Eduardo Oliveira</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0;">Analisando 847 sessões · atualizado há 2h</p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:6px;">
+    <span class="badge badge-purple">Senior</span>
+    <span class="badge badge-teal">Full-stack</span>
+    <span class="badge badge-amber">Web3</span>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:1rem;">
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">score geral</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:#534AB7;">78</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">/100</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">sessões analisadas</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:var(--color-text-primary);">847</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">últimos 90 dias</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">uso de testes</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:#0F6E56;">62%</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">das sessões</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">evolução</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:#0F6E56;">+14</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">pts vs mês anterior</p>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr);gap:10px;margin-bottom:1rem;">
+
+  <div class="card">
+    <p style="font-size:13px;font-weight:500;margin:0 0 14px;">dimensões do perfil</p>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">qualidade de prompt</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">84/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:84%;background:#534AB7;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">maturidade em testes</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">62/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:62%;background:#1D9E75;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">uso de TDD</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">38/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:38%;background:#BA7517;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">diversidade técnica</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">91/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:91%;background:#534AB7;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">refactoring</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">75/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:75%;background:#1D9E75;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">arquitetura / design</span>
+          <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);">80/100</span>
+        </div>
+        <div class="dim-bar"><div class="dim-fill" style="width:80%;background:#534AB7;"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div class="card" style="flex:1;">
+      <p style="font-size:13px;font-weight:500;margin:0 0 10px;">padrões detectados</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        <span class="badge badge-purple">React</span>
+        <span class="badge badge-purple">Rails API</span>
+        <span class="badge badge-teal">RSpec</span>
+        <span class="badge badge-teal">Playwright</span>
+        <span class="badge badge-teal">Docker</span>
+        <span class="badge badge-amber">Web3</span>
+        <span class="badge badge-amber">Blockchain</span>
+        <span class="badge badge-coral">FastAPI</span>
+        <span class="badge badge-coral">Flutter</span>
+        <span class="badge badge-purple">JWT</span>
+        <span class="badge badge-teal">CI/CD</span>
+        <span class="badge badge-amber">Zustand</span>
+      </div>
+    </div>
+    <div class="card" style="flex:1;">
+      <p style="font-size:13px;font-weight:500;margin:0 0 10px;">benchmarks — peers similares</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">top 10% em prompt quality</span>
+          <span style="font-size:11px;font-weight:500;color:#3C3489;background:#EEEDFE;padding:2px 7px;border-radius:4px;">+24 acima da média</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">TDD: abaixo da mediana</span>
+          <span style="font-size:11px;font-weight:500;color:#633806;background:#FAEEDA;padding:2px 7px;border-radius:4px;">oportunidade</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">tech breadth: top 5%</span>
+          <span style="font-size:11px;font-weight:500;color:#085041;background:#E1F5EE;padding:2px 7px;border-radius:4px;">destaque</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <p style="font-size:13px;font-weight:500;margin:0 0 10px;">insights gerados por IA</p>
+  <div class="insight">
+    <p style="font-size:12px;color:var(--color-text-primary);margin:0 0 2px;font-weight:500;">Ponto forte — prompts contextuais</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0;">Você frequentemente inclui contexto de negócio e exemplos nos seus prompts. Isso coloca você no top 10% dos usuários analisados.</p>
+  </div>
+  <div class="insight">
+    <p style="font-size:12px;color:var(--color-text-primary);margin:0 0 2px;font-weight:500;">Oportunidade — adoção de TDD</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0;">Apenas 23% das suas sessões de código novo começam com testes. Pedir ao Claude para "escrever o teste antes" pode elevar essa dimensão.</p>
+  </div>
+  <div class="insight">
+    <p style="font-size:12px;color:var(--color-text-primary);margin:0 0 2px;font-weight:500;">Tendência — crescimento consistente</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0;">Sua qualidade de prompt cresceu 18 pontos nos últimos 60 dias. O padrão indica uso mais estruturado e deliberado ao longo do tempo.</p>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;">
+  <button onclick="sendPrompt('Como implementar o hook MCP para o Claude Code que captura as conversas em JSONL?')" style="font-size:13px;">Implementar o hook MCP ↗</button>
+  <button onclick="sendPrompt('Como construir o scoring engine para analisar qualidade de prompts e padrões de desenvolvimento?')" style="font-size:13px;">Construir o scoring engine ↗</button>
+</div>

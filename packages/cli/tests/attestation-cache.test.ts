@@ -15,21 +15,21 @@ let workDir: string;
 let savedEnv: string | undefined;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), "devprofile-attest-cache-"));
-  savedEnv = process.env.DEVPROFILE_DATA_DIR;
-  process.env.DEVPROFILE_DATA_DIR = workDir;
+  workDir = mkdtempSync(join(tmpdir(), "beheld-attest-cache-"));
+  savedEnv = process.env.BEHELD_DATA_DIR;
+  process.env.BEHELD_DATA_DIR = workDir;
 });
 
 afterEach(() => {
-  if (savedEnv === undefined) delete process.env.DEVPROFILE_DATA_DIR;
-  else process.env.DEVPROFILE_DATA_DIR = savedEnv;
+  if (savedEnv === undefined) delete process.env.BEHELD_DATA_DIR;
+  else process.env.BEHELD_DATA_DIR = savedEnv;
   rmSync(workDir, { recursive: true, force: true });
 });
 
 const SAMPLE: CachedAttestation = {
   payload: {
-    type: "devprofile-identity-attestation/v1",
-    platform_key_id: "devprofile-platform-2026-q2",
+    type: "beheld-identity-attestation/v1",
+    platform_key_id: "beheld-platform-2026-q2",
     dev_pubkey: "ed25519-pub:ao/AsOyFTMrORd9irGlQjbxI5C7Qb4TfZVi7sgnoyio=",
     github: {
       user_id: 12345,
@@ -51,9 +51,9 @@ describe("attestation-cache", () => {
     expect(loadAttestationCache()).toEqual(SAMPLE);
   });
 
-  test("save grava no path esperado dentro de DEVPROFILE_DATA_DIR/.devprofile", () => {
+  test("save grava no path esperado dentro de BEHELD_DATA_DIR/.beheld", () => {
     saveAttestationCache(SAMPLE);
-    const expected = join(workDir, ".devprofile", "attestation.json");
+    const expected = join(workDir, ".beheld", "attestation.json");
     expect(existsSync(expected)).toBe(true);
     expect(attestationCachePath()).toBe(expected);
   });

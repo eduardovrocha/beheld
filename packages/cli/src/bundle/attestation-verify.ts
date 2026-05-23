@@ -45,7 +45,7 @@ export interface AttestationCheck {
   reason?: string;
 }
 
-const ATTESTATION_TYPE = "devprofile-identity-attestation/v1";
+const ATTESTATION_TYPE = "beheld-identity-attestation/v1";
 const SIG_RE = /^ed25519:([A-Za-z0-9+/=]+)$/;
 const PUBKEY_PREFIX_RE = /^ed25519(-pub)?:/;
 

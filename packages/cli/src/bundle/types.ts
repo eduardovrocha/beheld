@@ -1,5 +1,5 @@
 /**
- * .dpbundle wire format — TypeScript twin of engine/src/models.py.
+ * .beheld wire format — TypeScript twin of engine/src/models.py.
  *
  * Any change here MUST bump BUNDLE_VERSION and update the Python twin in the
  * same commit. The cross-language canonical hash test catches drift.
@@ -30,6 +30,13 @@ export interface BundleWorkflowMetrics {
   ecosystem_concentration: number;
 }
 
+/** Reference to a repo in the L1 section. `first_seen_at` (F5.7.2) is the
+ *  ISO-8601 UTC timestamp of the first import — immutable across re-imports. */
+export interface L1RepositoryRef {
+  hash: string;
+  first_seen_at: string;
+}
+
 /** L1 — git-history signals (Phase 6). Always present in v2 payloads;
  *  empty (zeros / empty lists / null timestamps) when no repo has been imported. */
 export interface BundleL1Section {
@@ -40,7 +47,7 @@ export interface BundleL1Section {
   ecosystems: Record<string, boolean>;
   platforms: Record<string, boolean>;
   avg_test_ratio: number;
-  root_commit_hashes: string[];
+  root_commit_hashes: L1RepositoryRef[];
 }
 
 /** L2 — session signals (Phase 2–5). Same shape as the legacy `signals`
@@ -60,24 +67,27 @@ export type BundleSignals = BundleL2Section;
 
 export interface BundlePayload {
   created_at: string;
-  devprofile_version: string;
+  beheld_version: string;
   previous_hash: string | null;
   scores: BundleScores;
   l1: BundleL1Section;
   l2: BundleL2Section;
+  /** F5.7.2 — SHA-256 hex of the engine binary that produced the payload.
+   *  Null when the engine ran unfrozen or the hash lookup failed. */
+  engine_version_hash: string | null;
 }
 
 /** Legacy v1 payload shape — only used by `verifyBundle` to detect bundles
  *  generated before Phase 6 and emit a friendly warning. */
 export interface BundlePayloadV1 {
   created_at: string;
-  devprofile_version: string;
+  beheld_version: string;
   previous_hash: string | null;
   scores: BundleScores;
   signals: BundleL2Section;
 }
 
-/** Identity attestation issued by the DevProfile platform key
+/** Identity attestation issued by the Beheld platform key
  *  (Phase 5 / F5.6). Lives at the WRAPPER level — sibling of hash and
  *  signature — so adding it to a bundle does not change the bundle hash.
  *  Bundles without an attestation field are still valid; verifiers report
@@ -89,7 +99,7 @@ export interface AttestationGithub {
 }
 
 export interface AttestationPayload {
-  type: string;            // "devprofile-identity-attestation/v1"
+  type: string;            // "beheld-identity-attestation/v1"
   platform_key_id: string; // joins to GET /api/platform-keys + embedded keys
   dev_pubkey: string;      // "ed25519-pub:<std-base64>"
   github: AttestationGithub;
@@ -101,6 +111,22 @@ export interface BundleAttestation {
   signature: string; // "ed25519:<base64>" — Ed25519 sig over canonical(payload)
 }
 
+/** Sigstore Rekor inclusion proof (Phase 5 / F5.8). Lives at the WRAPPER
+ *  level — sibling of hash/signature/attestation — so appending it after
+ *  bundle generation never changes the payload hash. `null` when offline
+ *  submission failed; can be back-filled via `beheld snapshot --rekor-submit`. */
+export interface RekorEntry {
+  /** Monotonically increasing position in the Rekor append-only log. */
+  logIndex: number;
+  /** Rekor entry UUID — appears in the public URL
+   *  https://rekor.sigstore.dev/api/v1/log/entries/<uuid>. */
+  uuid: string;
+  /** ISO-8601 UTC of when Rekor included the entry. */
+  integratedTime: string;
+  /** Base64-encoded SET (Signed Entry Timestamp) issued by Rekor. */
+  signedEntryTimestamp: string;
+}
+
 export interface Bundle {
   version: string;
   payload: BundlePayload;
@@ -108,4 +134,5 @@ export interface Bundle {
   signature: string;   // "ed25519:<hex>"
   public_key: string;  // "ed25519:<base64url-x>"
   attestation?: BundleAttestation | null;  // F5.6 — optional, wrapper-level
+  rekor?: RekorEntry | null;               // F5.8 — optional, wrapper-level
 }

@@ -1,5 +1,5 @@
 /**
- * `devprofile attest` — bind the developer's Ed25519 pubkey to a GitHub
+ * `beheld attest` — bind the developer's Ed25519 pubkey to a GitHub
  * identity by completing the OAuth flow with the platform backend
  * (Phase 5 / F5.6.1.d).
  *
@@ -13,8 +13,8 @@
  *      claim_code for the attestation JSON via
  *      `POST /api/attestation/claim`, and writes it to the cache.
  *
- * On disk the attestation lives at `~/.devprofile/attestation.json`.
- * `devprofile snapshot` (F5.6.1.e) picks it up and embeds it in bundles.
+ * On disk the attestation lives at `~/.beheld/attestation.json`.
+ * `beheld snapshot` (F5.6.1.e) picks it up and embeds it in bundles.
  */
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -26,7 +26,7 @@ import {
 } from "../keys/attestation-cache";
 import { arrow, bold, brand, fail, meta, ok } from "../ui/styles";
 
-const DEFAULT_API_URL = process.env.DEVPROFILE_API_URL ?? "http://localhost:3000";
+const DEFAULT_API_URL = process.env.BEHELD_API_URL ?? "http://localhost:3000";
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface AttestOptions {
@@ -148,7 +148,7 @@ interface CallbackSession {
 }
 
 const SUCCESS_HTML = `<!doctype html>
-<html><head><title>DevProfile — autorizado</title>
+<html><head><title>Beheld — autorizado</title>
 <meta charset="utf-8">
 <style>
   body{font-family:-apple-system,Segoe UI,sans-serif;text-align:center;padding:3rem;color:#222;background:#fafafa}

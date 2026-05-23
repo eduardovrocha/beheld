@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { sanitize, sanitizeCommand } from "../sanitizer";
-import type { DevProfileEvent } from "../types";
+import type { BeheldEvent } from "../types";
 
 interface McpBody {
   method?: string;
@@ -22,11 +22,11 @@ function extractExt(value: unknown): string | undefined {
 }
 
 /**
- * Maps a Continue.dev MCP request to a DevProfileEvent.
+ * Maps a Continue.dev MCP request to a BeheldEvent.
  * Returns null for protocol messages (initialize, tools/list, tools/call)
  * or events that carry no useful signal.
  */
-export function handleMcpRequest(body: unknown): DevProfileEvent | null {
+export function handleMcpRequest(body: unknown): BeheldEvent | null {
   const parsed = parseBody(body);
   if (!parsed) return null;
 

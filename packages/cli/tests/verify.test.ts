@@ -21,21 +21,21 @@ let workDir: string;
 let savedEnv: string | undefined;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), "devprofile-verify-"));
-  savedEnv = process.env.DEVPROFILE_DATA_DIR;
-  process.env.DEVPROFILE_DATA_DIR = workDir;
+  workDir = mkdtempSync(join(tmpdir(), "beheld-verify-"));
+  savedEnv = process.env.BEHELD_DATA_DIR;
+  process.env.BEHELD_DATA_DIR = workDir;
 });
 
 afterEach(() => {
-  if (savedEnv === undefined) delete process.env.DEVPROFILE_DATA_DIR;
-  else process.env.DEVPROFILE_DATA_DIR = savedEnv;
+  if (savedEnv === undefined) delete process.env.BEHELD_DATA_DIR;
+  else process.env.BEHELD_DATA_DIR = savedEnv;
   rmSync(workDir, { recursive: true, force: true });
 });
 
 function fixturePayload(previousHash: string | null = null): BundlePayload {
   return {
     created_at: "2026-05-14T03:00:00+00:00",
-    devprofile_version: "0.2.0",
+    beheld_version: "0.2.0",
     previous_hash: previousHash,
     scores: {
       date: "2026-05-13",
@@ -335,7 +335,7 @@ describe("verifyChain", () => {
 
 describe("verifyCommand — file I/O", () => {
   async function writeBundle(bundle: Bundle): Promise<string> {
-    const file = join(workDir, "test.dpbundle");
+    const file = join(workDir, "test.beheld");
     writeFileSync(file, JSON.stringify(bundle, null, 2));
     return file;
   }
@@ -417,7 +417,7 @@ describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
     // Build a v1-style payload manually (omit l1, use legacy `signals` key).
     const v1Payload = {
       created_at: "2026-05-14T03:00:00+00:00",
-      devprofile_version: "0.2.0",
+      beheld_version: "0.2.0",
       previous_hash: null,
       scores: {
         date: "2026-05-13",
@@ -450,7 +450,7 @@ describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
   test("verifyCommand surfaces ⚠ L1 line when section is missing", async () => {
     const v1Payload = {
       created_at: "2026-05-14T03:00:00+00:00",
-      devprofile_version: "0.2.0",
+      beheld_version: "0.2.0",
       previous_hash: null,
       scores: {
         date: "2026-05-13",
@@ -471,7 +471,7 @@ describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
       },
     };
     const bundle = await buildValidBundle(v1Payload as unknown as BundlePayload);
-    const file = join(workDir, "v1.dpbundle");
+    const file = join(workDir, "v1.beheld");
     writeFileSync(file, JSON.stringify(bundle, null, 2));
 
     const { verifyCommand } = await import("../src/commands/verify?v=verify-cmd-l1");

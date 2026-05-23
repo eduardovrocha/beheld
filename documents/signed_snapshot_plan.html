@@ -1,0 +1,172 @@
+<style>
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.section-label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); letter-spacing:.05em; margin: 0 0 10px; }
+.badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--border-radius-md); display: inline-block; }
+.bp { background:#EEEDFE; color:#3C3489; }
+.bt { background:#E1F5EE; color:#085041; }
+.ba { background:#FAEEDA; color:#633806; }
+.bc { background:#FAECE7; color:#712B13; }
+.bg { background:#F1EFE8; color:#444441; }
+.row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:0.5px solid var(--color-border-tertiary); }
+.row:last-child { border-bottom:none; padding-bottom:0; }
+.step-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+.phase-num { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:500; flex-shrink:0; }
+</style>
+
+<h2 class="sr-only">Planejamento do Signed Snapshot — componentes, fases e fluxo</h2>
+
+<div style="padding-top:.5rem; margin-bottom:1.25rem;">
+  <p style="font-size:15px; font-weight:500; margin:0; color:var(--color-text-primary);">Signed Snapshot — planejamento</p>
+  <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 0;">Prova de competência verificável sem expor código, prompts ou PI. 100% local-first.</p>
+</div>
+
+<!-- O que é um .beheld -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">estrutura do .beheld</p>
+  <div style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px;">
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">payload</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.5;">scores, métricas, data, versão, previous_hash</p>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">hash</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.5;">SHA-256 do payload serializado</p>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">signature</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.5;">Ed25519 da chave privada em ~/.beheld/keys/</p>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">public_key</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.5;">embutida — receptor verifica sem servidor</p>
+    </div>
+  </div>
+</div>
+
+<!-- Fases de implementação -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">fases de implementação</p>
+
+  <div class="row">
+    <div class="phase-num" style="background:#EEEDFE; color:#3C3489;">1</div>
+    <div style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <p style="font-size:13px; font-weight:500; margin:0; color:var(--color-text-primary);">Geração de chaves Ed25519</p>
+        <span class="badge bp">packages/cli</span>
+        <span class="badge bg">Python/cryptography</span>
+      </div>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Gerada automaticamente no <code style="font-size:10px;">beheld init</code> se não existir. Opção de importar chave existente via <code style="font-size:10px;">beheld keys import</code>. Armazenada em <code style="font-size:10px;">~/.beheld/keys/private.pem</code> com permissão <code style="font-size:10px;">0600</code> — apenas o dono lê. Chave pública exportável em <code style="font-size:10px;">public.pem</code>.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="phase-num" style="background:#EEEDFE; color:#3C3489;">2</div>
+    <div style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <p style="font-size:13px; font-weight:500; margin:0; color:var(--color-text-primary);">Chain of snapshots</p>
+        <span class="badge bp">packages/engine</span>
+        <span class="badge bg">SQLite</span>
+      </div>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Tabela <code style="font-size:10px;">snapshots</code> no SQLite local. Cada snapshot referencia o <code style="font-size:10px;">hash</code> do anterior (<code style="font-size:10px;">previous_hash</code>). Primeiro snapshot tem <code style="font-size:10px;">previous_hash: null</code> (genesis). Adulteração retroativa quebra toda a cadeia — detectável na verificação.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="phase-num" style="background:#EEEDFE; color:#3C3489;">3</div>
+    <div style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <p style="font-size:13px; font-weight:500; margin:0; color:var(--color-text-primary);">Geração do .beheld</p>
+        <span class="badge bp">packages/cli</span>
+        <span class="badge ba">novo comando</span>
+      </div>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;"><code style="font-size:10px;">beheld snapshot</code> — monta o payload JSON com métricas autorizadas, calcula SHA-256, assina com Ed25519, embute a chave pública e salva o arquivo <code style="font-size:10px;">.beheld</code>. Formato JSON com campos: <code style="font-size:10px;">version</code>, <code style="font-size:10px;">payload</code>, <code style="font-size:10px;">hash</code>, <code style="font-size:10px;">signature</code>, <code style="font-size:10px;">public_key</code>.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="phase-num" style="background:#1D9E75; color:#fff;">4</div>
+    <div style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <p style="font-size:13px; font-weight:500; margin:0; color:var(--color-text-primary);">Upload e QR code</p>
+        <span class="badge bt">plataforma web</span>
+        <span class="badge bg">opt-in</span>
+      </div>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;"><code style="font-size:10px;">beheld snapshot --share</code> — faz upload do bundle para o portal, recebe uma URL curta (ex: <code style="font-size:10px;">beheld.dev/v/abc123</code>) e gera o QR code no terminal via unicode block chars. Sem conta obrigatória — URL pública por 90 dias por padrão.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="phase-num" style="background:#1D9E75; color:#fff;">5</div>
+    <div style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <p style="font-size:13px; font-weight:500; margin:0; color:var(--color-text-primary);">Verificação pública</p>
+        <span class="badge bt">página web</span>
+        <span class="badge bg">sem conta</span>
+      </div>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Página <code style="font-size:10px;">beheld.dev/v/abc123</code> exibe o perfil verificado. Receptor vê: scores, data do snapshot, status da assinatura (✓ válida / ✗ adulterada), integridade da chain. Também verificável offline via <code style="font-size:10px;">beheld verify arquivo.beheld</code>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Novos comandos CLI -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">novos comandos CLI</p>
+  <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px;">
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 6px; color:var(--color-text-primary);">Geração</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld snapshot</code> — gera .beheld localmente</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld snapshot --share</code> — gera + upload + QR</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld snapshot --output &lt;path&gt;</code> — salva em path específico</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.7;"><code style="font-size:10px;">beheld snapshot list</code> — histórico de snapshots</p>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px;">
+      <p style="font-size:12px; font-weight:500; margin:0 0 6px; color:var(--color-text-primary);">Chaves e verificação</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld keys show</code> — exibe a chave pública atual</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld keys import &lt;path&gt;</code> — importa chave existente</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0 0 4px; line-height:1.7;"><code style="font-size:10px;">beheld keys rotate</code> — gera novo par, mantém histórico</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.7;"><code style="font-size:10px;">beheld verify &lt;arquivo.beheld&gt;</code> — verifica offline</p>
+    </div>
+  </div>
+</div>
+
+<!-- Impacto na stack -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">impacto na stack existente</p>
+  <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;">
+    <div style="padding:10px 12px; background:var(--color-background-secondary); border-radius:var(--border-radius-md);">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">packages/engine (Python)</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Nova tabela <code style="font-size:10px;">snapshots</code> no SQLite. Endpoint <code style="font-size:10px;">POST /snapshot</code> — monta payload e retorna dados para o CLI assinar. Lib: <code style="font-size:10px;">cryptography</code> (já no ecossistema Python).</p>
+    </div>
+    <div style="padding:10px 12px; background:var(--color-background-secondary); border-radius:var(--border-radius-md);">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#3C3489;">packages/cli (TypeScript)</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Novos comandos: <code style="font-size:10px;">snapshot</code> e <code style="font-size:10px;">keys</code>. Geração Ed25519 via <code style="font-size:10px;">@noble/ed25519</code> (zero deps, auditável). QR code via <code style="font-size:10px;">qrcode-terminal</code>.</p>
+    </div>
+    <div style="padding:10px 12px; background:var(--color-background-secondary); border-radius:var(--border-radius-md);">
+      <p style="font-size:12px; font-weight:500; margin:0 0 4px; color:#085041;">plataforma web (v1)</p>
+      <p style="font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.6;">Endpoint <code style="font-size:10px;">POST /bundles</code> para upload. Página pública <code style="font-size:10px;">/v/:id</code> para verificação. Verificação Ed25519 no browser via Web Crypto API — sem backend.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Decisões críticas -->
+<div class="card">
+  <p class="section-label">decisões que precisam ser tomadas</p>
+  <div style="display:flex; flex-direction:column; gap:8px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:12px;">
+      <span style="color:var(--color-text-secondary);">Quais métricas entram no payload? (todos os 4 scores + raw signals, ou apenas scores?)</span>
+      <span class="badge ba">decisão pendente</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:12px;">
+      <span style="color:var(--color-text-secondary);">TTL da URL pública: 90 dias fixo, configurável, ou permanente com conta?</span>
+      <span class="badge ba">decisão pendente</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:12px;">
+      <span style="color:var(--color-text-secondary);">Rotação de chaves: snapshots antigos ficam vinculados à chave antiga ou são re-assinados?</span>
+      <span class="badge ba">decisão pendente</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; font-size:12px;">
+      <span style="color:var(--color-text-secondary);">Faz parte do v0.1.0 ou é a primeira feature do v0.2.0?</span>
+      <span class="badge ba">decisão pendente</span>
+    </div>
+  </div>
+</div>

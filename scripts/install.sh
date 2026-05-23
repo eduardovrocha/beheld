@@ -2,8 +2,8 @@
 set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
-BINARY="devprofile"
-REPO="devprofile/devprofile"
+BINARY="beheld"
+REPO="beheld/beheld"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -50,7 +50,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Downloading DevProfile ${VERSION} for ${OS}-${ARCH}..."
+echo "Downloading Beheld ${VERSION} for ${OS}-${ARCH}..."
 curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN"
 curl -fsSL "$CHECKSUM_URL" -o "$TMP_SUM"
 
@@ -92,7 +92,7 @@ if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
 fi
 
 echo ""
-echo "DevProfile ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
+echo "Beheld ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 echo "Running setup wizard..."
 echo ""
 

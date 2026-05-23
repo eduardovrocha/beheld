@@ -17,7 +17,7 @@ from typing import Optional
 
 from l1 import auth_resolver, git_extractor
 from l1.git_extractor import AuthorNotFoundError, CloneError
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 _CACHE_KEY_PREFIX = "l1_url:"
@@ -32,7 +32,7 @@ class L1Importer:
     a successful import additionally records the URL→root-hash mapping in the
     `profile` table for cross-process / cross-restart idempotency."""
 
-    def __init__(self, db: DevProfileDB) -> None:
+    def __init__(self, db: BeheldDB) -> None:
         self._db = db
         self._lock = threading.Lock()
         self._status: dict = {

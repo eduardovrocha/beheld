@@ -29,7 +29,7 @@ function writeJsonl(file: string, events: object[]): void {
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-counters-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "beheld-counters-"));
 });
 
 afterEach(() => {

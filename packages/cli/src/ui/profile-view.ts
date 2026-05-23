@@ -1,14 +1,5 @@
 import type { ProfileData, Scores, ViewFlags } from "../types";
-
-// ── ANSI helpers ──────────────────────────────────────────────────────────────
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
-const DIM = "\x1b[2m";
-const CYAN = "\x1b[36m";
+import { RESET, BOLD, GREEN, YELLOW, RED, DIM, CYAN } from "./styles";
 
 function color(score: number): string {
   if (score >= 75) return GREEN;
@@ -41,7 +32,7 @@ export function renderCollecting(sessionsCount: number, sessionsRequired: number
   const b = "█".repeat(filled) + "░".repeat(20 - filled);
 
   console.log("");
-  console.log("  DevProfile — Coletando dados");
+  console.log("  Beheld — Coletando dados");
   console.log("");
   console.log(`  ${b}  ${progress}%`);
   console.log("");
@@ -77,7 +68,7 @@ export function renderProfile(data: ProfileData, flags: ViewFlags): string {
   const lines: string[] = [];
 
   lines.push("");
-  lines.push(bold(`${CYAN}DevProfile${RESET}${BOLD} — seu perfil de desenvolvedor${RESET}`));
+  lines.push(bold(`${CYAN}Beheld${RESET}${BOLD} — seu perfil de desenvolvedor${RESET}`));
   lines.push("");
 
   // ── Scores ─────────────────────────────────────────────────────────────────
@@ -99,7 +90,7 @@ export function renderProfile(data: ProfileData, flags: ViewFlags): string {
       );
     }
   } else {
-    lines.push(`${DIM}Engine offline — rode ${bold("devprofile start")} para ver os scores.${RESET}`);
+    lines.push(`${DIM}Engine offline — rode ${bold("beheld start")} para ver os scores.${RESET}`);
   }
 
   lines.push("");

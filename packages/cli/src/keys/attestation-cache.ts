@@ -2,13 +2,13 @@
  * On-disk cache for the platform-issued identity attestation
  * (Phase 5 / F5.6.1.d).
  *
- * The CLI runs `devprofile attest`, completes the OAuth flow with the
- * platform backend, and stores the signed attestation here. `devprofile
+ * The CLI runs `beheld attest`, completes the OAuth flow with the
+ * platform backend, and stores the signed attestation here. `beheld
  * snapshot` reads from this file and embeds the attestation into each
- * .dpbundle it produces.
+ * .beheld it produces.
  *
  * Format on disk: the exact JSON returned by `POST /api/attestation/claim`.
- * File location: <DEVPROFILE_DATA_DIR or ~/.devprofile>/attestation.json
+ * File location: <BEHELD_DATA_DIR or ~/.beheld>/attestation.json
  * Permissions: 0600 (the file is a verifiable identity binding, not a
  * secret per se, but tightening keeps it consistent with the keystore).
  */
@@ -36,9 +36,9 @@ export interface CachedAttestation {
 export function attestationCachePath(baseDir?: string): string {
   const base =
     baseDir ??
-    (process.env.DEVPROFILE_DATA_DIR
-      ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-      : join(homedir(), ".devprofile"));
+    (process.env.BEHELD_DATA_DIR
+      ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+      : join(homedir(), ".beheld"));
   return join(base, "attestation.json");
 }
 

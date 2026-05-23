@@ -34,13 +34,13 @@ describe("buildSyncOutput", () => {
     const { dir, cleanup } = fixture();
     try {
       writeFileSync(
-        join(dir, "devprofile-platform-2026-q2.pub"),
+        join(dir, "beheld-platform-2026-q2.pub"),
         "AAAA-fake-pub-AAAA=\n",
       );
       writeFileSync(
-        join(dir, "devprofile-platform-2026-q2.info.json"),
+        join(dir, "beheld-platform-2026-q2.info.json"),
         JSON.stringify({
-          key_id: "devprofile-platform-2026-q2",
+          key_id: "beheld-platform-2026-q2",
           algorithm: "ed25519",
           created_at: "2026-05-19T18:13:07Z",
           active: true,
@@ -51,7 +51,7 @@ describe("buildSyncOutput", () => {
       const out = buildSyncOutput(dir, "test/source");
       expect(out.keys).toHaveLength(1);
       const k = out.keys[0]!;
-      expect(k.key_id).toBe("devprofile-platform-2026-q2");
+      expect(k.key_id).toBe("beheld-platform-2026-q2");
       expect(k.algorithm).toBe("ed25519");
       expect(k.public_key).toBe("ed25519-pub:AAAA-fake-pub-AAAA=");
       expect(k.active).toBe(true);

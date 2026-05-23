@@ -6,19 +6,19 @@ import { runWizard } from "../ui/wizard";
 import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashCommand, installClaudeMcpServer, migrateProjectScopedRegistrations } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
 import { ensureSecurePermissions } from "../daemon-manager";
-import type { DevProfileConfig } from "../types";
+import type { BeheldConfig } from "../types";
 
 const VERSION = "0.1.1";
 
 function configPath(): string {
-  return join(homedir(), ".devprofile", "config.json");
+  return join(homedir(), ".beheld", "config.json");
 }
 
-function readConfig(): DevProfileConfig | null {
+function readConfig(): BeheldConfig | null {
   const p = configPath();
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as DevProfileConfig;
+    return JSON.parse(readFileSync(p, "utf8")) as BeheldConfig;
   } catch {
     return null;
   }
@@ -27,7 +27,7 @@ function readConfig(): DevProfileConfig | null {
 async function askReinit(): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
-    rl.question("DevProfile já está configurado. Reinicializar? [s/N] ", (ans) => {
+    rl.question("Beheld já está configurado. Reinicializar? [s/N] ", (ans) => {
       rl.close();
       resolve(ans.trim().toLowerCase() === "s");
     });
@@ -37,7 +37,7 @@ async function askReinit(): Promise<boolean> {
 export async function initCommand(opts: { force?: boolean } = {}): Promise<void> {
   ensureSecurePermissions();
   // Generate Ed25519 signing keys on first run (silent if already present).
-  // Required for `devprofile snapshot` (Phase 5 — signed .dpbundle).
+  // Required for `beheld snapshot` (Phase 5 — signed .beheld).
   const { ensureKeysSilent } = await import("./keys");
   await ensureKeysSilent();
 
@@ -85,7 +85,7 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
     },
   );
 
-  const config: DevProfileConfig = {
+  const config: BeheldConfig = {
     version: VERSION,
     initialized_at: new Date().toISOString(),
     dimensions: result.dimensions,
@@ -93,6 +93,6 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
     ...(result.author_email ? { author_email: result.author_email } : {}),
   };
 
-  mkdirSync(join(homedir(), ".devprofile"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(homedir(), ".beheld"), { recursive: true, mode: 0o700 });
   writeFileSync(configPath(), JSON.stringify(config, null, 2) + "\n");
 }

@@ -14,17 +14,17 @@ jobs:
         include:
           - os: macos-latest
             target: bun-darwin-arm64
-            name: devprofile-darwin-arm64
+            name: beheld-darwin-arm64
             engine_platform: darwin
 
           - os: macos-13
             target: bun-darwin-x64
-            name: devprofile-darwin-x64
+            name: beheld-darwin-x64
             engine_platform: darwin
 
           - os: ubuntu-latest
             target: bun-linux-x64
-            name: devprofile-linux-x64
+            name: beheld-linux-x64
             engine_platform: linux
 
     runs-on: ${{ matrix.os }}
@@ -48,12 +48,12 @@ jobs:
           cd packages/engine
           pyinstaller \
             --onefile \
-            --name devprofile-engine \
+            --name beheld-engine \
             --distpath dist \
             src/main.py
 
       - name: Copy engine to CLI assets
-        run: cp packages/engine/dist/devprofile-engine packages/cli/assets/devprofile-engine
+        run: cp packages/engine/dist/beheld-engine packages/cli/assets/beheld-engine
 
       - name: Install Bun dependencies
         run: bun install

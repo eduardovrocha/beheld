@@ -1,4 +1,4 @@
-import engineBinary from "../assets/devprofile-engine" with { type: "file" };
+import engineBinary from "../assets/beheld-engine" with { type: "file" };
 import { existsSync, writeFileSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import { homedir, platform as osPlatform } from "node:os";
@@ -39,7 +39,7 @@ export function codesignEngine(binaryPath: string, spawnFn: SpawnFn = nodeSpawnS
 export async function ensureEngine(
   _platform = osPlatform(),
 ): Promise<string> {
-  const dest = join(homedir(), ".devprofile", "bin", "engine");
+  const dest = join(homedir(), ".beheld", "bin", "engine");
   await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
   if (!existsSync(dest)) {
     // Bun bundles assets at a virtual /$bunfs/ path — must read via Bun.file()

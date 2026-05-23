@@ -16,7 +16,7 @@ from scorers.overall import calculate_overall
 from scorers.prompt_quality import PromptQualityScorer
 from scorers.tech_breadth import TechBreadthScorer
 from scorers.test_maturity import TestMaturityScorer
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @dataclass
@@ -26,7 +26,7 @@ class ProcessResult:
 
 
 class Processor:
-    def __init__(self, db: DevProfileDB, reader: JsonlReader) -> None:
+    def __init__(self, db: BeheldDB, reader: JsonlReader) -> None:
         self.db = db
         self.reader = reader
 
@@ -123,7 +123,7 @@ class Processor:
         self.db.set_profile("last_scored_at", now.isoformat())
         self.db.set_profile("overall_score", str(overall))
 
-        # Workflow metrics over the recent window — feeds coach + .dpbundle (F5).
+        # Workflow metrics over the recent window — feeds coach + .beheld (F5).
         # Falls back to full history when recent window is sparse to avoid flaky values.
         metrics_window = recent if len(recent) >= 5 else all_sessions
         wf_metrics = compute_workflow_metrics(metrics_window)

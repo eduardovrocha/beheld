@@ -9,13 +9,13 @@ from typing import Optional
 
 import os
 
-from models import DevProfileEvent, Session
+from models import BeheldEvent, Session
 
 logger = logging.getLogger(__name__)
 
-_DATA_HOME = Path(os.environ.get("DEVPROFILE_DATA_DIR", Path.home()))
-SESSIONS_DIR = _DATA_HOME / ".devprofile" / "sessions"
-CURSOR_FILE = _DATA_HOME / ".devprofile" / ".cursor"
+_DATA_HOME = Path(os.environ.get("BEHELD_DATA_DIR", Path.home()))
+SESSIONS_DIR = _DATA_HOME / ".beheld" / "sessions"
+CURSOR_FILE = _DATA_HOME / ".beheld" / ".cursor"
 
 
 def _parse_ts(ts: str) -> datetime:
@@ -32,8 +32,8 @@ def _parse_ts(ts: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def _build_sessions(events: list[DevProfileEvent]) -> list[Session]:
-    buckets: dict[str, list[DevProfileEvent]] = {}
+def _build_sessions(events: list[BeheldEvent]) -> list[Session]:
+    buckets: dict[str, list[BeheldEvent]] = {}
     for event in events:
         buckets.setdefault(event.session_id, []).append(event)
 
@@ -125,7 +125,7 @@ class JsonlReader:
             return []
 
         offsets = self._load_cursor()
-        new_events: list[DevProfileEvent] = []
+        new_events: list[BeheldEvent] = []
         new_offsets: dict[str, int] = dict(offsets)
 
         for jsonl_file in sorted(self.sessions_dir.glob("*.jsonl")):
@@ -150,7 +150,7 @@ class JsonlReader:
                             continue
                         try:
                             data = json.loads(line)
-                            new_events.append(DevProfileEvent.from_dict(data))
+                            new_events.append(BeheldEvent.from_dict(data))
                         except Exception:
                             logger.warning("Skipping malformed JSONL line in %s", filename)
 

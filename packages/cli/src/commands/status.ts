@@ -3,12 +3,7 @@ import { engineHealth } from "../client/engine-client";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 interface DaemonPids {
   mcp?: number;
@@ -17,9 +12,9 @@ interface DaemonPids {
 
 function readPids(): DaemonPids {
   const f = join(
-    process.env.DEVPROFILE_DATA_DIR
-      ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-      : join(homedir(), ".devprofile"),
+    process.env.BEHELD_DATA_DIR
+      ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+      : join(homedir(), ".beheld"),
     "daemon.pid",
   );
   if (!existsSync(f)) return {};
@@ -44,7 +39,7 @@ export async function statusCommand(): Promise<void> {
 
   const pids = readPids();
 
-  console.log("");
+  console.log(brand("observando seu dia"));
   const mcpPid = pids.mcp ? `  ${DIM}pid ${pids.mcp}, port 7337${RESET}` : `  ${DIM}port 7337${RESET}`;
   const enginePid = pids.engine
     ? `  ${DIM}pid ${pids.engine}, port 7338${RESET}`

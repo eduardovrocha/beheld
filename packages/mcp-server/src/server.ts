@@ -4,22 +4,22 @@ import { handlePreToolUse, handlePostToolUse, handleStop } from "./hooks/claude-
 import { handleMcpRequest } from "./hooks/continue";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
-import { writePid, clearPid, rotateLogs, getDevProfileDir } from "./daemon";
-import { devprofileCoachTool } from "./tools/coach-tool";
-import { devprofileTool } from "./tools/devprofile-tool";
+import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
+import { beheldCoachTool } from "./tools/coach-tool";
+import { beheldTool } from "./tools/beheld-tool";
 import { statusTool } from "./tools/status-tool";
 import { notificationService } from "./notifications";
 import { triggerEngineProcessing } from "./engine-trigger";
 import { Counters } from "./counters";
-import type { DevProfileEvent } from "./types";
+import type { BeheldEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
 const VERSION = "0.1.1";
-const TOOLS: McpTool[] = [devprofileTool, devprofileCoachTool, statusTool];
+const TOOLS: McpTool[] = [beheldTool, beheldCoachTool, statusTool];
 const startedAt = Date.now();
 
-const writer = new JsonlWriter(getDevProfileDir());
-const counters = new Counters(path.join(getDevProfileDir(), "sessions"));
+const writer = new JsonlWriter(getBeheldDir());
+const counters = new Counters(path.join(getBeheldDir(), "sessions"));
 
 
 // ─── In-memory session state ────────────────────────────────────────────────
@@ -35,7 +35,7 @@ interface SessionMeta {
 
 const sessions = new Map<string, SessionMeta>();
 
-function trackEvent(event: DevProfileEvent): void {
+function trackEvent(event: BeheldEvent): void {
   if (!sessions.has(event.session_id)) {
     sessions.set(event.session_id, {
       session_id: event.session_id,
@@ -69,7 +69,7 @@ async function mcpResponse(body: unknown): Promise<unknown> {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "devprofile", version: VERSION },
+        serverInfo: { name: "beheld", version: VERSION },
       },
     };
   }
@@ -125,7 +125,7 @@ function badRequest(msg: string): Response {
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 export function startServer(): ReturnType<typeof Bun.serve> {
-  const port = parseInt(process.env.DEVPROFILE_PORT ?? "7337", 10);
+  const port = parseInt(process.env.BEHELD_PORT ?? "7337", 10);
   counters.rebuild();
   return Bun.serve({
     port,
@@ -213,10 +213,10 @@ export function startServer(): ReturnType<typeof Bun.serve> {
         let body: unknown;
         try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
 
-        // Capture a DevProfileEvent if the body is a Continue.dev event
+        // Capture a BeheldEvent if the body is a Continue.dev event
         const event = handleMcpRequest(body);
         if (event) {
-          const safe = sanitize(event) as DevProfileEvent;
+          const safe = sanitize(event) as BeheldEvent;
           await writer.write(safe);
           trackEvent(safe);
         }
@@ -246,5 +246,5 @@ if (import.meta.main) {
   process.on("SIGINT",  () => { clearPid(); process.exit(0); });
 
   const server = startServer();
-  console.log(`DevProfile MCP server listening on http://127.0.0.1:${server.port}`);
+  console.log(`Beheld MCP server listening on http://127.0.0.1:${server.port}`);
 }

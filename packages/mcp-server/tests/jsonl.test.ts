@@ -3,13 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { JsonlWriter } from "../src/writers/jsonl";
-import type { DevProfileEvent } from "../src/types";
+import type { BeheldEvent } from "../src/types";
 
 let tmpDir: string;
 let baseDir: string;
 let writer: JsonlWriter;
 
-function makeEvent(id: string, sessionId = "session-A", timestamp?: string): DevProfileEvent {
+function makeEvent(id: string, sessionId = "session-A", timestamp?: string): BeheldEvent {
   return {
     event_id: id,
     session_id: sessionId,
@@ -21,8 +21,8 @@ function makeEvent(id: string, sessionId = "session-A", timestamp?: string): Dev
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-jsonl-"));
-  baseDir = path.join(tmpDir, ".devprofile");
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "beheld-jsonl-"));
+  baseDir = path.join(tmpDir, ".beheld");
   writer = new JsonlWriter(baseDir);
 });
 
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("JsonlWriter", () => {
-  test("creates .devprofile directory with 700 permissions", async () => {
+  test("creates .beheld directory with 700 permissions", async () => {
     await writer.write(makeEvent("e1"));
     const stat = fs.statSync(baseDir);
     expect(stat.mode & 0o777).toBe(0o700);
@@ -86,7 +86,7 @@ describe("JsonlWriter", () => {
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const content = fs.readFileSync(path.join(sessionsDir, files[0]), "utf8");
     const ids = content.trim().split("\n").filter(Boolean)
-      .map((l) => (JSON.parse(l) as DevProfileEvent).event_id);
+      .map((l) => (JSON.parse(l) as BeheldEvent).event_id);
     expect(ids).toContain("e1");
     expect(ids).toContain("e2");
   });
@@ -134,7 +134,7 @@ describe("JsonlWriter", () => {
   });
 
   test("stored JSON line contains all event fields", async () => {
-    const event: DevProfileEvent = {
+    const event: BeheldEvent = {
       event_id: "full-e",
       session_id: "sess-full",
       source: "claude-code",
@@ -152,7 +152,7 @@ describe("JsonlWriter", () => {
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const parsed = JSON.parse(
       fs.readFileSync(path.join(sessionsDir, files[0]), "utf8").trim(),
-    ) as DevProfileEvent;
+    ) as BeheldEvent;
     expect(parsed.tool_name).toBe("Bash");
     expect(parsed.file_extension).toBe("ts");
     expect(parsed.has_test_context).toBe(true);

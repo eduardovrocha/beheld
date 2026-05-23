@@ -2,7 +2,7 @@
   "source": "web/source/backend/keys/platform",
   "keys": [
     {
-      "key_id": "devprofile-platform-2026-q2",
+      "key_id": "beheld-platform-2026-q2",
       "algorithm": "ed25519",
       "public_key": "ed25519-pub:ao/AsOyFTMrORd9irGlQjbxI5C7Qb4TfZVi7sgnoyio=",
       "active": true,

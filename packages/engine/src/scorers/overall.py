@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # Each dimension declares both its overall weight AND the layer(s) it consumes.
-# `sources` is documentation for consumers (CLI, dashboard, dpbundle); the
+# `sources` is documentation for consumers (CLI, dashboard, beheld); the
 # actual layer combination happens inside each scorer.
 WEIGHTS = {
     "prompt_quality": {"weight": 0.30, "sources": ["l2"]},

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { WizardDimensions, WizardEnvironments } from "../types";
+import { bold, green, dim, RESET, DIM, CYAN, YELLOW, RED } from "./styles";
 
 // ── Privacy strings (Phase 6 — required verbatim by F6.7 spec) ───────────────
 
@@ -11,25 +12,6 @@ export const BOOTSTRAP_PRIVACY_LINES = [
   "Cada repositório é processado uma única vez — reimportar não altera o perfil.",
   "Mensagens de commit, nomes de branch e conteúdo de código nunca são gravados.",
 ] as const;
-
-// ── ANSI ──────────────────────────────────────────────────────────────────────
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const GREEN = "\x1b[32m";
-const DIM = "\x1b[2m";
-const CYAN = "\x1b[36m";
-const YELLOW = "\x1b[33m";
-
-function bold(s: string): string {
-  return `${BOLD}${s}${RESET}`;
-}
-function green(s: string): string {
-  return `${GREEN}${s}${RESET}`;
-}
-function dim(s: string): string {
-  return `${DIM}${s}${RESET}`;
-}
 
 // ── readline helper ───────────────────────────────────────────────────────────
 
@@ -53,7 +35,7 @@ export function detectEnvironments(base = homedir()): WizardEnvironments {
 
 async function screen1(rl: ReturnType<typeof createInterface>): Promise<void> {
   process.stdout.write("\x1b[2J\x1b[0;0H"); // clear screen
-  console.log(bold(`\n${CYAN}DevProfile${RESET} — Onboarding\n`));
+  console.log(bold(`\n${CYAN}Beheld${RESET} — Onboarding\n`));
   console.log(bold("O que é coletado?") + "\n");
 
   const collected = [
@@ -83,7 +65,7 @@ async function screen1(rl: ReturnType<typeof createInterface>): Promise<void> {
     console.log(`  ${left.padEnd(maxLen + 10)}  ${right}`);
   }
 
-  console.log("\n" + dim("Todos os dados ficam em ~/.devprofile/ — nunca saem do seu computador."));
+  console.log("\n" + dim("Todos os dados ficam em ~/.beheld/ — nunca saem do seu computador."));
   await prompt(rl, "\nPressione Enter para continuar…");
 }
 
@@ -144,13 +126,13 @@ export async function bootstrapScreen(
   deps: BootstrapScreenDeps,
 ): Promise<BootstrapResult> {
   deps.log("─────────────────────────────────────────────────────");
-  deps.log("DevProfile · Histórico git (opcional)");
+  deps.log("Beheld · Histórico git (opcional)");
   deps.log("─────────────────────────────────────────────────────");
   deps.log("");
   deps.log("Seu perfil começa a se formar a partir de hoje.");
   deps.log("Quer carregar também o histórico dos seus projetos anteriores?");
   deps.log("");
-  deps.log("O DevProfile pode analisar repositórios onde você tem commits");
+  deps.log("O Beheld pode analisar repositórios onde você tem commits");
   deps.log("e extrair sinais técnicos — linguagens, ferramentas, ritmo de trabalho.");
   deps.log("");
   deps.log("O que é coletado:   extensões de arquivo, ecosystems, timing");
@@ -159,7 +141,7 @@ export async function bootstrapScreen(
   for (const line of BOOTSTRAP_PRIVACY_LINES) deps.log(line);
   deps.log("");
   deps.log("  [1] Importar agora");
-  deps.log("  [2] Importar depois  (devprofile import)");
+  deps.log("  [2] Importar depois  (beheld import)");
   deps.log("  [3] Pular");
   deps.log("");
 
@@ -179,7 +161,7 @@ export async function bootstrapScreen(
   }
 
   if (choice === "later") {
-    deps.log("Ok. Execute devprofile import quando quiser.");
+    deps.log("Ok. Execute beheld import quando quiser.");
     return { choice };
   }
 
@@ -237,7 +219,7 @@ async function screen4(
   actions: SetupActions,
 ): Promise<void> {
   process.stdout.write("\x1b[2J\x1b[0;0H");
-  console.log(bold("\nTela 4 — Configurando DevProfile\n"));
+  console.log(bold("\nTela 4 — Configurando Beheld\n"));
 
   async function step(label: string, fn: () => Promise<unknown>): Promise<void> {
     process.stdout.write(`  ${dim("…")}  ${label}`);
@@ -247,7 +229,7 @@ async function screen4(
       process.stdout.write(`\r  ${green("✓")}  ${finalLabel}\n`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stdout.write(`\r  \x1b[31m✗\x1b[0m  ${label}  ${dim(msg)}\n`);
+      process.stdout.write(`\r  ${RED}✗${RESET}  ${label}  ${dim(msg)}\n`);
     }
   }
 
@@ -266,7 +248,7 @@ async function screen4(
     await step("Registrando MCP server no Continue.dev", actions.installContinueMcp);
   }
   if (actions.extractEngine) {
-    await step("Extraindo engine (~/.devprofile/bin/engine)", actions.extractEngine);
+    await step("Extraindo engine (~/.beheld/bin/engine)", actions.extractEngine);
   }
   if (actions.startDaemons) {
     await step("Iniciando daemons", actions.startDaemons);
@@ -276,7 +258,7 @@ async function screen4(
   }
 
   console.log(
-    `\n${bold("Pronto.")} Digite ${bold("/devprofile")} no Claude Code para ver seu perfil.\n`,
+    `\n${bold("Pronto.")} Digite ${bold("/beheld")} no Claude Code para ver seu perfil.\n`,
   );
   rl.close();
 }

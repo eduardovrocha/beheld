@@ -10,9 +10,9 @@ let server: ReturnType<typeof import("../src/server").startServer>;
 let tmpDir: string;
 
 beforeAll(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-server-test-"));
-  process.env.DEVPROFILE_DATA_DIR = tmpDir;
-  process.env.DEVPROFILE_PORT = String(TEST_PORT);
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "beheld-server-test-"));
+  process.env.BEHELD_DATA_DIR = tmpDir;
+  process.env.BEHELD_PORT = String(TEST_PORT);
 
   const { startServer } = await import("../src/server");
   server = startServer();
@@ -21,8 +21,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.stop(true);
-  delete process.env.DEVPROFILE_DATA_DIR;
-  delete process.env.DEVPROFILE_PORT;
+  delete process.env.BEHELD_DATA_DIR;
+  delete process.env.BEHELD_PORT;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -94,7 +94,7 @@ describe("POST /hook/pre-tool", () => {
         tool_input: { file_path: "/project/src/main.ts" },
       }),
     });
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = path.join(tmpDir, ".beheld", "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const allContent = files.map((f) =>
       fs.readFileSync(path.join(sessionsDir, f), "utf8"),
@@ -113,7 +113,7 @@ describe("POST /hook/pre-tool", () => {
         tool_input: { command: "echo $SECRET", env: "SECRET=sk-testABCDEFGHIJKLMNOPQRSTUVWXYZ1234" },
       }),
     });
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = path.join(tmpDir, ".beheld", "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const allContent = files.map((f) =>
       fs.readFileSync(path.join(sessionsDir, f), "utf8"),
@@ -179,7 +179,7 @@ describe("POST /hook/stop", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, total_turns: 2 }),
     });
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = path.join(tmpDir, ".beheld", "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const allContent = files.map((f) =>
       fs.readFileSync(path.join(sessionsDir, f), "utf8"),
@@ -198,10 +198,10 @@ describe("POST /mcp", () => {
     });
     expect(r.status).toBe(200);
     const body = (await r.json()) as { result: { serverInfo: { name: string } } };
-    expect(body.result.serverInfo.name).toBe("devprofile");
+    expect(body.result.serverInfo.name).toBe("beheld");
   });
 
-  test("tools/list returns devprofile, devprofile_coach and devprofile_status", async () => {
+  test("tools/list returns beheld, beheld_coach and beheld_status", async () => {
     const r = await fetch(`${BASE}/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -209,9 +209,9 @@ describe("POST /mcp", () => {
     });
     const body = (await r.json()) as { result: { tools: Array<{ name: string }> } };
     const names = body.result.tools.map((t) => t.name);
-    expect(names).toContain("devprofile");
-    expect(names).toContain("devprofile_coach");
-    expect(names).toContain("devprofile_status");
+    expect(names).toContain("beheld");
+    expect(names).toContain("beheld_coach");
+    expect(names).toContain("beheld_status");
   });
 
   test("Continue.dev chat_request event is captured to JSONL", async () => {
@@ -224,7 +224,7 @@ describe("POST /mcp", () => {
       }),
     });
     expect(r.status).toBe(200);
-    const sessionsDir = path.join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = path.join(tmpDir, ".beheld", "sessions");
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     const allContent = files.map((f) =>
       fs.readFileSync(path.join(sessionsDir, f), "utf8"),

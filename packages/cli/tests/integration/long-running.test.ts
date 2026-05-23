@@ -1,6 +1,6 @@
 // Long-running integration scenario.
 //
-// This test boots a real MCP server subprocess against a fresh DEVPROFILE_DATA_DIR
+// This test boots a real MCP server subprocess against a fresh BEHELD_DATA_DIR
 // plus a stub engine on isolated ports, drives traffic through it, kills the
 // engine with SIGKILL, restarts it, and verifies that:
 //
@@ -70,7 +70,7 @@ async function stopProcess(p: ReturnType<typeof Bun.spawn> | null): Promise<void
 }
 
 beforeAll(async () => {
-  tmpDir = mkdtempSync(join(tmpdir(), "devprofile-integration-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "beheld-integration-"));
   env = buildEnv({ dataDir: tmpDir, mcpPort: MCP_PORT, enginePort: ENGINE_PORT });
 });
 
@@ -110,7 +110,7 @@ SUITE("Long-running scenario — produto sobrevive a uso prolongado e restarts",
     expect(afterTraffic!.sessions_today).toBe(30);
 
     // ── 4. Verificar JSONL escrito no disco ──────────────────────────────────
-    const sessionsDir = join(tmpDir, ".devprofile", "sessions");
+    const sessionsDir = join(tmpDir, ".beheld", "sessions");
     expect(existsSync(sessionsDir)).toBe(true);
     const jsonlFiles = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     expect(jsonlFiles.length).toBe(30);
@@ -160,8 +160,8 @@ SUITE("Long-running scenario — produto sobrevive a uso prolongado e restarts",
 
     // ── 10. Doctor reporta ambos daemons healthy ─────────────────────────────
     // We don't strictly require exit 0 in this isolated test env — the PID
-    // file isn't created (we bypass `devprofile start`) and macOS codesign
-    // warns when there's no real engine binary at ~/.devprofile/bin/engine.
+    // file isn't created (we bypass `beheld start`) and macOS codesign
+    // warns when there's no real engine binary at ~/.beheld/bin/engine.
     // What MUST hold is: MCP and engine are reported healthy with the right
     // versions, and the actual listening PIDs are echoed back.
     const doctorOk = runCli(["doctor"], env);

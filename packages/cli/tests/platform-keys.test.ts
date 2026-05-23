@@ -13,7 +13,7 @@ describe("embedded platform keys", () => {
 
   test("toda chave tem os campos requeridos com tipos corretos", () => {
     for (const key of EMBEDDED_PLATFORM_KEYS) {
-      expect(key.key_id).toMatch(/^devprofile-platform-\d{4}-q[1-4]$/);
+      expect(key.key_id).toMatch(/^beheld-platform-\d{4}-q[1-4]$/);
       expect(key.algorithm).toBe("ed25519");
       expect(key.public_key).toMatch(/^ed25519-pub:[A-Za-z0-9+/=]+$/);
       expect(typeof key.active).toBe("boolean");
@@ -32,7 +32,7 @@ describe("embedded platform keys", () => {
   });
 
   test("findPlatformKey retorna undefined para id desconhecido", () => {
-    expect(findPlatformKey("devprofile-platform-9999-q9")).toBeUndefined();
+    expect(findPlatformKey("beheld-platform-9999-q9")).toBeUndefined();
   });
 
   test("activePlatformKeys filtra inativas e revogadas", () => {

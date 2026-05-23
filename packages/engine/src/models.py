@@ -9,7 +9,7 @@ from typing import Optional
 # ── raw event from JSONL ──────────────────────────────────────────────────────
 
 @dataclass
-class DevProfileEvent:
+class BeheldEvent:
     event_id: str
     session_id: str
     source: str
@@ -25,7 +25,7 @@ class DevProfileEvent:
     metadata: dict = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> DevProfileEvent:
+    def from_dict(cls, d: dict) -> BeheldEvent:
         return cls(
             event_id=d["event_id"],
             session_id=d["session_id"],
@@ -53,7 +53,7 @@ class Session:
     ended_at: Optional[datetime]
     duration_minutes: float
     # Raw event list (populated from JSONL; empty for DB-reconstructed sessions)
-    events: list[DevProfileEvent] = field(default_factory=list)
+    events: list[BeheldEvent] = field(default_factory=list)
     tools_used: list[str] = field(default_factory=list)
     file_extensions: Counter = field(default_factory=Counter)
     commands: list[str] = field(default_factory=list)
@@ -113,8 +113,8 @@ class ProjectClassification:
 
 # ── coach feature ─────────────────────────────────────────────────────────────
 #
-# Types below back the /coach endpoint and the devprofile_coach MCP tool.
-# Design constraints (see Phase 5 — .dpbundle):
+# Types below back the /coach endpoint and the beheld_coach MCP tool.
+# Design constraints (see Phase 5 — .beheld):
 # - WorkflowMetrics fields are scalars only (deterministic JSON canonical form).
 # - Pattern objects are derived, never persisted; they don't enter the bundle.
 # - CoachPayload is the wire format consumed by host LLMs (Claude Code etc.).
@@ -197,7 +197,7 @@ class CoachingGuidance:
 
 @dataclass(frozen=True)
 class CoachPayload:
-    """Top-level response of GET /coach. Consumed by devprofile_coach MCP tool."""
+    """Top-level response of GET /coach. Consumed by beheld_coach MCP tool."""
     version: int
     as_of: str
     data_freshness: str
@@ -208,7 +208,7 @@ class CoachPayload:
     suggested_followups: list[str] = field(default_factory=list)
 
 
-# ── signed snapshot (.dpbundle) — Phase 5 ─────────────────────────────────────
+# ── signed snapshot (.beheld) — Phase 5 ─────────────────────────────────────
 #
 # Wire format contract. Identical shape in TypeScript (cli/src/bundle/types.ts).
 # Any change here MUST bump BUNDLE_VERSION and update the TS twin in the same
@@ -216,6 +216,17 @@ class CoachPayload:
 # drift.
 
 BUNDLE_VERSION = "3"
+
+
+@dataclass(frozen=True)
+class L1RepositoryRef:
+    """Reference to an imported repository in the L1 section.
+
+    `hash` is the opaque root-commit SHA. `first_seen_at` is the ISO-8601 UTC
+    timestamp of the first time this repo was imported (immutable across
+    re-imports — see F5.7.2)."""
+    hash: str
+    first_seen_at: str
 
 
 @dataclass(frozen=True)
@@ -229,7 +240,7 @@ class BundleL1Section:
     ecosystems: dict[str, bool]
     platforms: dict[str, bool]
     avg_test_ratio: float
-    root_commit_hashes: list[str]
+    root_commit_hashes: list[L1RepositoryRef]
 
 
 @dataclass(frozen=True)
@@ -251,18 +262,22 @@ BundleSignals = BundleL2Section
 
 @dataclass(frozen=True)
 class BundlePayload:
-    """The signed half of a .dpbundle. SHA-256 of canonical_json(payload) is
+    """The signed half of a .beheld. SHA-256 of canonical_json(payload) is
     embedded in the parent Bundle.hash; that same canonical_json is what
     Ed25519 signs.
 
     Schema v2 (Phase 6): `signals` was replaced by separate `l1` and `l2`
-    sections so verifiers can inspect each layer independently."""
+    sections so verifiers can inspect each layer independently.
+
+    F5.7.2 added `engine_version_hash` (SHA-256 of the engine binary that
+    produced the payload). Null when running unfrozen or when hashing fails."""
     created_at: str
-    devprofile_version: str
+    beheld_version: str
     previous_hash: Optional[str]
     scores: Scores
     l1: BundleL1Section
     l2: BundleL2Section
+    engine_version_hash: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -297,8 +312,8 @@ class BundleAttestation:
 
 @dataclass(frozen=True)
 class Bundle:
-    """Top-level .dpbundle wire format. `version` is the bundle schema version,
-    independent of devprofile_version (which tracks the app).
+    """Top-level .beheld wire format. `version` is the bundle schema version,
+    independent of beheld_version (which tracks the app).
 
     Schema v3 (Phase 5 / F5.6) adds the optional `attestation` field at the
     wrapper level. v1, v2, and v3 are all readable by current verifiers; the

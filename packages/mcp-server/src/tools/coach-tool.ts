@@ -1,6 +1,6 @@
 import type { McpTool } from "./types";
 
-const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 const VALID_HINTS = new Set([
   "feature_work",
@@ -10,7 +10,7 @@ const VALID_HINTS = new Set([
   "unknown",
 ]);
 
-const JSON_OPEN = "---DEVPROFILE-JSON---";
+const JSON_OPEN = "---BEHELD-JSON---";
 const JSON_CLOSE = "---END-JSON---";
 
 interface Pattern {
@@ -78,7 +78,7 @@ function formatInsufficient(payload: CoachPayload): string {
   const verbo = need === 1 ? "falta" : "faltam";
   const subst = need === 1 ? "sessão" : "sessões";
   const text = [
-    "DevProfile ainda coletando dados.",
+    "Beheld ainda coletando dados.",
     "",
     `${got}/3 sessões — ${verbo} ${need} ${subst}.`,
     "Continue usando o Claude Code; o coaching será habilitado automaticamente.",
@@ -88,7 +88,7 @@ function formatInsufficient(payload: CoachPayload): string {
 
 function formatLive(payload: CoachPayload): string {
   const lines: string[] = [
-    `DevProfile · coaching context (v${payload.version})`,
+    `Beheld · coaching context (v${payload.version})`,
     "",
   ];
 
@@ -110,15 +110,15 @@ function formatLive(payload: CoachPayload): string {
   return wrap(lines.join("\n"), payload);
 }
 
-export const devprofileCoachTool: McpTool = {
-  name: "devprofile_coach",
+export const beheldCoachTool: McpTool = {
+  name: "beheld_coach",
   description: [
     "Retorna padrões observados no histórico real do desenvolvedor (sequências de tools, cadência de testes, ecossistemas) com instruções de como apresentar feedback acionável.",
     "",
     "QUANDO CHAMAR:",
     "- O usuário pediu feedback sobre como está programando ('como estou indo?', 'tô fazendo certo?', 'me dá um diagnóstico').",
     "- Início de uma feature/task nova quando o ecossistema da sessão atual bate com padrões conhecidos.",
-    "- Usuário invocou /devprofile coach explicitamente.",
+    "- Usuário invocou /beheld coach explicitamente.",
     "",
     "QUANDO NÃO CHAMAR:",
     "- Tarefa puramente factual ou de execução ('rode os testes', 'leia esse arquivo').",
@@ -126,7 +126,7 @@ export const devprofileCoachTool: McpTool = {
     "- Sessão de debug ativa (usuário tentando resolver erro) — feedback de estilo aqui interrompe.",
     "",
     "COMO USAR O RETORNO:",
-    "- Leia o bloco entre ---DEVPROFILE-JSON--- e ---END-JSON--- como contrato.",
+    "- Leia o bloco entre ---BEHELD-JSON--- e ---END-JSON--- como contrato.",
     "- Siga `coaching_guidance.must` e evite tudo em `must_not`.",
     "- Apresente NO MÁXIMO um padrão, escolhido por (applies_to_current_session AND confidence >= 0.6) ORDER BY severity DESC.",
     "- Se nenhum padrão passar no filtro, não mencione o tool — siga a conversa normalmente.",
@@ -149,7 +149,7 @@ export const devprofileCoachTool: McpTool = {
 
     const payload = await fetchCoachPayload(hint);
     if (!payload) {
-      return "DevProfile: engine offline. Tente novamente em alguns segundos ou execute: devprofile start.";
+      return "Beheld: engine offline. Tente novamente em alguns segundos ou execute: beheld start.";
     }
     if (payload.data_freshness === "insufficient") {
       return formatInsufficient(payload);

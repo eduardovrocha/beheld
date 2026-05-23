@@ -3,6 +3,7 @@ import { mcpSessionCurrent, mcpStatus } from "../client/mcp-client";
 import { renderCoachText } from "../ui/coach-view";
 import { renderProfile, renderCollecting } from "../ui/profile-view";
 import { renderAlertBox } from "../ui/alert-box";
+import { brand } from "../ui/styles";
 import type { ProfileData, ViewFlags } from "../types";
 
 interface ViewOptions {
@@ -52,7 +53,7 @@ async function renderCoachView(sessionHint: string, flags: ViewFlags): Promise<v
   const payload = await coach(hint);
   if (!payload) {
     warn("\n  ✗ Engine offline — coaching context indisponível.", flags);
-    warn("  Execute: devprofile start\n", flags);
+    warn("  Execute: beheld start\n", flags);
     process.exit(1);
   }
 
@@ -110,8 +111,8 @@ async function maybeRenderStaleAlert(
     title,
     body,
     suggestions: [
-      { label: "Para diagnosticar", command: "devprofile doctor" },
-      { label: "Para reiniciar",    command: "devprofile restart" },
+      { label: "Para diagnosticar", command: "beheld doctor" },
+      { label: "Para reiniciar",    command: "beheld restart" },
     ],
   }));
   console.log("");
@@ -134,8 +135,13 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
   };
 
   if (opts.coach === true) {
+    if (!flags.json && !flags.scoresOnly) console.log(brand("olhando seu dia de perto"));
     await renderCoachView(opts.sessionHint ?? "unknown", flags);
     return;
+  }
+
+  if (!flags.json && !flags.scoresOnly) {
+    console.log(brand("seu retrato hoje"));
   }
 
   const status = await engineStatus();
@@ -162,7 +168,7 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
   } else if (hasOrphans) {
     warn(`\n  ⚠️  Há eventos não processados (sessão interrompida).`, flags);
     warn(`  Score pode estar desatualizado.`, flags);
-    warn(`  Execute: devprofile view --refresh para atualizar.\n`, flags);
+    warn(`  Execute: beheld view --refresh para atualizar.\n`, flags);
   }
 
   const [scores, summary, insightData, session] = await Promise.all([
@@ -174,7 +180,7 @@ export async function viewCommand(opts: ViewOptions = {}): Promise<void> {
 
   if (!scores) {
     warn("\n  ✗ Engine offline e nenhum score cacheado disponível.", flags);
-    warn("  Execute: devprofile start\n", flags);
+    warn("  Execute: beheld start\n", flags);
     process.exit(1);
   }
 

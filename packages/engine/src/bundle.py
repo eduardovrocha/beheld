@@ -1,4 +1,4 @@
-"""Canonical serialization + hash for .dpbundle payloads (Phase 5).
+"""Canonical serialization + hash for .beheld payloads (Phase 5).
 
 This module owns the wire-level rules that make the bundle hash deterministic
 and reproducible byte-for-byte across Python (engine) and TypeScript (CLI).
@@ -22,11 +22,13 @@ import hashlib
 import json
 from collections import Counter
 from datetime import datetime, timezone
+from typing import Optional
 
 from models import (
     BundleL1Section,
     BundleL2Section,
     BundlePayload,
+    L1RepositoryRef,
     Scores,
     WorkflowMetrics,
 )
@@ -88,13 +90,18 @@ def _signal_counts(db, signal_type: str) -> dict[str, int]:
 
 def build_bundle_payload(
     db,
-    devprofile_version: str,
+    beheld_version: str,
     period_days: int = 30,
+    engine_version_hash: Optional[str] = None,
 ) -> BundlePayload:
-    """Assemble the signed half of a .dpbundle from current DB state.
+    """Assemble the signed half of a .beheld from current DB state.
 
     Raises ValueError when there are no scores yet — caller (the engine
     endpoint) translates that to HTTP 409 so the CLI shows a clean message.
+
+    `engine_version_hash` (F5.7.2) is the SHA-256 of the engine binary that
+    produced the payload, or None when unfrozen / unavailable. It is recorded
+    verbatim in the payload and ends up in the bundle's signed canonical bytes.
     """
     scores = db.get_current_scores()
     if scores is None:
@@ -147,11 +154,12 @@ def build_bundle_payload(
 
     return BundlePayload(
         created_at=datetime.now(timezone.utc).isoformat(),
-        devprofile_version=devprofile_version,
+        beheld_version=beheld_version,
         previous_hash=previous_hash,
         scores=scores,
         l1=l1,
         l2=l2,
+        engine_version_hash=engine_version_hash,
     )
 
 
@@ -160,11 +168,21 @@ def _build_l1_section(db) -> BundleL1Section:
 
     Returns an empty section (zeros / empty lists / null timestamps) when no
     repository has been imported — the L1 key is always present in v2 payloads.
-    Privacy: no URLs, names, or paths — only root commit hashes."""
+    Privacy: no URLs, names, or paths — only root commit hashes paired with the
+    timestamp of the first import (F5.7.2)."""
     summary = db.get_l1_summary()
     repos = db.get_l1_repositories()
-    # Sorted so the canonical JSON is deterministic across runs.
-    root_hashes = sorted(r["root_commit_hash"] for r in repos)
+    # Sorted by hash so the canonical JSON is deterministic across runs.
+    refs = sorted(
+        (
+            L1RepositoryRef(
+                hash=r["root_commit_hash"],
+                first_seen_at=r.get("first_seen_at") or r["imported_at"],
+            )
+            for r in repos
+        ),
+        key=lambda ref: ref.hash,
+    )
     return BundleL1Section(
         total_repos=int(summary.get("total_repos") or 0),
         total_commits=int(summary.get("total_commits") or 0),
@@ -173,5 +191,5 @@ def _build_l1_section(db) -> BundleL1Section:
         ecosystems=dict(summary.get("ecosystems_merged") or {}),
         platforms=dict(summary.get("platforms_merged") or {}),
         avg_test_ratio=float(summary.get("avg_test_ratio") or 0.0),
-        root_commit_hashes=root_hashes,
+        root_commit_hashes=list(refs),
     )

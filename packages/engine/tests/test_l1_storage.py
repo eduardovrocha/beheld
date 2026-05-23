@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 @pytest.fixture
-def db() -> DevProfileDB:
-    instance = DevProfileDB(":memory:")
+def db() -> BeheldDB:
+    instance = BeheldDB(":memory:")
     instance.init_schema()
     yield instance
     instance.close()
@@ -18,7 +18,7 @@ def db() -> DevProfileDB:
 # ── repositories ─────────────────────────────────────────────────────────────
 
 
-def test_save_l1_repository_inserts_correctly(db: DevProfileDB) -> None:
+def test_save_l1_repository_inserts_correctly(db: BeheldDB) -> None:
     created = db.save_l1_repository(
         root_commit_hash="a" * 40,
         imported_at="2026-05-14T10:00:00+00:00",
@@ -35,7 +35,7 @@ def test_save_l1_repository_inserts_correctly(db: DevProfileDB) -> None:
     assert row["imported_at"] == "2026-05-14T10:00:00+00:00"
 
 
-def test_save_l1_repository_idempotent(db: DevProfileDB) -> None:
+def test_save_l1_repository_idempotent(db: BeheldDB) -> None:
     first = db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 10, "e1")
     second = db.save_l1_repository("h1", "2026-05-14T11:00:00+00:00", 99, "e1")
     assert first is True
@@ -52,7 +52,7 @@ def test_save_l1_repository_idempotent(db: DevProfileDB) -> None:
 # ── signals ──────────────────────────────────────────────────────────────────
 
 
-def test_save_l1_signals_stores_json_fields(db: DevProfileDB) -> None:
+def test_save_l1_signals_stores_json_fields(db: BeheldDB) -> None:
     db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 50, "e1")
     db.save_l1_signals(
         root_commit_hash="h1",
@@ -77,7 +77,7 @@ def test_save_l1_signals_stores_json_fields(db: DevProfileDB) -> None:
     assert row["last_commit_at"] == "2026-05-13T00:00:00+00:00"
 
 
-def test_save_l1_signals_replaces_existing(db: DevProfileDB) -> None:
+def test_save_l1_signals_replaces_existing(db: BeheldDB) -> None:
     """Re-importing a repo should overwrite stale signals, not duplicate them."""
     db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 50, "e1")
     db.save_l1_signals("h1", {"py": 1}, {}, {}, 0.1, {}, None, None)
@@ -92,7 +92,7 @@ def test_save_l1_signals_replaces_existing(db: DevProfileDB) -> None:
 # ── summary view ─────────────────────────────────────────────────────────────
 
 
-def test_get_l1_summary_empty_returns_zeros(db: DevProfileDB) -> None:
+def test_get_l1_summary_empty_returns_zeros(db: BeheldDB) -> None:
     summary = db.get_l1_summary()
     assert summary["total_repos"] == 0
     assert summary["total_commits"] == 0
@@ -104,7 +104,7 @@ def test_get_l1_summary_empty_returns_zeros(db: DevProfileDB) -> None:
     assert summary["avg_test_ratio"] == 0.0
 
 
-def test_get_l1_summary_with_data(db: DevProfileDB) -> None:
+def test_get_l1_summary_with_data(db: BeheldDB) -> None:
     db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 100, "e1")
     db.save_l1_signals(
         "h1",
@@ -143,7 +143,7 @@ def test_get_l1_summary_with_data(db: DevProfileDB) -> None:
 # ── listing ──────────────────────────────────────────────────────────────────
 
 
-def test_get_l1_repositories_returns_list(db: DevProfileDB) -> None:
+def test_get_l1_repositories_returns_list(db: BeheldDB) -> None:
     assert db.get_l1_repositories() == []
     db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 10, "e1")
     db.save_l1_repository("h2", "2026-05-14T11:00:00+00:00", 20, "e1")
@@ -152,13 +152,13 @@ def test_get_l1_repositories_returns_list(db: DevProfileDB) -> None:
     hashes = {r["root_commit_hash"] for r in repos}
     assert hashes == {"h1", "h2"}
     for r in repos:
-        assert set(r.keys()) == {"root_commit_hash", "imported_at", "commit_count"}
+        assert set(r.keys()) == {"root_commit_hash", "imported_at", "commit_count", "first_seen_at"}
 
 
 # ── deletion ─────────────────────────────────────────────────────────────────
 
 
-def test_delete_l1_repository_removes_signals_cascade(db: DevProfileDB) -> None:
+def test_delete_l1_repository_removes_signals_cascade(db: BeheldDB) -> None:
     db.save_l1_repository("h1", "2026-05-14T10:00:00+00:00", 10, "e1")
     db.save_l1_signals("h1", {"py": 5}, {"python": True}, {}, 0.2, {}, None, None)
 
@@ -175,5 +175,5 @@ def test_delete_l1_repository_removes_signals_cascade(db: DevProfileDB) -> None:
     assert signal_row is None
 
 
-def test_delete_l1_repository_not_found_returns_false(db: DevProfileDB) -> None:
+def test_delete_l1_repository_not_found_returns_false(db: BeheldDB) -> None:
     assert db.delete_l1_repository("does-not-exist") is False

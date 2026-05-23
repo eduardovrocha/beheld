@@ -1,0 +1,213 @@
+<style>
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.dim-bar { height: 6px; border-radius: 3px; background: var(--color-background-secondary); overflow: hidden; }
+.dim-fill { height: 100%; border-radius: 3px; }
+.badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--border-radius-md); display: inline-block; }
+.badge-purple { background: #EEEDFE; color: #3C3489; }
+.badge-teal { background: #E1F5EE; color: #085041; }
+.badge-amber { background: #FAEEDA; color: #633806; }
+.badge-coral { background: #FAECE7; color: #712B13; }
+.badge-gray { background: #F1EFE8; color: #444441; }
+.insight { border-left: 2px solid var(--color-border-secondary); padding-left: 12px; margin: 8px 0; border-radius: 0; }
+.proj-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.proj-row:last-child { border-bottom: none; padding-bottom: 0; }
+.proj-icon { width: 32px; height: 32px; border-radius: var(--border-radius-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; }
+.plat-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.plat-row:last-child { border-bottom: none; }
+.plat-bar { height: 4px; border-radius: 2px; background: var(--color-background-secondary); flex: 1; margin: 0 10px; overflow: hidden; }
+.plat-fill { height: 100%; border-radius: 2px; }
+</style>
+
+<h2 class="sr-only">Dashboard de perfil do desenvolvedor — versão 2 com tipos de projeto e plataformas</h2>
+
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.25rem;padding-top:0.5rem;">
+  <div style="width:44px;height:44px;border-radius:50%;background:#EEEDFE;display:flex;align-items:center;justify-content:center;font-weight:500;font-size:15px;color:#3C3489;">EO</div>
+  <div>
+    <p style="font-weight:500;font-size:15px;margin:0;color:var(--color-text-primary)">Eduardo Oliveira</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0;">847 sessões analisadas · atualizado há 2h</p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:6px;">
+    <span class="badge badge-purple">Senior</span>
+    <span class="badge badge-teal">Full-stack</span>
+    <span class="badge badge-amber">Web3</span>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:1rem;">
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">score geral</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:#534AB7;">78</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">/100</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">tipos de projeto</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:var(--color-text-primary);">6</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">categorias distintas</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">plataformas ativas</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:var(--color-text-primary);">5</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">ambientes de trabalho</p>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px 12px;text-align:center;">
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 4px;">evolução</p>
+    <p style="font-size:26px;font-weight:500;margin:0;color:#0F6E56;">+14</p>
+    <p style="font-size:11px;color:var(--color-text-secondary);margin:4px 0 0;">pts vs mês anterior</p>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:1rem;">
+
+  <!-- Tipos de projeto -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <p style="font-size:13px;font-weight:500;margin:0;">tipos de projeto</p>
+      <span style="font-size:11px;color:var(--color-text-secondary);">tema omitido</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#EEEDFE;">
+        <i class="ti ti-layout-dashboard" style="color:#3C3489;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">Plataforma SaaS / B2B</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">Auth, billing, multi-tenant, dashboard</p>
+      </div>
+      <span class="badge badge-purple">38%</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#E1F5EE;">
+        <i class="ti ti-api" style="color:#085041;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">API / Backend service</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">REST, autenticação, integrações externas</p>
+      </div>
+      <span class="badge badge-teal">24%</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#FAEEDA;">
+        <i class="ti ti-chart-candle" style="color:#633806;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">Ferramenta financeira / dados</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">Streaming de dados, visualização, trading</p>
+      </div>
+      <span class="badge badge-amber">18%</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#FAECE7;">
+        <i class="ti ti-device-mobile" style="color:#712B13;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">App mobile / cross-platform</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">UI, state, integração com API</p>
+      </div>
+      <span class="badge badge-coral">11%</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#EEEDFE;">
+        <i class="ti ti-currency-ethereum" style="color:#3C3489;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">Web3 / Blockchain</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">Smart contracts, wallet, DeFi</p>
+      </div>
+      <span class="badge badge-purple">6%</span>
+    </div>
+
+    <div class="proj-row">
+      <div class="proj-icon" style="background:#F1EFE8;">
+        <i class="ti ti-robot" style="color:#444441;" aria-hidden="true"></i>
+      </div>
+      <div style="flex:1;">
+        <p style="font-size:12px;font-weight:500;margin:0;color:var(--color-text-primary);">Automação / IA / scripts</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin:2px 0 0;">Pipelines, agentes, extração de dados</p>
+      </div>
+      <span class="badge badge-gray">3%</span>
+    </div>
+  </div>
+
+  <!-- Plataformas -->
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div class="card" style="flex:1;">
+      <p style="font-size:13px;font-weight:500;margin:0 0 12px;">plataformas de trabalho</p>
+
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:6px;width:110px;">
+          <i class="ti ti-terminal-2" style="font-size:15px;color:#3C3489;" aria-hidden="true"></i>
+          <span style="font-size:12px;color:var(--color-text-primary);">Claude Code</span>
+        </div>
+        <div class="plat-bar"><div class="plat-fill" style="width:72%;background:#534AB7;"></div></div>
+        <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);min-width:32px;text-align:right;">72%</span>
+      </div>
+
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:6px;width:110px;">
+          <i class="ti ti-brand-vscode" style="font-size:15px;color:#085041;" aria-hidden="true"></i>
+          <span style="font-size:12px;color:var(--color-text-primary);">VS Code</span>
+        </div>
+        <div class="plat-bar"><div class="plat-fill" style="width:58%;background:#1D9E75;"></div></div>
+        <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);min-width:32px;text-align:right;">58%</span>
+      </div>
+
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:6px;width:110px;">
+          <i class="ti ti-brand-github" style="font-size:15px;color:#444441;" aria-hidden="true"></i>
+          <span style="font-size:12px;color:var(--color-text-primary);">GitHub</span>
+        </div>
+        <div class="plat-bar"><div class="plat-fill" style="width:44%;background:#888780;"></div></div>
+        <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);min-width:32px;text-align:right;">44%</span>
+      </div>
+
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:6px;width:110px;">
+          <i class="ti ti-brand-docker" style="font-size:15px;color:#185FA5;" aria-hidden="true"></i>
+          <span style="font-size:12px;color:var(--color-text-primary);">Docker</span>
+        </div>
+        <div class="plat-bar"><div class="plat-fill" style="width:31%;background:#378ADD;"></div></div>
+        <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);min-width:32px;text-align:right;">31%</span>
+      </div>
+
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:6px;width:110px;">
+          <i class="ti ti-server" style="font-size:15px;color:#633806;" aria-hidden="true"></i>
+          <span style="font-size:12px;color:var(--color-text-primary);">Cloud / Infra</span>
+        </div>
+        <div class="plat-bar"><div class="plat-fill" style="width:18%;background:#BA7517;"></div></div>
+        <span style="font-size:12px;font-weight:500;color:var(--color-text-primary);min-width:32px;text-align:right;">18%</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <p style="font-size:13px;font-weight:500;margin:0 0 8px;">contexto de trabalho inferido</p>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">modo predominante</span>
+          <span class="badge badge-purple">solo / freelance</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">ciclo de trabalho</span>
+          <span class="badge badge-teal">projeto por projeto</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">horário de pico</span>
+          <span class="badge badge-gray">14h – 23h</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--color-text-secondary);">sessão média</span>
+          <span class="badge badge-gray">47 min</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;">
+  <button onclick="sendPrompt('Como classificar o tipo de projeto a partir das conversas do Claude Code sem revelar o tema do negócio?')" style="font-size:13px;">Como classificar projetos ↗</button>
+  <button onclick="sendPrompt('Como detectar a plataforma e ambiente de trabalho a partir dos logs do Claude Code?')" style="font-size:13px;">Como detectar plataformas ↗</button>
+</div>

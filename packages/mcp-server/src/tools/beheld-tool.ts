@@ -1,7 +1,7 @@
 import type { McpTool } from "./types";
 import { getLastCachedScores } from "../../../cli/src/storage/local-cache";
 
-const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface EngineScores {
   prompt_quality: number;
@@ -91,7 +91,7 @@ function bar(score: number, width = 10): string {
 
 function formatSummary(scores: EngineScores, insights: string[]): string {
   if (scores.sessions_analyzed === 0) {
-    return "DevProfile: nenhuma sessão analisada ainda. Continue usando o Claude Code — volte após algumas sessões.";
+    return "Beheld: nenhuma sessão analisada ainda. Continue usando o Claude Code — volte após algumas sessões.";
   }
   const lines: string[] = [
     `Score geral: ${scores.overall}/100  ${bar(scores.overall)}  (${scores.sessions_analyzed} sessões)`,
@@ -108,7 +108,7 @@ function formatSummary(scores: EngineScores, insights: string[]): string {
 
 function formatScores(scores: EngineScores): string {
   if (scores.sessions_analyzed === 0) {
-    return "DevProfile: nenhuma sessão analisada ainda.";
+    return "Beheld: nenhuma sessão analisada ainda.";
   }
   return [
     `Prompt quality  ${String(scores.prompt_quality).padStart(3)}  ${bar(scores.prompt_quality)}`,
@@ -122,13 +122,13 @@ function formatScores(scores: EngineScores): string {
 
 function formatInsight(insights: string[]): string {
   const next = insights[0];
-  if (!next) return "DevProfile: nenhum insight disponível no momento.";
+  if (!next) return "Beheld: nenhum insight disponível no momento.";
   return `→ ${next}`;
 }
 
 function formatFull(scores: EngineScores, summary: ProfileSummary | null, insights: string[]): string {
   if (scores.sessions_analyzed === 0) {
-    return "DevProfile: nenhuma sessão analisada ainda. Continue usando o Claude Code.";
+    return "Beheld: nenhuma sessão analisada ainda. Continue usando o Claude Code.";
   }
 
   const lines: string[] = [
@@ -166,8 +166,8 @@ function formatFull(scores: EngineScores, summary: ProfileSummary | null, insigh
   return lines.join("\n");
 }
 
-export const devprofileTool: McpTool = {
-  name: "devprofile",
+export const beheldTool: McpTool = {
+  name: "beheld",
   description: "Exibe o perfil de desenvolvedor baseado no uso do Claude",
   inputSchema: {
     type: "object",
@@ -180,7 +180,7 @@ export const devprofileTool: McpTool = {
 
     const scores = await fetchScores();
     if (!scores) {
-      return "DevProfile: engine offline e nenhum score cacheado disponível. Execute: devprofile start";
+      return "Beheld: engine offline e nenhum score cacheado disponível. Execute: beheld start";
     }
 
     // Only check readiness when live — cache means a profile existed before
@@ -189,7 +189,7 @@ export const devprofileTool: McpTool = {
       if (r && !r.ready) {
         const remaining = r.sessions_required - r.sessions_count;
         return [
-          "DevProfile ainda coletando dados.",
+          "Beheld ainda coletando dados.",
           "",
           `${r.sessions_count}/${r.sessions_required} sessões — ${remaining !== 1 ? "faltam" : "falta"} ${remaining} ${remaining !== 1 ? "sessões" : "sessão"}.`,
           "",

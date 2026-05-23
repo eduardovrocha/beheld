@@ -1,11 +1,11 @@
 {
-  "name": "@devprofile/cli",
+  "name": "@beheld/cli",
   "version": "0.1.1",
   "private": true,
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test",
-    "build": "bun build src/index.ts --compile --outfile ../../dist/devprofile"
+    "build": "bun build src/index.ts --compile --outfile ../../dist/beheld"
   },
   "dependencies": {
     "commander": "^12.1.0",

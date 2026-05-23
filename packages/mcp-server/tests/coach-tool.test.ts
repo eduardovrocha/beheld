@@ -71,7 +71,7 @@ let mockServer: ReturnType<typeof Bun.serve>;
 let respondWith: () => unknown = () => livePayload;
 
 beforeAll(async () => {
-  process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  process.env.BEHELD_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
   mockServer = Bun.serve({
     port: MOCK_PORT,
     hostname: "127.0.0.1",
@@ -91,20 +91,20 @@ beforeAll(async () => {
 
 afterAll(() => {
   mockServer.stop(true);
-  delete process.env.DEVPROFILE_ENGINE_URL;
+  delete process.env.BEHELD_ENGINE_URL;
 });
 
 // ── basics ──────────────────────────────────────────────────────────────────
 
-describe("devprofile_coach — schema", () => {
-  test("tool name is 'devprofile_coach'", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool");
-    expect(devprofileCoachTool.name).toBe("devprofile_coach");
+describe("beheld_coach — schema", () => {
+  test("tool name is 'beheld_coach'", async () => {
+    const { beheldCoachTool } = await import("../src/tools/coach-tool");
+    expect(beheldCoachTool.name).toBe("beheld_coach");
   });
 
   test("inputSchema lists session_hint as enum", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool");
-    const prop = devprofileCoachTool.inputSchema.properties.session_hint as {
+    const { beheldCoachTool } = await import("../src/tools/coach-tool");
+    const prop = beheldCoachTool.inputSchema.properties.session_hint as {
       enum: string[];
     };
     expect(prop.enum).toEqual([
@@ -117,14 +117,14 @@ describe("devprofile_coach — schema", () => {
   });
 
   test("description contains 'QUANDO NÃO CHAMAR'", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool");
-    expect(devprofileCoachTool.description).toContain("QUANDO NÃO CHAMAR");
+    const { beheldCoachTool } = await import("../src/tools/coach-tool");
+    expect(beheldCoachTool.description).toContain("QUANDO NÃO CHAMAR");
   });
 
   test("description tells the host how to use the JSON block", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool");
-    expect(devprofileCoachTool.description).toContain("---DEVPROFILE-JSON---");
-    expect(devprofileCoachTool.description).toContain(
+    const { beheldCoachTool } = await import("../src/tools/coach-tool");
+    expect(beheldCoachTool.description).toContain("---BEHELD-JSON---");
+    expect(beheldCoachTool.description).toContain(
       "applies_to_current_session",
     );
   });
@@ -132,32 +132,32 @@ describe("devprofile_coach — schema", () => {
 
 // ── live mode ───────────────────────────────────────────────────────────────
 
-describe("devprofile_coach — live payload", () => {
+describe("beheld_coach — live payload", () => {
   test("text contains pattern labels", async () => {
     respondWith = () => livePayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=live1"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
+    const out = (await beheldCoachTool.handler({})) as string;
     expect(out).toContain("Testes escritos após o código");
     expect(out).toContain("Loop de debug");
   });
 
   test("text contains pattern count header", async () => {
     respondWith = () => livePayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=live2"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
+    const out = (await beheldCoachTool.handler({})) as string;
     expect(out).toContain("Padrões detectados (2)");
   });
 
   test("text shows score + freshness summary", async () => {
     respondWith = () => livePayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=live3"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
+    const out = (await beheldCoachTool.handler({})) as string;
     expect(out).toContain("Score geral: 35/100");
     expect(out).toContain("· 30 sessões ·");
     expect(out).toContain("· live");
@@ -165,21 +165,21 @@ describe("devprofile_coach — live payload", () => {
 
   test("contains JSON delimiters", async () => {
     respondWith = () => livePayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=live4"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
-    expect(out).toContain("---DEVPROFILE-JSON---");
+    const out = (await beheldCoachTool.handler({})) as string;
+    expect(out).toContain("---BEHELD-JSON---");
     expect(out).toContain("---END-JSON---");
   });
 
   test("JSON block parses back to the payload sent by the engine", async () => {
     respondWith = () => livePayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=live5"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
-    const match = out.match(/---DEVPROFILE-JSON---\n([\s\S]+?)\n---END-JSON---/);
+    const out = (await beheldCoachTool.handler({})) as string;
+    const match = out.match(/---BEHELD-JSON---\n([\s\S]+?)\n---END-JSON---/);
     expect(match).not.toBeNull();
     const parsed = JSON.parse(match![1]);
     expect(parsed.version).toBe(1);
@@ -191,49 +191,49 @@ describe("devprofile_coach — live payload", () => {
   test("session_hint is forwarded to the engine", async () => {
     respondWith = () => livePayload;
     lastQuery = null;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=hint1"
     );
-    await devprofileCoachTool.handler({ session_hint: "debug" });
+    await beheldCoachTool.handler({ session_hint: "debug" });
     expect(lastQuery?.get("session_hint")).toBe("debug");
   });
 
   test("invalid session_hint is coerced to 'unknown' before being sent", async () => {
     respondWith = () => livePayload;
     lastQuery = null;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=hint2"
     );
-    await devprofileCoachTool.handler({ session_hint: "junk_value" });
+    await beheldCoachTool.handler({ session_hint: "junk_value" });
     expect(lastQuery?.get("session_hint")).toBe("unknown");
   });
 });
 
 // ── empty patterns ──────────────────────────────────────────────────────────
 
-describe("devprofile_coach — live with no patterns", () => {
+describe("beheld_coach — live with no patterns", () => {
   test("text says 'sem padrões observáveis'", async () => {
     respondWith = () => noPatternsPayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=nopat"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
+    const out = (await beheldCoachTool.handler({})) as string;
     expect(out).toContain("Sem padrões observáveis");
     // still embeds the JSON block (host LLM still gets guidance)
-    expect(out).toContain("---DEVPROFILE-JSON---");
+    expect(out).toContain("---BEHELD-JSON---");
   });
 });
 
 // ── insufficient ────────────────────────────────────────────────────────────
 
-describe("devprofile_coach — insufficient data", () => {
+describe("beheld_coach — insufficient data", () => {
   test("returns 'coletando dados' header", async () => {
     respondWith = () => insufficientPayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=insuf1"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
-    expect(out).toContain("DevProfile ainda coletando dados");
+    const out = (await beheldCoachTool.handler({})) as string;
+    expect(out).toContain("Beheld ainda coletando dados");
     expect(out).toContain("1/3 sessões");
   });
 
@@ -242,20 +242,20 @@ describe("devprofile_coach — insufficient data", () => {
       ...insufficientPayload,
       scores: { ...insufficientPayload.scores, sessions_analyzed: 2 },
     });
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=insuf2"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
+    const out = (await beheldCoachTool.handler({})) as string;
     expect(out).toContain("falta 1 sessão");
   });
 
   test("still embeds JSON block so host has the guidance available", async () => {
     respondWith = () => insufficientPayload;
-    const { devprofileCoachTool } = await import(
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=insuf3"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
-    const match = out.match(/---DEVPROFILE-JSON---\n([\s\S]+?)\n---END-JSON---/);
+    const out = (await beheldCoachTool.handler({})) as string;
+    const match = out.match(/---BEHELD-JSON---\n([\s\S]+?)\n---END-JSON---/);
     expect(match).not.toBeNull();
     const parsed = JSON.parse(match![1]);
     expect(parsed.data_freshness).toBe("insufficient");
@@ -265,16 +265,16 @@ describe("devprofile_coach — insufficient data", () => {
 
 // ── engine offline ──────────────────────────────────────────────────────────
 
-describe("devprofile_coach — engine offline", () => {
+describe("beheld_coach — engine offline", () => {
   test("returns plain offline message (no JSON block to leak)", async () => {
-    const saved = process.env.DEVPROFILE_ENGINE_URL;
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19997";
-    const { devprofileCoachTool } = await import(
+    const saved = process.env.BEHELD_ENGINE_URL;
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:19997";
+    const { beheldCoachTool } = await import(
       "../src/tools/coach-tool?v=offline"
     );
-    const out = (await devprofileCoachTool.handler({})) as string;
-    process.env.DEVPROFILE_ENGINE_URL = saved;
+    const out = (await beheldCoachTool.handler({})) as string;
+    process.env.BEHELD_ENGINE_URL = saved;
     expect(out).toContain("engine offline");
-    expect(out).not.toContain("---DEVPROFILE-JSON---");
+    expect(out).not.toContain("---BEHELD-JSON---");
   });
 });

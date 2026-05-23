@@ -6,7 +6,7 @@
 
 ## Objetivo
 
-Daemon HTTP em `localhost:7337` que captura eventos do Claude Code e do Continue.dev, sanitiza todo conteúdo sensível antes de tocar o disco, e persiste os sinais técnicos em `~/.devprofile/sessions/` como JSONL.
+Daemon HTTP em `localhost:7337` que captura eventos do Claude Code e do Continue.dev, sanitiza todo conteúdo sensível antes de tocar o disco, e persiste os sinais técnicos em `~/.beheld/sessions/` como JSONL.
 
 ---
 
@@ -28,8 +28,8 @@ packages/mcp-server/
 │   │   └── jsonl.ts           # classe JsonlWriter com rotação e gzip
 │   └── tools/
 │       ├── types.ts           # interface McpTool
-│       ├── devprofile-tool.ts # tool "/devprofile" para Claude Code
-│       └── status-tool.ts     # tool "devprofile_status" para Continue.dev
+│       ├── beheld-tool.ts # tool "/beheld" para Claude Code
+│       └── status-tool.ts     # tool "beheld_status" para Continue.dev
 └── tests/
     ├── sanitizer.test.ts
     ├── hooks.test.ts
@@ -85,12 +85,12 @@ Classe `JsonlWriter(baseDir: string)`.
 - Data: quando um evento chega com data diferente da do arquivo em cache, um novo arquivo é criado.
 - Tamanho: ao atingir 50 MB, o arquivo é comprimido com `gzip` (`zlib.gzipSync`) e um novo é criado.
 
-**Índice:** `~/.devprofile/sessions/index.json` — atualizado a cada evento com `{ session_id, date, path, events, size_bytes }`.
+**Índice:** `~/.beheld/sessions/index.json` — atualizado a cada evento com `{ session_id, date, path, events, size_bytes }`.
 
-**Permissões:** `~/.devprofile/` criado com `chmod 700`.
+**Permissões:** `~/.beheld/` criado com `chmod 700`.
 
 Métodos:
-- `async write(event: DevProfileEvent): Promise<void>`
+- `async write(event: BeheldEvent): Promise<void>`
 - `async index(): Promise<SessionIndex>` — lê e sincroniza `size_bytes` do disco
 
 ---
@@ -120,7 +120,7 @@ O `sanitize()` é chamado no `body` inteiro antes de qualquer extração.
 ### `src/hooks/continue.ts`
 
 ```typescript
-handleMcpRequest(body: unknown): DevProfileEvent | null
+handleMcpRequest(body: unknown): BeheldEvent | null
 ```
 
 Retorna `null` para mensagens de protocolo MCP (`initialize`, `tools/list`, `tools/call`) e para eventos desconhecidos.
@@ -138,7 +138,7 @@ Retorna `null` para mensagens de protocolo MCP (`initialize`, `tools/list`, `too
 
 ### `src/server.ts`
 
-Servidor HTTP com `Bun.serve()` em `127.0.0.1:7337` (configurável via `DEVPROFILE_PORT`).
+Servidor HTTP com `Bun.serve()` em `127.0.0.1:7337` (configurável via `BEHELD_PORT`).
 
 | Endpoint | Método | Descrição |
 |----------|--------|-----------|
@@ -152,7 +152,7 @@ Servidor HTTP com `Bun.serve()` em `127.0.0.1:7337` (configurável via `DEVPROFI
 
 **Tratamento de erros:** respostas com `{ error: string }` e status HTTP correto. Stack traces nunca são expostos — apenas logados internamente com `console.error`.
 
-**Endpoint `/mcp`:** dois papéis simultâneos — extrai o `DevProfileEvent` via `handleMcpRequest` (se não for `null`, sanitiza e grava), e retorna a resposta de protocolo MCP correta ao Continue.dev (tools/list, tools/call, etc.).
+**Endpoint `/mcp`:** dois papéis simultâneos — extrai o `BeheldEvent` via `handleMcpRequest` (se não for `null`, sanitiza e grava), e retorna a resposta de protocolo MCP correta ao Continue.dev (tools/list, tools/call, etc.).
 
 **Estado em memória:** sessões ativas rastreadas em `Map<session_id, SessionMeta>` — contagem de eventos, ferramentas usadas, `has_test_context` acumulado. Reset a cada restart do daemon (não persiste; o JSONL é a fonte de verdade).
 
@@ -164,23 +164,23 @@ O servidor exporta `startServer()` para uso programático pelos testes e pelo CL
 
 | Função | Comportamento |
 |--------|---------------|
-| `start()` | Verifica se já está rodando; se não, faz spawn do binário em `~/.local/bin/devprofile server` como processo detached com stdout/stderr redirecionados para `daemon.log` |
+| `start()` | Verifica se já está rodando; se não, faz spawn do binário em `~/.local/bin/beheld server` como processo detached com stdout/stderr redirecionados para `daemon.log` |
 | `stop()` | Lê o PID de `daemon.pid`, envia SIGTERM, remove o arquivo |
 | `isRunning()` | Lê o PID e verifica com `process.kill(pid, 0)` |
-| `writePid(n)` / `readPid()` / `clearPid()` | Gerenciamento do arquivo `~/.devprofile/daemon.pid` |
+| `writePid(n)` / `readPid()` / `clearPid()` | Gerenciamento do arquivo `~/.beheld/daemon.pid` |
 | `rotateLogs()` | Move `daemon.log` para `daemon.log.1` ao atingir 10 MB |
 | `setupAutostart(bin?)` | Instala autostart para o sistema operacional atual |
 | `removeAutostart()` | Remove o arquivo de autostart instalado |
 
-**Autostart — macOS:** `~/Library/LaunchAgents/com.devprofile.daemon.plist` com `RunAtLoad=true` e `KeepAlive=true`, apontando para `~/.local/bin/devprofile server`.
+**Autostart — macOS:** `~/Library/LaunchAgents/com.beheld.daemon.plist` com `RunAtLoad=true` e `KeepAlive=true`, apontando para `~/.local/bin/beheld server`.
 
-**Autostart — Linux:** `~/.config/systemd/user/devprofile.service` com `Restart=always`, apontando para `~/.local/bin/devprofile server`.
+**Autostart — Linux:** `~/.config/systemd/user/beheld.service` com `Restart=always`, apontando para `~/.local/bin/beheld server`.
 
 ---
 
-### `src/tools/devprofile-tool.ts`
+### `src/tools/beheld-tool.ts`
 
-Tool MCP `devprofile` exposta ao Claude Code (registrada pelo `devprofile init` na Fase 3).
+Tool MCP `beheld` exposta ao Claude Code (registrada pelo `beheld init` na Fase 3).
 
 - Busca `GET localhost:7338/scores/current` do engine Python (com timeout de 2 s).
 - Parâmetro opcional `view`: `"summary"` (padrão) | `"scores"` | `"insights"` | `"full"`.
@@ -189,7 +189,7 @@ Tool MCP `devprofile` exposta ao Claude Code (registrada pelo `devprofile init` 
 
 ### `src/tools/status-tool.ts`
 
-Tool MCP `devprofile_status` para a sidebar do Continue.dev.
+Tool MCP `beheld_status` para a sidebar do Continue.dev.
 
 - Busca scores do engine e retorna `{ score, sessions_today, last_updated, top_insight }`.
 - Retorna zeros se o engine não responder — nunca falha com erro HTTP.
@@ -243,10 +243,10 @@ cwd_hash de "/Users/test/..."  →  SHA256 correto verificado via shasum
 - [x] Sanitizador remove `sk-test...` de qualquer campo
 - [x] `has_test_context = true` detectado quando command contém `rspec`
 - [x] `cwd_hash` é SHA256 hex do cwd, não o path em si
-- [x] Arquivo JSONL em `~/.devprofile/sessions/` com nome `YYYY-MM-DD_<session-id>.jsonl`
+- [x] Arquivo JSONL em `~/.beheld/sessions/` com nome `YYYY-MM-DD_<session-id>.jsonl`
 - [x] `daemon.ts` expõe `start()`, `stop()`, `isRunning()` com autostart via LaunchAgent/systemd
 - [x] Todos os testes passam: `bun test packages/mcp-server`
-- [ ] Daemon reinicia após reboot — requer `devprofile init` (Fase 3) para instalar o autostart
+- [ ] Daemon reinicia após reboot — requer `beheld init` (Fase 3) para instalar o autostart
 
 ---
 
@@ -254,9 +254,9 @@ cwd_hash de "/Users/test/..."  →  SHA256 correto verificado via shasum
 
 **Fase 2 — Scoring Engine Python**
 
-- Leitor incremental de JSONL com cursor em `~/.devprofile/.cursor`
+- Leitor incremental de JSONL com cursor em `~/.beheld/.cursor`
 - Extratores de padrões técnicos (comandos, extensões, sequência de tools)
 - Classificador de tipo de projeto
 - 4 scorers: `prompt_quality`, `test_maturity`, `tech_breadth`, `growth_rate`
-- Persistência em `~/.devprofile/profile.db` (SQLite)
+- Persistência em `~/.beheld/profile.db` (SQLite)
 - FastAPI em `localhost:7338` com os endpoints que as tools da Fase 1 já consultam

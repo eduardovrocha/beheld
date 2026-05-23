@@ -148,7 +148,8 @@ describe("runImport — interactive loop", () => {
       pollIntervalMs: 1,
     });
     expect(importCalls.length).toBe(0);
-    expect(logs.join("\n")).toContain("Bootstrap concluído. 0 repositórios · 0 commits analisados.");
+    expect(logs.join("\n")).toContain("Bootstrap concluído");
+    expect(logs.join("\n")).toContain("0 repositório(s) · 0 commits analisados");
   });
 
   test("shows progress during polling (multiple status calls)", async () => {
@@ -170,7 +171,7 @@ describe("runImport — interactive loop", () => {
     });
     expect(statusCalls.value).toBeGreaterThanOrEqual(2);
     expect(logs.join("\n")).toContain("12 commits");
-    expect(logs.join("\n")).toContain("Adicionado ao L1.");
+    expect(logs.join("\n")).toContain("adicionado ao L1");
   });
 
   test("handles author_not_found gracefully and continues the loop", async () => {
@@ -183,7 +184,8 @@ describe("runImport — interactive loop", () => {
     });
     const out = logs.join("\n");
     expect(out).toContain("Nenhum commit seu encontrado");
-    expect(out).toContain("Bootstrap concluído. 0 repositórios");
+    expect(out).toContain("Bootstrap concluído");
+    expect(out).toContain("0 repositório(s)");
   });
 
   test("handles already_imported and shows the count of zero new repos", async () => {
@@ -195,8 +197,9 @@ describe("runImport — interactive loop", () => {
       pollIntervalMs: 1,
     });
     const out = logs.join("\n");
-    expect(out).toContain("já presente no L1");
-    expect(out).toContain("Bootstrap concluído. 0 repositórios");
+    expect(out).toContain("Já presente no L1");
+    expect(out).toContain("Bootstrap concluído");
+    expect(out).toContain("0 repositório(s)");
   });
 
   test("handles clone_error and reports the detail", async () => {
@@ -230,12 +233,12 @@ describe("runImport — interactive loop", () => {
     expect(importCalls.length).toBe(2);
     expect(importCalls[0].pat).toBeNull();
     expect(importCalls[1].pat).toBe("ghp_TEST_TOKEN");
-    expect(logs.join("\n")).toContain("Adicionado ao L1.");
+    expect(logs.join("\n")).toContain("adicionado ao L1");
   });
 
   test("PAT is not persisted to config.json after use", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "dp-import-"));
-    process.env.DEVPROFILE_DATA_DIR = tmp;
+    process.env.BEHELD_DATA_DIR = tmp;
     try {
       const { io } = makeMockIO({
         prompts: ["https://example.com/r.git", ""],
@@ -247,7 +250,7 @@ describe("runImport — interactive loop", () => {
       await runImport({}, {
         io,
         client,
-        config: defaultConfigStore,  // uses DEVPROFILE_DATA_DIR
+        config: defaultConfigStore,  // uses BEHELD_DATA_DIR
         pollIntervalMs: 1,
       });
 
@@ -255,13 +258,13 @@ describe("runImport — interactive loop", () => {
       // It was never called here (config had no email yet, but we never prompt
       // because makeMockIO returns "" → ensureAuthorEmail throws).
       // To exercise the path, write a config first:
-      const cfgPath = join(tmp, ".devprofile", "config.json");
+      const cfgPath = join(tmp, ".beheld", "config.json");
       if (existsSync(cfgPath)) {
         const raw = readFileSync(cfgPath, "utf8");
         expect(raw).not.toContain("ghp_DO_NOT_PERSIST_42");
       }
     } finally {
-      delete process.env.DEVPROFILE_DATA_DIR;
+      delete process.env.BEHELD_DATA_DIR;
     }
   });
 
@@ -291,7 +294,8 @@ describe("runImport — interactive loop", () => {
     });
     const out = logs.join("\n");
     // 12 + 30 = 42 commits across 2 repos
-    expect(out).toContain("Bootstrap concluído. 2 repositórios · 42 commits analisados.");
+    expect(out).toContain("Bootstrap concluído");
+    expect(out).toContain("2 repositório(s) · 42 commits analisados");
   });
 });
 
@@ -323,7 +327,7 @@ describe("runImport — --list", () => {
       io, client,
       config: inMemoryConfig("dev@example.com"),
     });
-    expect(logs.join("\n")).toContain("Nenhum repositório importado.");
+    expect(logs.join("\n")).toContain("Nenhum repositório importado");
   });
 });
 
@@ -347,7 +351,7 @@ describe("runImport — --remove", () => {
       config: inMemoryConfig("dev@example.com"),
     });
     expect(deleteCalls).toEqual(["a3f8c1d2deadbeef"]);
-    expect(logs.join("\n")).toContain("Repositório removido do L1.");
+    expect(logs.join("\n")).toContain("removido do L1");
   });
 
   test("reports not-found when the engine returns 404", async () => {
@@ -357,7 +361,7 @@ describe("runImport — --remove", () => {
       io, client,
       config: inMemoryConfig("dev@example.com"),
     });
-    expect(logs.join("\n")).toContain("Repositório não encontrado.");
+    expect(logs.join("\n")).toContain("Repositório não encontrado");
   });
 });
 
@@ -368,7 +372,7 @@ describe("formatRepoTable", () => {
     ]);
     expect(out.split("\n")[0]).toContain("HASH");
     const row = out.split("\n")[1];
-    expect(row).toMatch(/^a{8}/);
+    expect(row).toMatch(/^\s*a{8}/);
     expect(row).toContain("2026-05-14");
     expect(row).toContain("12");
   });

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
+import os
+import sys
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -13,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from bundle import build_bundle_payload
 from coach import COACHING_GUIDANCE, detect_patterns
+from identity import IdentityGenerator
+from identity_adapter import build_signals_minimal, compute_emergent_diff
 from insights import InsightGenerator
 from l1.importer import L1Importer
 from models import (
@@ -24,15 +29,35 @@ from models import (
 )
 from processor import Processor
 from reader.jsonl_reader import CURSOR_FILE, SESSIONS_DIR, JsonlReader
-from storage.sqlite import DB_PATH, DevProfileDB
+from storage.sqlite import DB_PATH, BeheldDB
 
 VERSION = "0.1.1"
 
-db = DevProfileDB(DB_PATH)
+
+def get_engine_hash() -> Optional[str]:
+    """SHA-256 of the engine binary in execution (F5.7.2).
+
+    Returns the hex digest when running as a PyInstaller-frozen binary
+    (sys.frozen is True) or as a regular Python module (hash of this file).
+    Returns None on any IO/permission failure — the snapshot never blocks on
+    this lookup."""
+    try:
+        if getattr(sys, "frozen", False):
+            binary_path = sys.executable
+        else:
+            binary_path = os.path.abspath(__file__)
+        with open(binary_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except (OSError, IOError):
+        return None
+
+
+db = BeheldDB(DB_PATH)
 _reader = JsonlReader(SESSIONS_DIR, CURSOR_FILE)
 processor = Processor(db, _reader)
 insights_gen = InsightGenerator(db)
 l1_importer = L1Importer(db)
+identity_gen = IdentityGenerator(db=db)
 
 
 # ── status helpers ────────────────────────────────────────────────────────────
@@ -85,7 +110,7 @@ async def lifespan(app: FastAPI):
     db.close()
 
 
-app = FastAPI(title="DevProfile Engine", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="Beheld Engine", version=VERSION, lifespan=lifespan)
 
 
 # ── endpoints ────────────────────────────────────────────────────────────────
@@ -206,7 +231,7 @@ _VALID_SESSION_HINTS = {"feature_work", "debug", "refactor", "exploration", "unk
 def metrics_workflow() -> dict:
     """Latest WorkflowMetrics + metadata.
 
-    Consumers: MCP coach tool, future .dpbundle generator (F5). The `metrics`
+    Consumers: MCP coach tool, future .beheld generator (F5). The `metrics`
     block is canonical (scalars only, sort_keys serializable) — safe to embed
     in a signed snapshot.
     """
@@ -297,7 +322,7 @@ def coach(session_hint: str = "unknown") -> dict:
 
 @app.get("/snapshot/latest")
 def snapshot_latest() -> dict:
-    """Tip of the snapshot chain — consumed by `devprofile snapshot` to set
+    """Tip of the snapshot chain — consumed by `beheld snapshot` to set
     `previous_hash` on the next bundle. Returns nulls if no snapshot exists
     (genesis case)."""
     latest = db.get_latest_snapshot()
@@ -313,22 +338,53 @@ def snapshot_latest() -> dict:
 @app.get("/snapshot/chain/status")
 def snapshot_chain_status() -> dict:
     """Walks the entire chain detecting tampering. Diagnostic endpoint —
-    consumed by `devprofile verify --chain` and future health checks."""
+    consumed by `beheld verify --chain` and future health checks."""
     return db.validate_chain()
 
 
 @app.post("/snapshot/payload")
 def snapshot_payload() -> dict:
-    """Build the signable half of a .dpbundle from current DB state.
+    """Build the signable half of a .beheld from current DB state.
 
     Returns the BundlePayload as-is (unsigned). The CLI canonicalizes, hashes,
     signs with Ed25519, and POSTs the result back to /snapshot/save.
     """
     try:
-        payload = build_bundle_payload(db, VERSION)
+        payload = build_bundle_payload(db, VERSION, engine_version_hash=get_engine_hash())
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return dataclasses.asdict(payload)
+
+
+@app.post("/snapshot/html-data")
+def snapshot_html_data() -> dict:
+    """Bundle payload + identity phrase + emergent-pattern diff in one shot.
+
+    Consumed by `beheld snapshot --html` to render the public-facing
+    retrato técnico. The payload here is identical to /snapshot/payload —
+    we add identity (run through the IdentityGenerator) and emergent (30d vs
+    180d workflow shift) so the CLI doesn't need to reach into the engine
+    twice.
+
+    Identity goes through the generator's full LLM-or-fallback pipeline.
+    Emergent may be null when the data lacks a meaningful shift; the CLI
+    must hide that section if so.
+    """
+    try:
+        payload = build_bundle_payload(db, VERSION, engine_version_hash=get_engine_hash())
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    signals = build_signals_minimal(db)
+    identity = identity_gen.generate(signals, persist=False)
+    emergent = compute_emergent_diff(db)
+
+    return {
+        "payload": dataclasses.asdict(payload),
+        "signals": signals,
+        "identity": identity.to_dict(),
+        "emergent": emergent,
+    }
 
 
 class SnapshotSaveBody(BaseModel):

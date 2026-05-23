@@ -14,7 +14,7 @@ function dummyBundle(overrides: Partial<Bundle> = {}): Bundle {
     version: BUNDLE_VERSION,
     payload: {
       created_at: "2026-05-14T00:00:00+00:00",
-      devprofile_version: "0.2.0",
+      beheld_version: "0.2.0",
       previous_hash: null,
       scores: {
         date: "2026-05-13",
@@ -49,8 +49,8 @@ function dummyBundle(overrides: Partial<Bundle> = {}): Bundle {
 }
 
 beforeAll(async () => {
-  savedEnv = process.env.DEVPROFILE_PORTAL_URL;
-  process.env.DEVPROFILE_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  savedEnv = process.env.BEHELD_PORTAL_URL;
+  process.env.BEHELD_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}`;
   server = Bun.serve({
     port: MOCK_PORT,
     hostname: "127.0.0.1",
@@ -68,8 +68,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.stop(true);
-  if (savedEnv === undefined) delete process.env.DEVPROFILE_PORTAL_URL;
-  else process.env.DEVPROFILE_PORTAL_URL = savedEnv;
+  if (savedEnv === undefined) delete process.env.BEHELD_PORTAL_URL;
+  else process.env.BEHELD_PORTAL_URL = savedEnv;
 });
 
 beforeEach(() => {
@@ -90,7 +90,7 @@ beforeEach(() => {
 
 describe("uploadBundle", () => {
   test("default portal URL points at production", () => {
-    expect(DEFAULT_PORTAL_URL).toBe("https://devprofile.app");
+    expect(DEFAULT_PORTAL_URL).toBe("https://beheld.dev");
   });
 
   test("returns { ok: true, data } on 201", async () => {
@@ -123,10 +123,10 @@ describe("uploadBundle", () => {
   });
 
   test("returns { ok: false, kind: 'network' } when portal unreachable", async () => {
-    const saved = process.env.DEVPROFILE_PORTAL_URL;
-    process.env.DEVPROFILE_PORTAL_URL = "http://127.0.0.1:19995";
+    const saved = process.env.BEHELD_PORTAL_URL;
+    process.env.BEHELD_PORTAL_URL = "http://127.0.0.1:19995";
     const result = await uploadBundle(dummyBundle());
-    process.env.DEVPROFILE_PORTAL_URL = saved;
+    process.env.BEHELD_PORTAL_URL = saved;
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe("network");
   });
@@ -151,11 +151,11 @@ describe("uploadBundle", () => {
     }
   });
 
-  test("strips trailing slash from DEVPROFILE_PORTAL_URL", async () => {
-    const saved = process.env.DEVPROFILE_PORTAL_URL;
-    process.env.DEVPROFILE_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}/`;
+  test("strips trailing slash from BEHELD_PORTAL_URL", async () => {
+    const saved = process.env.BEHELD_PORTAL_URL;
+    process.env.BEHELD_PORTAL_URL = `http://127.0.0.1:${MOCK_PORT}/`;
     const result = await uploadBundle(dummyBundle());
-    process.env.DEVPROFILE_PORTAL_URL = saved;
+    process.env.BEHELD_PORTAL_URL = saved;
     expect(result.ok).toBe(true);
   });
 });
@@ -164,7 +164,7 @@ describe("uploadBundle", () => {
 
 describe("renderQr", () => {
   test("produces non-empty unicode block output", async () => {
-    const out = await renderQr("https://devprofile.app/v/test123");
+    const out = await renderQr("https://beheld.dev/v/test123");
     expect(out.length).toBeGreaterThan(50);
     // qrcode-terminal uses block characters; "█" is the standard one for "small"
     expect(out).toMatch(/[█▀▄ ]/);

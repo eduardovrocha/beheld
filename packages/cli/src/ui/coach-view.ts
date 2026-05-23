@@ -1,11 +1,5 @@
 import type { CoachPayload } from "../client/engine-client";
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
+import { RESET, BOLD, DIM, GREEN, YELLOW, RED } from "./styles";
 
 function severityColor(severity: string): string {
   if (severity === "high") return RED;
@@ -26,7 +20,7 @@ export function renderCoachText(payload: CoachPayload): string {
     const subst = need === 1 ? "sessão" : "sessões";
     return [
       "",
-      `  ${BOLD}DevProfile · coach${RESET} ${DIM}(coletando dados)${RESET}`,
+      `  ${BOLD}Beheld · coach${RESET} ${DIM}(coletando dados)${RESET}`,
       "",
       `  ${got}/3 sessões — ${verbo} ${need} ${subst}.`,
       `  ${DIM}Continue usando o Claude Code; o coaching será habilitado automaticamente.${RESET}`,
@@ -36,7 +30,7 @@ export function renderCoachText(payload: CoachPayload): string {
 
   const lines: string[] = [
     "",
-    `  ${BOLD}DevProfile · coach${RESET} ${DIM}(v${payload.version} · ${payload.data_freshness})${RESET}`,
+    `  ${BOLD}Beheld · coach${RESET} ${DIM}(v${payload.version} · ${payload.data_freshness})${RESET}`,
     "",
   ];
 

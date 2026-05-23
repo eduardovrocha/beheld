@@ -1,6 +1,6 @@
 import type { DaemonStatus, SessionMetrics } from "../types";
 
-const BASE = process.env.DEVPROFILE_MCP_URL ?? "http://127.0.0.1:7337";
+const BASE = process.env.BEHELD_MCP_URL ?? "http://127.0.0.1:7337";
 const TIMEOUT = 3000;
 
 async function get<T>(path: string): Promise<T | null> {

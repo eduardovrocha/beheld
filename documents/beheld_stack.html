@@ -1,0 +1,160 @@
+<style>
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.section-label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); letter-spacing:.05em; margin: 0 0 10px; }
+.badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--border-radius-md); display: inline-block; }
+.bp { background:#EEEDFE; color:#3C3489; }
+.bt { background:#E1F5EE; color:#085041; }
+.ba { background:#FAEEDA; color:#633806; }
+.bc { background:#FAECE7; color:#712B13; }
+.bg { background:#F1EFE8; color:#444441; }
+.row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:0.5px solid var(--color-border-tertiary); }
+.row:last-child { border-bottom:none; padding-bottom:0; }
+.tech-name { font-size:12px; font-weight:500; color:var(--color-text-primary); margin:0 0 2px; }
+.tech-why { font-size:11px; color:var(--color-text-secondary); margin:0; line-height:1.5; }
+.icon-wrap { width:30px; height:30px; border-radius:var(--border-radius-md); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.tradeoff { display:flex; gap:8px; padding:7px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:11px; }
+.tradeoff:last-child { border-bottom:none; }
+.pro { color:var(--color-text-success); }
+.con { color:var(--color-text-danger); }
+.layer-tag { font-size:10px; font-weight:500; padding:1px 6px; border-radius:3px; background:var(--color-background-secondary); color:var(--color-text-secondary); white-space:nowrap; margin-top:2px; display:inline-block; }
+</style>
+
+<h2 class="sr-only">Stack técnica sugerida para o Beheld, organizada por camada</h2>
+
+<div style="padding-top:0.5rem; margin-bottom:1.25rem;">
+  <p style="font-size:15px; font-weight:500; margin:0; color:var(--color-text-primary);">Stack sugerida — Beheld</p>
+  <p style="font-size:12px; color:var(--color-text-secondary); margin:4px 0 0;">Organizada por camada. Prioriza tecnologias que você já domina e minimiza superfície nova.</p>
+</div>
+
+<!-- Camada 1: Coleta -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">camada 1 — coleta e hooks</p>
+  <div class="row">
+    <div class="icon-wrap" style="background:#EEEDFE;"><i class="ti ti-brand-typescript" style="color:#3C3489;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">TypeScript + Node.js <span class="layer-tag">MCP server local</span></p>
+      <p class="tech-why">O SDK oficial do MCP é TypeScript-first. O server roda como processo daemon local (porta 7337), recebe eventos do Claude Code e do Continue.dev, e grava JSONL em <code style="font-size:10px;">~/.beheld/sessions/</code>. Você já escreve TS no frontend — mesma linguagem, sem contexto novo.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#EEEDFE;"><i class="ti ti-brand-typescript" style="color:#3C3489;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">VS Code Extension API (TypeScript) <span class="layer-tag">extensão VSIX</span></p>
+      <p class="tech-why">Extensões VS Code são obrigatoriamente TypeScript/JavaScript. Registra listeners de <code style="font-size:10px;">workspace</code>, <code style="font-size:10px;">window</code> e <code style="font-size:10px;">commands</code>. Mostra ícone na status bar, painel de onboarding e badge de score. Comunica com o MCP server local via HTTP.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#F1EFE8;"><i class="ti ti-file-type-js" style="color:#444441;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">Claude Code hooks (JSON config) <span class="layer-tag">hook nativo</span></p>
+      <p class="tech-why">Configuração pura em <code style="font-size:10px;">~/.claude/settings.json</code>. O CLI instala o hook automaticamente no <code style="font-size:10px;">beheld init</code>. Não requer código extra — só apontar para o MCP server local.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+</div>
+
+<!-- Camada 2: Processamento -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">camada 2 — processamento e scoring</p>
+  <div class="row">
+    <div class="icon-wrap" style="background:#FAEEDA;"><i class="ti ti-brand-python" style="color:#633806;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">Python <span class="layer-tag">scoring engine</span></p>
+      <p class="tech-why">Você já usa Python para scripts e data extraction. É a melhor linguagem para o pipeline de análise: lê os JSONL, roda o classificador de padrões, calcula os scores e salva no SQLite local. Roda como job periódico disparado pelo MCP server (a cada sessão encerrada).</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#FAEEDA;"><i class="ti ti-database" style="color:#633806;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">SQLite <span class="layer-tag">armazenamento local</span></p>
+      <p class="tech-why">Zero configuração, zero servidor, arquivo único em <code style="font-size:10px;">~/.beheld/profile.db</code>. Perfeito para local-first. Quando o usuário ativa o sync, o backend lê este arquivo diretamente ou recebe o delta via API. Suporta até anos de histórico sem problemas de performance.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#FAEEDA;"><i class="ti ti-brain" style="color:#633806;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">Anthropic API (claude-sonnet-4-6) <span class="layer-tag">classificação e insights</span></p>
+      <p class="tech-why">Chamada pontual ao fim de cada sessão para classificar tipo de projeto e gerar insights. Roda localmente no pipeline Python. Custo marginal por sessão (~0.01 USD). Pode ser substituído pelo Ollama com <code style="font-size:10px;">qwen2.5-coder:14b</code> para quem preferir zero custo variável — você já tem o setup funcionando.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+</div>
+
+<!-- Camada 3: CLI -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">camada 3 — CLI</p>
+  <div class="row">
+    <div class="icon-wrap" style="background:#EEEDFE;"><i class="ti ti-terminal" style="color:#3C3489;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">TypeScript + <code style="font-size:11px;">oclif</code> ou <code style="font-size:11px;">commander.js</code> <span class="layer-tag">CLI global</span></p>
+      <p class="tech-why">Publicado como <code style="font-size:10px;">npm i -g beheld</code>. Gerencia <code style="font-size:10px;">init</code>, <code style="font-size:10px;">view</code>, <code style="font-size:10px;">sync</code>, <code style="font-size:10px;">delete</code>. Chama o Python scoring engine via <code style="font-size:10px;">child_process</code> ou via HTTP se o daemon estiver rodando. Mesma linguagem do MCP server — um único repositório.</p>
+    </div>
+    <span class="badge bp">MVP</span>
+  </div>
+</div>
+
+<!-- Camada 4: Plataforma web -->
+<div class="card" style="margin-bottom:10px;">
+  <p class="section-label">camada 4 — plataforma web (v1)</p>
+  <div class="row">
+    <div class="icon-wrap" style="background:#E1F5EE;"><i class="ti ti-diamond" style="color:#085041;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">Ruby on Rails 7 API <span class="layer-tag">backend</span></p>
+      <p class="tech-why">Sua stack principal. Recebe os deltas de sync via API JSON, armazena perfis, calcula benchmarks entre usuários e serve os insights. ActiveRecord + PostgreSQL. Autenticação via magic link — sem senha, sem fricção. Você já tem padrões de JWT e autenticação bem estabelecidos.</p>
+    </div>
+    <span class="badge bt">v1</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#E1F5EE;"><i class="ti ti-brand-react" style="color:#085041;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">React 18 + Zustand <span class="layer-tag">dashboard web</span></p>
+      <p class="tech-why">Seu frontend principal. Dashboard de perfil, timeline de evolução, benchmarks. Zustand para estado global (você já usa). Recharts para os gráficos de evolução. Mesma base do seu projeto de biblioteca — pode reaproveitar estrutura, i18n e padrões de teste com Playwright.</p>
+    </div>
+    <span class="badge bt">v1</span>
+  </div>
+  <div class="row">
+    <div class="icon-wrap" style="background:#E1F5EE;"><i class="ti ti-brand-postgresql" style="color:#085041;font-size:16px;" aria-hidden="true"></i></div>
+    <div style="flex:1;">
+      <p class="tech-name">PostgreSQL + Redis <span class="layer-tag">banco + cache</span></p>
+      <p class="tech-why">PostgreSQL para perfis, sessões e benchmarks. Redis para cache de rankings e fila de processamento de sync (Sidekiq). Stack que você já opera — sem surpresa em produção.</p>
+    </div>
+    <span class="badge bt">v1</span>
+  </div>
+</div>
+
+<!-- Trade-offs principais -->
+<div class="card">
+  <p class="section-label">decisões e trade-offs</p>
+  <div class="tradeoff">
+    <span style="font-weight:500;color:var(--color-text-primary);min-width:160px;font-size:12px;">Python vs TypeScript no scoring</span>
+    <div>
+      <span class="pro">+ Python tem ecossistema superior para análise de texto e ML</span><br>
+      <span class="con">- Dois runtimes no MVP (Node + Python). Mitigação: scoring roda como microserviço HTTP separado, CLI chama via porta local.</span>
+    </div>
+  </div>
+  <div class="tradeoff">
+    <span style="font-weight:500;color:var(--color-text-primary);min-width:160px;font-size:12px;">SQLite local vs PostgreSQL</span>
+    <div>
+      <span class="pro">+ SQLite: zero config, perfeito para local-first, portátil</span><br>
+      <span class="con">- Sync requer serialização do delta. Mitigação: exporta JSON incremental assinado, backend valida e importa.</span>
+    </div>
+  </div>
+  <div class="tradeoff">
+    <span style="font-weight:500;color:var(--color-text-primary);min-width:160px;font-size:12px;">Anthropic API vs Ollama</span>
+    <div>
+      <span class="pro">+ API: qualidade superior, sem setup do usuário</span><br>
+      <span class="con">- Custo variável e dependência externa. Mitigação: Ollama como fallback configurável — você já tem qwen2.5-coder:14b rodando.</span>
+    </div>
+  </div>
+  <div class="tradeoff">
+    <span style="font-weight:500;color:var(--color-text-primary);min-width:160px;font-size:12px;">Rails vs Node no backend</span>
+    <div>
+      <span class="pro">+ Rails: sua stack dominante, produtividade máxima, padrões já estabelecidos</span><br>
+      <span class="con">- Poderia ser tudo TypeScript/Node. Mas Rails entrega o backend v1 em metade do tempo para você especificamente.</span>
+    </div>
+  </div>
+</div>

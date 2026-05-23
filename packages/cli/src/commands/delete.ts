@@ -4,17 +4,12 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { removeAllHooks } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
+import { RED, GREEN, BOLD, DIM, RESET, brand } from "../ui/styles";
 
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
-
-function devprofileDir(): string {
-  return process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+function beheldDir(): string {
+  return process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
 }
 
 async function askConfirmPhrase(phrase: string): Promise<boolean> {
@@ -34,6 +29,7 @@ interface DeleteOptions {
 }
 
 export async function deleteCommand(opts: DeleteOptions): Promise<void> {
+  console.log(brand("apagando o que sobrou"));
   const { local, remote, all } = opts;
 
   if (!local && !remote && !all) {
@@ -42,7 +38,7 @@ export async function deleteCommand(opts: DeleteOptions): Promise<void> {
   }
 
   if (local || all) {
-    const dir = devprofileDir();
+    const dir = beheldDir();
     const totalSessions = countSessions(dir);
     console.log(
       `\n  ${RED}Isso apagará ${totalSessions} sessões de dados locais. Não pode ser desfeito.${RESET}`,
@@ -72,16 +68,16 @@ export async function deleteCommand(opts: DeleteOptions): Promise<void> {
       }
     }
 
-    process.stdout.write("  Apagando ~/.devprofile/…");
+    process.stdout.write("  Apagando ~/.beheld/…");
     try {
       if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-      process.stdout.write(`\r  ${GREEN}✓${RESET}  Apagando ~/.devprofile/\n`);
+      process.stdout.write(`\r  ${GREEN}✓${RESET}  Apagando ~/.beheld/\n`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\r  ${RED}✗${RESET}  ${msg}\n`);
     }
 
-    console.log(`\n  ${BOLD}DevProfile removido.${RESET}`);
+    console.log(`\n  ${BOLD}Beheld removido.${RESET}`);
   }
 
   if (remote && !all) {

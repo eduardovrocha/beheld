@@ -2,13 +2,13 @@
  * Bundle upload + QR rendering (Phase 5 / F5.4).
  *
  * Pure functions: filesystem and CLI concerns live in commands/snapshot.ts.
- * The portal base URL is read from DEVPROFILE_PORTAL_URL (defaults to the
+ * The portal base URL is read from BEHELD_PORTAL_URL (defaults to the
  * production portal). Failures are typed so the caller can degrade gracefully —
- * the local .dpbundle was already written before the share attempt.
+ * the local .beheld was already written before the share attempt.
  */
 import type { Bundle } from "./types";
 
-export const DEFAULT_PORTAL_URL = "https://devprofile.app";
+export const DEFAULT_PORTAL_URL = "https://beheld.dev";
 
 export interface ShareResponse {
   id: string;
@@ -27,7 +27,7 @@ export type ShareResult =
   | { ok: false; error: ShareError };
 
 function portalUrl(): string {
-  return (process.env.DEVPROFILE_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
+  return (process.env.BEHELD_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
 }
 
 export async function uploadBundle(bundle: Bundle): Promise<ShareResult> {

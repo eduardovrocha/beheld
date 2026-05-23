@@ -9,7 +9,7 @@ LLM-driven insight cache). The coach pipeline is:
                                       detect_patterns ──▶ list[Pattern]
 
 Both functions are pure. The output of `compute_workflow_metrics` is exactly
-the shape that Phase 5 (.dpbundle) embeds in `signals.workflow_metrics` — so
+the shape that Phase 5 (.beheld) embeds in `signals.workflow_metrics` — so
 the bundle hash stays deterministic across runs.
 
 Patterns are derived, never persisted, never bundled.

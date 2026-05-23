@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 function getDbPath(): string {
-  return process.env.DEVPROFILE_CACHE_DB ?? join(homedir(), ".devprofile", "profile.db");
+  return process.env.BEHELD_CACHE_DB ?? join(homedir(), ".beheld", "profile.db");
 }
 
 export interface CachedScores {

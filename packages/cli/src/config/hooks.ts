@@ -29,11 +29,11 @@ function writeJson(path: string, data: unknown): void {
 }
 
 function backup(path: string): void {
-  if (existsSync(path)) copyFileSync(path, `${path}.devprofile.bak`);
+  if (existsSync(path)) copyFileSync(path, `${path}.beheld.bak`);
 }
 
 function restoreBackup(path: string): void {
-  const bak = `${path}.devprofile.bak`;
+  const bak = `${path}.beheld.bak`;
   if (existsSync(bak)) copyFileSync(bak, path);
 }
 
@@ -62,7 +62,7 @@ function makeHook(endpoint: string): HookMatcher {
   };
 }
 
-function hasDevprofileHook(matchers: unknown[]): boolean {
+function hasBeheldHook(matchers: unknown[]): boolean {
   return matchers.some(
     (m) =>
       typeof m === "object" &&
@@ -103,7 +103,7 @@ export async function installClaudeCodeHooks(
   };
   for (const [event, endpoint] of Object.entries(hookMap)) {
     const existing = (hooks[event] ?? []) as unknown[];
-    if (!hasDevprofileHook(existing)) {
+    if (!hasBeheldHook(existing)) {
       hooks[event] = [...existing, makeHook(endpoint)];
     }
   }
@@ -135,8 +135,8 @@ export async function removeClaudeCodeHooks(
     cfg.hooks = hooks;
     // Also clean up legacy mcpServers entry written by older versions
     const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-    if ("devprofile" in mcpServers) {
-      delete mcpServers["devprofile"];
+    if ("beheld" in mcpServers) {
+      delete mcpServers["beheld"];
       cfg.mcpServers = mcpServers;
     }
     writeJson(settingsFile, cfg);
@@ -160,9 +160,9 @@ export async function installContinueDevMcp(
   backup(configFile);
   const cfg = readJson(configFile);
   const servers = (cfg.mcpServers ?? []) as McpServerEntry[];
-  if (!servers.some((s) => s.name === "devprofile")) {
+  if (!servers.some((s) => s.name === "beheld")) {
     servers.push({
-      name: "devprofile",
+      name: "beheld",
       transport: { type: "http", url: "http://127.0.0.1:7337/mcp" },
     });
   }
@@ -177,7 +177,7 @@ export async function removeContinueDevMcp(
   try {
     const cfg = readJson(configFile);
     const servers = (cfg.mcpServers ?? []) as McpServerEntry[];
-    cfg.mcpServers = servers.filter((s) => s.name !== "devprofile");
+    cfg.mcpServers = servers.filter((s) => s.name !== "beheld");
     writeJson(configFile, cfg);
   } catch {
     restoreBackup(configFile);
@@ -187,10 +187,10 @@ export async function removeContinueDevMcp(
 // ── Claude Code slash commands ────────────────────────────────────────────────
 
 export function claudeCommandPath(base = homedir()): string {
-  return join(base, ".claude", "commands", "devprofile.md");
+  return join(base, ".claude", "commands", "beheld.md");
 }
 
-const SLASH_COMMAND_CONTENT = `Use the devprofile MCP tool with view="$ARGUMENTS" (use "summary" if no argument given) and display the result exactly as returned, without adding any commentary.
+const SLASH_COMMAND_CONTENT = `Use the beheld MCP tool with view="$ARGUMENTS" (use "summary" if no argument given) and display the result exactly as returned, without adding any commentary.
 `;
 
 export async function installClaudeSlashCommand(
@@ -225,16 +225,16 @@ export async function installClaudeMcpServer(
 ): Promise<void> {
   const cfg = readJson(claudeJson);
   const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-  const existing = mcpServers["devprofile"] as { args?: string[] } | undefined;
+  const existing = mcpServers["beheld"] as { args?: string[] } | undefined;
   const needsUpdate =
     !existing ||
     !Array.isArray(existing.args) ||
     !existing.args.includes("--stdio");
 
   if (needsUpdate) {
-    mcpServers["devprofile"] = {
+    mcpServers["beheld"] = {
       type: "stdio",
-      command: join(base, ".local", "bin", "devprofile"),
+      command: join(base, ".local", "bin", "beheld"),
       args: ["server", "--stdio"],
     };
     cfg.mcpServers = mcpServers;
@@ -249,8 +249,8 @@ export async function removeClaudeMcpServer(
   try {
     const cfg = readJson(claudeJson);
     const mcpServers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
-    if ("devprofile" in mcpServers) {
-      delete mcpServers["devprofile"];
+    if ("beheld" in mcpServers) {
+      delete mcpServers["beheld"];
       cfg.mcpServers = mcpServers;
       writeJson(claudeJson, cfg);
     }
@@ -280,10 +280,10 @@ export async function migrateProjectScopedRegistrations(
     }
 
     const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
-    if (!("devprofile" in servers)) continue;
+    if (!("beheld" in servers)) continue;
 
     copyFileSync(settingsPath, `${settingsPath}.bak`);
-    delete servers["devprofile"];
+    delete servers["beheld"];
 
     if (Object.keys(servers).length === 0) {
       delete config.mcpServers;

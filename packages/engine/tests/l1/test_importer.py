@@ -11,22 +11,22 @@ from l1 import importer as importer_module
 from l1.auth_resolver import AuthMethod
 from l1.git_extractor import AuthorNotFoundError, CloneError, L1ExtractedSignals
 from l1.importer import L1Importer
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def db() -> DevProfileDB:
-    instance = DevProfileDB(":memory:")
+def db() -> BeheldDB:
+    instance = BeheldDB(":memory:")
     instance.init_schema()
     yield instance
     instance.close()
 
 
 @pytest.fixture
-def imp(db: DevProfileDB) -> L1Importer:
+def imp(db: BeheldDB) -> L1Importer:
     return L1Importer(db)
 
 
@@ -124,7 +124,7 @@ def test_import_returns_clone_error(imp: L1Importer, monkeypatch: pytest.MonkeyP
 
 
 def test_import_happy_path_saves_to_sqlite(
-    imp: L1Importer, db: DevProfileDB, monkeypatch: pytest.MonkeyPatch
+    imp: L1Importer, db: BeheldDB, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_auth(monkeypatch, AuthMethod(method="ssh"))
     _stub_extract(monkeypatch, _signals(root="b" * 40, commit_count=42))
@@ -150,7 +150,7 @@ def test_import_happy_path_saves_to_sqlite(
 
 
 def test_import_idempotent_second_call(
-    imp: L1Importer, db: DevProfileDB, monkeypatch: pytest.MonkeyPatch
+    imp: L1Importer, db: BeheldDB, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_auth(monkeypatch, AuthMethod(method="ssh"))
     spy = _stub_extract(monkeypatch, _signals(root="c" * 40))
@@ -167,7 +167,7 @@ def test_import_idempotent_second_call(
 
 
 def test_import_same_repo_via_different_url_dedupes_on_real_hash(
-    imp: L1Importer, db: DevProfileDB, monkeypatch: pytest.MonkeyPatch
+    imp: L1Importer, db: BeheldDB, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two URLs (e.g. mirror + canonical) that map to the same root commit
     should only produce one row — and the new URL is then cached."""
@@ -243,7 +243,7 @@ def test_import_status_error_on_clone_failure(
 
 
 def test_cache_uses_url_fingerprint_not_plaintext(
-    imp: L1Importer, db: DevProfileDB, monkeypatch: pytest.MonkeyPatch
+    imp: L1Importer, db: BeheldDB, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The `profile` table must not contain the plaintext repo URL — only a
     SHA-256 fingerprint."""

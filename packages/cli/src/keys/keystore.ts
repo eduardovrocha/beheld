@@ -1,14 +1,14 @@
 /**
- * Ed25519 keystore for signed snapshots (.dpbundle, Phase 5).
+ * Ed25519 keystore for signed snapshots (.beheld, Phase 5).
  *
  * Uses the Web Crypto API (crypto.subtle) — zero new deps, and the verify
  * page (Etapa G, Rails) uses the same API on the browser side, so payloads
  * sign here and verify there without conversion.
  *
  * Format on disk: JWK ({ kty: "OKP", crv: "Ed25519", x, d? }).
- * - Public key: `<devprofile>/keys/public.jwk`  (0644)
- * - Private key: `<devprofile>/keys/private.jwk` (0600)
- * Rotated keys are archived under `<devprofile>/keys/archive/<ISO>/`.
+ * - Public key: `<beheld>/keys/public.jwk`  (0644)
+ * - Private key: `<beheld>/keys/private.jwk` (0600)
+ * Rotated keys are archived under `<beheld>/keys/archive/<ISO>/`.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -33,9 +33,9 @@ export interface Ed25519Jwk {
 
 export function getKeyPaths(baseDir?: string): KeyPaths {
   const base = baseDir
-    ?? (process.env.DEVPROFILE_DATA_DIR
-      ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-      : join(homedir(), ".devprofile"));
+    ?? (process.env.BEHELD_DATA_DIR
+      ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+      : join(homedir(), ".beheld"));
   const dir = join(base, "keys");
   return {
     dir,
@@ -115,7 +115,7 @@ export async function loadPrivateKey(baseDir?: string): Promise<CryptoKey> {
 export async function rotateKeys(baseDir?: string): Promise<{ archived: string; paths: KeyPaths }> {
   const paths = getKeyPaths(baseDir);
   if (!keysExist(baseDir)) {
-    throw new Error("No keys to rotate — run `devprofile init` or `devprofile keys import` first");
+    throw new Error("No keys to rotate — run `beheld init` or `beheld keys import` first");
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const archiveTarget = join(paths.archiveDir, stamp);

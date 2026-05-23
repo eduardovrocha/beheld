@@ -141,10 +141,10 @@ describe("renderProfile", () => {
     expect(parts[3]).toBe(75);
   });
 
-  test("default output contains DevProfile header", () => {
+  test("default output contains Beheld header", () => {
     const flags: ViewFlags = { json: false, scoresOnly: false };
     const out = renderProfile(data, flags);
-    expect(out).toContain("DevProfile");
+    expect(out).toContain("Beheld");
   });
 
   test("default output contains score dimension labels", () => {
@@ -204,7 +204,7 @@ describe("detectEnvironments", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = join(tmpdir(), `devprofile-env-${randomUUID()}`);
+    tmpDir = join(tmpdir(), `beheld-env-${randomUUID()}`);
     mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -254,7 +254,7 @@ describe("hooks idempotency", () => {
   let claudeJson: string;
 
   beforeEach(() => {
-    tmpDir = join(tmpdir(), `devprofile-hooks-${randomUUID()}`);
+    tmpDir = join(tmpdir(), `beheld-hooks-${randomUUID()}`);
     mkdirSync(join(tmpDir, ".claude"), { recursive: true });
     mkdirSync(join(tmpDir, ".continue"), { recursive: true });
     settingsFile = join(tmpDir, ".claude", "settings.json");
@@ -275,15 +275,15 @@ describe("hooks idempotency", () => {
     expect(cfg.hooks.PreToolUse).toHaveLength(1);
     expect(cfg.hooks.PostToolUse).toHaveLength(1);
     expect(cfg.hooks.Stop).toHaveLength(1);
-    expect(cfg.mcpServers?.devprofile).toBeUndefined();
+    expect(cfg.mcpServers?.beheld).toBeUndefined();
   });
 
-  test("installClaudeMcpServer adds devprofile to ~/.claude.json with stdio", async () => {
+  test("installClaudeMcpServer adds beheld to ~/.claude.json with stdio", async () => {
     await installClaudeMcpServer(claudeJson);
     const cfg = JSON.parse(readFileSync(claudeJson, "utf8"));
-    const entry = cfg.mcpServers?.devprofile;
+    const entry = cfg.mcpServers?.beheld;
     expect(entry?.type).toBe("stdio");
-    expect(entry?.command).toContain(".local/bin/devprofile");
+    expect(entry?.command).toContain(".local/bin/beheld");
     expect(entry?.args).toEqual(["server", "--stdio"]);
     expect(entry?.url).toBeUndefined();
   });
@@ -292,7 +292,7 @@ describe("hooks idempotency", () => {
     await installClaudeMcpServer(claudeJson);
     await installClaudeMcpServer(claudeJson);
     const cfg = JSON.parse(readFileSync(claudeJson, "utf8"));
-    expect(Object.keys(cfg.mcpServers).filter((k) => k === "devprofile")).toHaveLength(1);
+    expect(Object.keys(cfg.mcpServers).filter((k) => k === "beheld")).toHaveLength(1);
   });
 
   test("installClaudeCodeHooks is idempotent — second call does not duplicate hooks", async () => {
@@ -308,20 +308,20 @@ describe("hooks idempotency", () => {
     await installContinueDevMcp(configFile);
     const cfg = JSON.parse(readFileSync(configFile, "utf8"));
     const servers = cfg.mcpServers as Array<{ name: string }>;
-    expect(servers.some((s) => s.name === "devprofile")).toBe(true);
+    expect(servers.some((s) => s.name === "beheld")).toBe(true);
   });
 
   test("installContinueDevMcp is idempotent — no duplicate entries", async () => {
     await installContinueDevMcp(configFile);
     await installContinueDevMcp(configFile);
     const cfg = JSON.parse(readFileSync(configFile, "utf8"));
-    const devprofiles = (cfg.mcpServers as Array<{ name: string }>).filter(
-      (s) => s.name === "devprofile",
+    const behelds = (cfg.mcpServers as Array<{ name: string }>).filter(
+      (s) => s.name === "beheld",
     );
-    expect(devprofiles).toHaveLength(1);
+    expect(behelds).toHaveLength(1);
   });
 
-  test("removeAllHooks removes devprofile hooks, MCP entries, and claude.json entry", async () => {
+  test("removeAllHooks removes beheld hooks, MCP entries, and claude.json entry", async () => {
     await installClaudeCodeHooks(settingsFile);
     await installContinueDevMcp(configFile);
     await installClaudeMcpServer(claudeJson);
@@ -337,13 +337,13 @@ describe("hooks idempotency", () => {
 
     const continueCfg = JSON.parse(readFileSync(configFile, "utf8"));
     const servers = continueCfg.mcpServers as Array<{ name: string }>;
-    expect(servers.some((s) => s.name === "devprofile")).toBe(false);
+    expect(servers.some((s) => s.name === "beheld")).toBe(false);
 
     const claudeJsonCfg = JSON.parse(readFileSync(claudeJson, "utf8"));
-    expect(claudeJsonCfg.mcpServers?.devprofile).toBeUndefined();
+    expect(claudeJsonCfg.mcpServers?.beheld).toBeUndefined();
   });
 
-  test("removeAllHooks preserves non-devprofile hooks", async () => {
+  test("removeAllHooks preserves non-beheld hooks", async () => {
     const existing = {
       hooks: {
         PreToolUse: [{ matcher: "", hooks: [{ type: "command", command: "echo hello" }] }],
@@ -358,7 +358,7 @@ describe("hooks idempotency", () => {
     expect(cfg.hooks.PreToolUse[0].hooks[0].command).toBe("echo hello");
   });
 
-  test("migrateProjectScopedRegistrations removes devprofile and preserves other servers", async () => {
+  test("migrateProjectScopedRegistrations removes beheld and preserves other servers", async () => {
     const projDir = join(tmpDir, ".claude", "projects");
     const proj1 = join(projDir, "proj1");
     const proj2 = join(projDir, "proj2");
@@ -367,13 +367,13 @@ describe("hooks idempotency", () => {
 
     writeFileSync(join(proj1, "settings.json"), JSON.stringify({
       mcpServers: {
-        devprofile: { type: "stdio", command: "/tmp/dp", args: ["server"] },
+        beheld: { type: "stdio", command: "/tmp/dp", args: ["server"] },
         other: { type: "stdio", command: "/bin/other", args: [] },
       },
     }));
     writeFileSync(join(proj2, "settings.json"), JSON.stringify({
       mcpServers: {
-        devprofile: { type: "stdio", command: "/tmp/dp", args: ["server"] },
+        beheld: { type: "stdio", command: "/tmp/dp", args: ["server"] },
       },
     }));
 
@@ -381,7 +381,7 @@ describe("hooks idempotency", () => {
     expect(count).toBe(2);
 
     const cfg1 = JSON.parse(readFileSync(join(proj1, "settings.json"), "utf8"));
-    expect(cfg1.mcpServers?.devprofile).toBeUndefined();
+    expect(cfg1.mcpServers?.beheld).toBeUndefined();
     expect(cfg1.mcpServers?.other).toBeDefined();
 
     const cfg2 = JSON.parse(readFileSync(join(proj2, "settings.json"), "utf8"));
@@ -393,7 +393,7 @@ describe("hooks idempotency", () => {
     const proj = join(projDir, "bak-test");
     mkdirSync(proj, { recursive: true });
     writeFileSync(join(proj, "settings.json"), JSON.stringify({
-      mcpServers: { devprofile: { type: "stdio", command: "/tmp/dp", args: [] } },
+      mcpServers: { beheld: { type: "stdio", command: "/tmp/dp", args: [] } },
     }));
 
     await migrateProjectScopedRegistrations(projDir);
@@ -483,7 +483,7 @@ describe("view readiness gate", () => {
   const deadEngineUrl = "http://127.0.0.1:19999";
 
   test("view shows 'Coletando dados' when engine offline and DB has 0 scores (no cache)", async () => {
-    const missingDb = join(tmpdir(), `devprofile-noread-${randomUUID()}.db`);
+    const missingDb = join(tmpdir(), `beheld-noread-${randomUUID()}.db`);
     // Engine offline + no cache → exits 1 with error (not collecting screen)
     // Collecting screen only shows when engine is LIVE and reports not ready
     // This test confirms the exit path when engine offline + no cache
@@ -491,7 +491,7 @@ describe("view readiness gate", () => {
       ["bun", "run", "packages/cli/src/index.ts", "view"],
       {
         cwd: repoRoot,
-        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: missingDb },
+        env: { ...process.env, BEHELD_ENGINE_URL: deadEngineUrl, BEHELD_CACHE_DB: missingDb },
         stdout: "pipe",
         stderr: "pipe",
       },
@@ -504,7 +504,7 @@ describe("view readiness gate", () => {
 
   test("view with cached scores (source=cache) never shows collecting screen", async () => {
     const { Database } = await import("bun:sqlite");
-    const dbPath = join(tmpdir(), `devprofile-readiness-${randomUUID()}.db`);
+    const dbPath = join(tmpdir(), `beheld-readiness-${randomUUID()}.db`);
     const db = new Database(dbPath);
     db.exec(
       `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
@@ -517,7 +517,7 @@ describe("view readiness gate", () => {
       ["bun", "run", "packages/cli/src/index.ts", "view"],
       {
         cwd: repoRoot,
-        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        env: { ...process.env, BEHELD_ENGINE_URL: deadEngineUrl, BEHELD_CACHE_DB: dbPath },
         stdout: "pipe",
         stderr: "pipe",
       },
@@ -538,12 +538,12 @@ describe("scoresCurrent offline fallback", () => {
   const deadEngineUrl = "http://127.0.0.1:19999";
 
   test("view exits 1 with no-cache message when engine offline and no DB", async () => {
-    const missingDb = join(tmpdir(), `devprofile-missing-${randomUUID()}.db`);
+    const missingDb = join(tmpdir(), `beheld-missing-${randomUUID()}.db`);
     const proc = Bun.spawn(
       ["bun", "run", "packages/cli/src/index.ts", "view"],
       {
         cwd: repoRoot,
-        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: missingDb },
+        env: { ...process.env, BEHELD_ENGINE_URL: deadEngineUrl, BEHELD_CACHE_DB: missingDb },
         stdout: "pipe",
         stderr: "pipe",
       },
@@ -556,7 +556,7 @@ describe("scoresCurrent offline fallback", () => {
 
   test("view shows cache warning when engine offline but DB has scores", async () => {
     const { Database } = await import("bun:sqlite");
-    const dbPath = join(tmpdir(), `devprofile-cache-${randomUUID()}.db`);
+    const dbPath = join(tmpdir(), `beheld-cache-${randomUUID()}.db`);
     const db = new Database(dbPath);
     db.exec(
       `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
@@ -569,7 +569,7 @@ describe("scoresCurrent offline fallback", () => {
       ["bun", "run", "packages/cli/src/index.ts", "view"],
       {
         cwd: repoRoot,
-        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        env: { ...process.env, BEHELD_ENGINE_URL: deadEngineUrl, BEHELD_CACHE_DB: dbPath },
         stdout: "pipe",
         stderr: "pipe",
       },
@@ -579,14 +579,14 @@ describe("scoresCurrent offline fallback", () => {
     expect(exit).toBe(0);
     // New B18 alert box uses uppercase title; older score date also triggers it
     expect(output.toLowerCase()).toContain("engine offline");
-    expect(output).toContain("devprofile doctor");
-    expect(output).toContain("devprofile restart");
+    expect(output).toContain("beheld doctor");
+    expect(output).toContain("beheld restart");
     rmSync(dbPath, { force: true });
   }, 15000);
 
   test("view --scores-only with cached DB returns space-separated numbers", async () => {
     const { Database } = await import("bun:sqlite");
-    const dbPath = join(tmpdir(), `devprofile-scores-${randomUUID()}.db`);
+    const dbPath = join(tmpdir(), `beheld-scores-${randomUUID()}.db`);
     const db = new Database(dbPath);
     db.exec(
       `CREATE TABLE scores (date TEXT, prompt_quality INTEGER, test_maturity INTEGER,
@@ -599,7 +599,7 @@ describe("scoresCurrent offline fallback", () => {
       ["bun", "run", "packages/cli/src/index.ts", "view", "--scores-only"],
       {
         cwd: repoRoot,
-        env: { ...process.env, DEVPROFILE_ENGINE_URL: deadEngineUrl, DEVPROFILE_CACHE_DB: dbPath },
+        env: { ...process.env, BEHELD_ENGINE_URL: deadEngineUrl, BEHELD_CACHE_DB: dbPath },
         stdout: "pipe",
         stderr: "pipe",
       },
@@ -827,7 +827,7 @@ describe("codesignEngine — macOS", () => {
 
   test("isCommandAvailable retorna false para comando inexistente", async () => {
     const { isCommandAvailable } = await import("../src/engine-extractor");
-    expect(isCommandAvailable("devprofile-nonexistent-xyz")).toBe(false);
+    expect(isCommandAvailable("beheld-nonexistent-xyz")).toBe(false);
   });
 
   test("isCommandAvailable retorna true para 'sh' (sempre disponível)", async () => {
@@ -838,21 +838,21 @@ describe("codesignEngine — macOS", () => {
 
 // ── Secure permissions ────────────────────────────────────────────────────────
 
-describe("permissões seguras do diretório ~/.devprofile", () => {
+describe("permissões seguras do diretório ~/.beheld", () => {
   test("cria diretório com permissão 0700", () => {
-    const tmpBase = mkdtempSync(join(tmpdir(), "devprofile-test-"));
-    const devprofileDir = join(tmpBase, ".devprofile");
+    const tmpBase = mkdtempSync(join(tmpdir(), "beheld-test-"));
+    const beheldDir = join(tmpBase, ".beheld");
 
-    mkdirSync(devprofileDir, { recursive: true, mode: 0o700 });
+    mkdirSync(beheldDir, { recursive: true, mode: 0o700 });
 
-    const mode = statSync(devprofileDir).mode & 0o777;
+    const mode = statSync(beheldDir).mode & 0o777;
     expect(mode).toBe(0o700);
 
     rmSync(tmpBase, { recursive: true });
   });
 
   test("ensureSecurePermissions corrige diretório com 0755", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "devprofile-perm-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "beheld-perm-"));
     chmodSync(tmpDir, 0o755);
     expect(statSync(tmpDir).mode & 0o777).toBe(0o755);
 
@@ -868,11 +868,11 @@ describe("permissões seguras do diretório ~/.devprofile", () => {
 // ── Autostart templates ───────────────────────────────────────────────────────
 
 describe("autostart — templates de LaunchAgent e systemd", () => {
-  test("LaunchAgent usa devprofile start em vez de server", async () => {
+  test("LaunchAgent usa beheld start em vez de server", async () => {
     const { generateLaunchAgentPlist } = await import("../src/daemon-manager");
     const plist = generateLaunchAgentPlist(
-      "/usr/local/bin/devprofile",
-      "/home/user/.devprofile",
+      "/usr/local/bin/beheld",
+      "/home/user/.beheld",
     );
     expect(plist).toContain("<string>start</string>");
     expect(plist).not.toContain("<string>server</string>");
@@ -881,28 +881,28 @@ describe("autostart — templates de LaunchAgent e systemd", () => {
   test("LaunchAgent tem KeepAlive false", async () => {
     const { generateLaunchAgentPlist } = await import("../src/daemon-manager");
     const plist = generateLaunchAgentPlist(
-      "/usr/local/bin/devprofile",
-      "/home/user/.devprofile",
+      "/usr/local/bin/beheld",
+      "/home/user/.beheld",
     );
     expect(plist).toContain("<false/>");
     expect(plist).not.toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
   });
 
-  test("systemd service usa devprofile start em vez de server", async () => {
+  test("systemd service usa beheld start em vez de server", async () => {
     const { generateSystemdService } = await import("../src/daemon-manager");
     const service = generateSystemdService(
-      "/usr/local/bin/devprofile",
-      "/home/user/.devprofile",
+      "/usr/local/bin/beheld",
+      "/home/user/.beheld",
     );
-    expect(service).toContain("devprofile start");
-    expect(service).not.toContain("devprofile server");
+    expect(service).toContain("beheld start");
+    expect(service).not.toContain("beheld server");
   });
 
   test("systemd service é Type=oneshot com RemainAfterExit", async () => {
     const { generateSystemdService } = await import("../src/daemon-manager");
     const service = generateSystemdService(
-      "/usr/local/bin/devprofile",
-      "/home/user/.devprofile",
+      "/usr/local/bin/beheld",
+      "/home/user/.beheld",
     );
     expect(service).toContain("Type=oneshot");
     expect(service).toContain("RemainAfterExit=yes");
@@ -966,18 +966,18 @@ describe("view --json e --scores-only não poluem stdout com warnings", () => {
 
 describe("installClaudeSlashCommand", () => {
   test("sobrescreve arquivo vazio", async () => {
-    const tmpFile = join(tmpdir(), `devprofile-empty-${Date.now()}.md`);
+    const tmpFile = join(tmpdir(), `beheld-empty-${Date.now()}.md`);
     writeFileSync(tmpFile, "");
 
     await installClaudeSlashCommand(tmpFile);
 
     const content = readFileSync(tmpFile, "utf-8");
     expect(content.trim().length).toBeGreaterThan(0);
-    expect(content).toContain("devprofile");
+    expect(content).toContain("beheld");
   });
 
   test("preserva arquivo com conteúdo existente", async () => {
-    const tmpFile = join(tmpdir(), `devprofile-existing-${Date.now()}.md`);
+    const tmpFile = join(tmpdir(), `beheld-existing-${Date.now()}.md`);
     const original = "conteúdo customizado pelo usuário";
     writeFileSync(tmpFile, original);
 
@@ -988,7 +988,7 @@ describe("installClaudeSlashCommand", () => {
   });
 
   test("cria arquivo se não existe", async () => {
-    const tmpFile = join(tmpdir(), `devprofile-new-${Date.now()}.md`);
+    const tmpFile = join(tmpdir(), `beheld-new-${Date.now()}.md`);
 
     await installClaudeSlashCommand(tmpFile);
 

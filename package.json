@@ -1,12 +1,12 @@
 {
-  "name": "devprofile",
+  "name": "beheld",
   "version": "0.1.1",
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "bun test",
     "build": "sh scripts/build.sh",
-    "build:cli": "bun build packages/cli/src/index.ts --compile --outfile dist/devprofile",
+    "build:cli": "bun build packages/cli/src/index.ts --compile --outfile dist/beheld",
     "sync:platform-keys": "bun run scripts/sync-platform-keys.ts"
   }
 }

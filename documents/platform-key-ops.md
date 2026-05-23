@@ -1,6 +1,6 @@
 # Platform Key — Operações de Segurança
 
-> Esse documento descreve como a chave privada da plataforma DevProfile —
+> Esse documento descreve como a chave privada da plataforma Beheld —
 > usada exclusivamente pra assinar attestations de identidade — é gerada,
 > armazenada, rotacionada, e em quais condições migra pra infraestrutura
 > mais robusta.
@@ -33,7 +33,7 @@ permite rotacionar uma sem afetar as outras.
 |------|---------|----------------|
 | Algoritmo | Ed25519 | Quando NIST recomendar substituto (não previsto) |
 | Armazenamento | Env var em produção + backup em password manager pessoal | Em cada trigger de upgrade (ver `Triggers de upgrade`) |
-| Naming | `devprofile-platform-{YYYY}-{Q1-4}` | Próxima rotação |
+| Naming | `beheld-platform-{YYYY}-{Q1-4}` | Próxima rotação |
 | Cadência de revisão | Trimestral | Continuamente |
 | Public key publication | Commitada em `web/source/backend/keys/platform/` (fonte) + snapshot em `packages/cli/src/embedded-keys/` (offline verify). Exposta via `GET /api/platform-keys` | Permanente |
 | Múltiplas chaves ativas | Suportado simultaneamente | Necessário pra janela de rotação |
@@ -63,7 +63,7 @@ não em VM efêmera de CI).
 
 ```sh
 # Definir o key_id da rotação corrente
-KEY_ID="devprofile-platform-2026-q2"
+KEY_ID="beheld-platform-2026-q2"
 
 # Gerar keypair Ed25519
 openssl genpkey -algorithm Ed25519 -out "${KEY_ID}.priv.pem"
@@ -113,7 +113,7 @@ Adicionar `keys/platform/${KEY_ID}.info.json`:
 
 ```json
 {
-  "key_id": "devprofile-platform-2026-q2",
+  "key_id": "beheld-platform-2026-q2",
   "algorithm": "ed25519",
   "created_at": "2026-05-19T14:00:00Z",
   "active": true,
@@ -134,9 +134,9 @@ Garantir `.gitignore` em `keys/platform/`:
 Commit:
 
 ```sh
-git add keys/platform/devprofile-platform-2026-q2.pub
-git add keys/platform/devprofile-platform-2026-q2.info.json
-git commit -m "feat(platform-key): rotate to devprofile-platform-2026-q2"
+git add keys/platform/beheld-platform-2026-q2.pub
+git add keys/platform/beheld-platform-2026-q2.info.json
+git commit -m "feat(platform-key): rotate to beheld-platform-2026-q2"
 ```
 
 **2. Configuração no backend de produção**
@@ -149,29 +149,29 @@ git commit -m "feat(platform-key): rotate to devprofile-platform-2026-q2"
 Definir env vars no host de produção:
 
 ```
-DEVPROFILE_PLATFORM_KEY_ID=devprofile-platform-2026-q2
-DEVPROFILE_PLATFORM_PRIVATE_KEY=<conteúdo de devprofile-platform-2026-q2.priv.b64>
+BEHELD_PLATFORM_KEY_ID=beheld-platform-2026-q2
+BEHELD_PLATFORM_PRIVATE_KEY=<conteúdo de beheld-platform-2026-q2.priv.b64>
 ```
 
 Para um host genérico via SSH (ajustar caminho do env file conforme deploy):
 
 ```sh
-ssh deploy@<host> "cat >> /etc/devprofile/backend.env" <<EOF
-DEVPROFILE_PLATFORM_KEY_ID=devprofile-platform-2026-q2
-DEVPROFILE_PLATFORM_PRIVATE_KEY=$(cat devprofile-platform-2026-q2.priv.b64)
+ssh deploy@<host> "cat >> /etc/beheld/backend.env" <<EOF
+BEHELD_PLATFORM_KEY_ID=beheld-platform-2026-q2
+BEHELD_PLATFORM_PRIVATE_KEY=$(cat beheld-platform-2026-q2.priv.b64)
 EOF
-ssh deploy@<host> "systemctl restart devprofile-backend"
+ssh deploy@<host> "systemctl restart beheld-backend"
 ```
 
 **3. Validação pós-deploy**
 
 ```sh
 # Verificar que o backend carregou a chave e public key bate
-curl https://devprofile.info/api/platform-keys | jq
+curl https://beheld.info/api/platform-keys | jq
 
 # Esperar resposta incluindo:
 # {
-#   "key_id": "devprofile-platform-2026-q2",
+#   "key_id": "beheld-platform-2026-q2",
 #   "public_key": "ed25519-pub:<conteúdo de .pub.b64>",
 #   "active": true,
 #   ...
@@ -190,7 +190,7 @@ Dois locais obrigatórios, ambos criptografados:
 **Local 1 — Password manager pessoal**
 
 - 1Password / Bitwarden / pass / equivalente
-- Entry name: `DevProfile Platform Key — {key_id}`
+- Entry name: `Beheld Platform Key — {key_id}`
 - Campo "password": conteúdo de `.priv.b64`
 - Campo "notes": data de geração, fingerprint, hosts onde está deployada
 - Sharing: NUNCA compartilhada (até existir co-founder com mesmo nível
@@ -254,7 +254,7 @@ todas. Apenas a flag `active` muda.
 
 ```sh
 # Antigas attestations ainda devem verificar
-curl -X POST https://devprofile.info/api/attestation/verify \
+curl -X POST https://beheld.info/api/attestation/verify \
   -H 'Content-Type: application/json' \
   -d @attestation-old.json
 # Esperar: {"valid": true, "revoked": false}
@@ -402,7 +402,7 @@ O que NÃO existe ainda (e quando passa a ser obrigatório):
 Para o owner atual da chave, revisar trimestralmente:
 
 ```
-[ ] Public key publicada em GET /api/platform-keys (https://devprofile.info/api/platform-keys) bate com web/source/backend/keys/platform/{key_id}.pub
+[ ] Public key publicada em GET /api/platform-keys (https://beheld.info/api/platform-keys) bate com web/source/backend/keys/platform/{key_id}.pub
 [ ] Backup em password manager pessoal está atualizado
 [ ] Backup offline (pendrive) está atualizado
 [ ] Nenhum trigger de upgrade foi disparado
@@ -417,15 +417,15 @@ Para o owner atual da chave, revisar trimestralmente:
 ## Para o sucessor (futuro)
 
 Se você está lendo isso depois de assumir responsabilidade pela
-plataforma DevProfile e o owner anterior não está mais disponível
+plataforma Beheld e o owner anterior não está mais disponível
 pra orientar:
 
 1. Não rotacione a chave imediatamente sem entender. Atestações
    existentes precisam continuar verificáveis.
 2. Acesse o backend de produção e confirme qual `key_id` está ativo
-   (env var `DEVPROFILE_PLATFORM_KEY_ID`).
+   (env var `BEHELD_PLATFORM_KEY_ID`).
 3. Confirme que esse key_id existe em `web/source/backend/keys/platform/`
-   do repo `devprofile-web` com `active: true` em `info.json`.
+   do repo `beheld-web` com `active: true` em `info.json`.
 4. Localize o backup da private key no password manager pessoal do
    owner anterior — esse acesso DEVE ter sido transferido como parte
    da sucessão. Se não foi, considere a chave atual potencialmente
@@ -434,5 +434,5 @@ pra orientar:
    fazer qualquer mudança operacional.
 
 A continuidade da plataforma depende de você. A confiança que os devs
-depositam no DevProfile é construída em camadas, e a platform key é
+depositam no Beheld é construída em camadas, e a platform key é
 uma dessas camadas. Trata com o cuidado que ela merece.

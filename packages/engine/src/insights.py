@@ -5,13 +5,13 @@ import os
 from datetime import datetime, timezone
 
 from models import Scores
-from storage.sqlite import DevProfileDB
+from storage.sqlite import BeheldDB
 
 
 class InsightGenerator:
     """Generates developer insights with a 24-hour SQLite cache."""
 
-    def __init__(self, db: DevProfileDB) -> None:
+    def __init__(self, db: BeheldDB) -> None:
         self.db = db
 
     def generate(self) -> dict:

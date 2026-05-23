@@ -7,14 +7,14 @@ import { ensureEngine } from "./engine-extractor";
 import { mcpHealth } from "./client/mcp-client";
 import { engineHealth } from "./client/engine-client";
 
-const devprofileDir = () =>
-  process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+const beheldDir = () =>
+  process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
 
-const pidFile = () => join(devprofileDir(), "daemon.pid");
-const logFile = () => join(devprofileDir(), "daemon.log");
-const binaryPath = () => join(homedir(), ".local", "bin", "devprofile");
+const pidFile = () => join(beheldDir(), "daemon.pid");
+const logFile = () => join(beheldDir(), "daemon.log");
+const binaryPath = () => join(homedir(), ".local", "bin", "beheld");
 
 interface DaemonPids {
   mcp?: number;
@@ -32,17 +32,17 @@ function readPids(): DaemonPids {
 }
 
 function writePids(pids: DaemonPids): void {
-  mkdirSync(devprofileDir(), { recursive: true, mode: 0o700 });
+  mkdirSync(beheldDir(), { recursive: true, mode: 0o700 });
   writeFileSync(pidFile(), JSON.stringify(pids));
 }
 
 /**
- * Ensures ~/.devprofile and its subdirectories have secure permissions (0700).
+ * Ensures ~/.beheld and its subdirectories have secure permissions (0700).
  * Corrects existing installations that may have been created with looser modes.
- * Accepts an optional baseDir for testability; defaults to the live devprofile dir.
+ * Accepts an optional baseDir for testability; defaults to the live beheld dir.
  */
 export function ensureSecurePermissions(baseDir?: string): void {
-  const base = baseDir ?? devprofileDir();
+  const base = baseDir ?? beheldDir();
   const dirs = [base, join(base, "sessions"), join(base, "bin")];
   for (const dir of dirs) {
     if (existsSync(dir)) {
@@ -118,7 +118,7 @@ export async function start(): Promise<StartResult> {
 
   const engineDest = await ensureEngine();
   const log = logFile();
-  mkdirSync(devprofileDir(), { recursive: true, mode: 0o700 });
+  mkdirSync(beheldDir(), { recursive: true, mode: 0o700 });
 
   const pids = readPids();
 
@@ -211,7 +211,7 @@ export async function isRunning(): Promise<boolean> {
   return mcp && eng;
 }
 
-// KeepAlive is false because `devprofile start` exits once both daemons are up.
+// KeepAlive is false because `beheld start` exits once both daemons are up.
 // launchd must not loop-restart a one-shot command.
 export function generateLaunchAgentPlist(bin: string, devDir: string): string {
   const log = join(devDir, "daemon.log");
@@ -220,7 +220,7 @@ export function generateLaunchAgentPlist(bin: string, devDir: string): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.devprofile.daemon</string>
+  <string>com.beheld.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>${bin}</string>
@@ -238,11 +238,11 @@ export function generateLaunchAgentPlist(bin: string, devDir: string): string {
 </plist>`;
 }
 
-// Type=oneshot + RemainAfterExit because `devprofile start` exits after launching
+// Type=oneshot + RemainAfterExit because `beheld start` exits after launching
 // both daemons. Without RemainAfterExit the unit would show as inactive immediately.
 export function generateSystemdService(bin: string, _devDir: string): string {
   return `[Unit]
-Description=DevProfile daemons
+Description=Beheld daemons
 After=default.target
 
 [Service]
@@ -260,17 +260,17 @@ export async function installAutostart(): Promise<void> {
 
   if (platform() === "darwin") {
     const dir = join(homedir(), "Library", "LaunchAgents");
-    const plist = join(dir, "com.devprofile.daemon.plist");
+    const plist = join(dir, "com.beheld.daemon.plist");
     await mkdir(dir, { recursive: true });
-    await writeFile(plist, generateLaunchAgentPlist(bin, devprofileDir()));
+    await writeFile(plist, generateLaunchAgentPlist(bin, beheldDir()));
     // launchctl load is best-effort; ignore errors in non-interactive envs
     spawn("launchctl", ["load", "-w", plist], { stdio: "ignore" });
   } else if (platform() === "linux") {
     const dir = join(homedir(), ".config", "systemd", "user");
-    const unit = join(dir, "devprofile.service");
+    const unit = join(dir, "beheld.service");
     await mkdir(dir, { recursive: true });
-    await writeFile(unit, generateSystemdService(bin, devprofileDir()));
-    spawn("systemctl", ["--user", "enable", "--now", "devprofile.service"], {
+    await writeFile(unit, generateSystemdService(bin, beheldDir()));
+    spawn("systemctl", ["--user", "enable", "--now", "beheld.service"], {
       stdio: "ignore",
     });
   }

@@ -177,7 +177,7 @@ describe("handlePreToolUse", () => {
   test("command_sanitized e metadata são consistentes — ambos substituem paths por hash", () => {
     const event = handlePreToolUse({
       tool_name: "Bash",
-      tool_input: { command: "/Users/eduardo/.local/bin/devprofile start" },
+      tool_input: { command: "/Users/eduardo/.local/bin/beheld start" },
       session_id: "test-123",
       timestamp: "2026-05-11T00:00:00Z",
     });
@@ -208,10 +208,10 @@ describe("handlePostToolUse", () => {
 
 describe("triggerEngineProcessing", () => {
   const originalFetch = globalThis.fetch;
-  const originalEnv = process.env.DEVPROFILE_ENGINE_URL;
+  const originalEnv = process.env.BEHELD_ENGINE_URL;
 
   beforeEach(async () => {
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19998"; // dead port
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:19998"; // dead port
     const { _resetCoalesceState } = await import("../src/engine-trigger");
     _resetCoalesceState();
   });
@@ -219,9 +219,9 @@ describe("triggerEngineProcessing", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     if (originalEnv === undefined) {
-      delete process.env.DEVPROFILE_ENGINE_URL;
+      delete process.env.BEHELD_ENGINE_URL;
     } else {
-      process.env.DEVPROFILE_ENGINE_URL = originalEnv;
+      process.env.BEHELD_ENGINE_URL = originalEnv;
     }
   });
 

@@ -77,7 +77,7 @@ jobs:
         run: bun install
 
       - name: Build CLI binary
-        run: bun build packages/cli/src/index.ts --compile --outfile dist/devprofile
+        run: bun build packages/cli/src/index.ts --compile --outfile dist/beheld
 
       - name: Smoke test
-        run: dist/devprofile --version
+        run: dist/beheld --version

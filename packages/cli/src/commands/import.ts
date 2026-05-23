@@ -9,8 +9,9 @@ import {
   getL1Repositories as defaultGetL1Repositories,
   importRepository as defaultImportRepository,
 } from "../client/engine-client";
+import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET } from "../ui/styles";
 import type {
-  DevProfileConfig,
+  BeheldConfig,
   L1ImportResponse,
   L1ImportStatus,
   L1Repository,
@@ -61,23 +62,23 @@ export interface ImportFlags {
 // ── default IO + config + client (real terminal / fs / network) ──────────────
 
 function configPath(): string {
-  const base = process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+  const base = process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
   return join(base, "config.json");
 }
 
-function readDevProfileConfig(): DevProfileConfig | null {
+function readBeheldConfig(): BeheldConfig | null {
   const p = configPath();
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as DevProfileConfig;
+    return JSON.parse(readFileSync(p, "utf8")) as BeheldConfig;
   } catch {
     return null;
   }
 }
 
-function writeDevProfileConfig(cfg: DevProfileConfig): void {
+function writeBeheldConfig(cfg: BeheldConfig): void {
   const p = configPath();
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(cfg, null, 2));
@@ -85,17 +86,17 @@ function writeDevProfileConfig(cfg: DevProfileConfig): void {
 
 export const defaultConfigStore: ImportConfigStore = {
   getAuthorEmail(): string | null {
-    return readDevProfileConfig()?.author_email ?? null;
+    return readBeheldConfig()?.author_email ?? null;
   },
   setAuthorEmail(email: string): void {
     const existing =
-      readDevProfileConfig() ?? {
+      readBeheldConfig() ?? {
         version: "0.1.0",
         initialized_at: new Date().toISOString(),
-        dimensions: { code: true, prompts: true, workflow: true } as DevProfileConfig["dimensions"],
+        dimensions: { code: true, prompts: true, workflow: true } as BeheldConfig["dimensions"],
         environments: { claudeCode: false, continueDev: false },
       };
-    writeDevProfileConfig({ ...existing, author_email: email });
+    writeBeheldConfig({ ...existing, author_email: email });
   },
 };
 
@@ -177,20 +178,20 @@ function dateOnly(iso: string): string {
 }
 
 export function formatRepoTable(repos: L1Repository[]): string {
-  if (repos.length === 0) return "Nenhum repositório importado.";
-  const header = "HASH      DATA DE IMPORT    COMMITS";
+  if (repos.length === 0) return `  ${DIM}Nenhum repositório importado.${RESET}`;
+  const headerLine = `  ${DIM}HASH      DATA DE IMPORT    COMMITS${RESET}`;
   const rows = repos.map((r) => {
     const h = shortHash(r.root_commit_hash).padEnd(10);
     const d = dateOnly(r.imported_at).padEnd(18);
-    return `${h}${d}${r.commit_count}`;
+    return `  ${h}${d}${r.commit_count}`;
   });
-  return [header, ...rows].join("\n");
+  return [headerLine, ...rows].join("\n");
 }
 
 async function ensureAuthorEmail(io: ImportIO, cfg: ImportConfigStore): Promise<string> {
   const existing = cfg.getAuthorEmail();
   if (existing) return existing;
-  const email = (await io.prompt("Qual o seu email de commit no git? (ex: eduardo@exemplo.com) ")).trim();
+  const email = (await io.prompt(`  Qual seu email de commit no git? ${meta("(ex: eduardo@exemplo.com)")}: `)).trim();
   if (!email) throw new Error("Email do git é obrigatório para importar.");
   cfg.setAuthorEmail(email);
   return email;
@@ -233,9 +234,9 @@ async function importOne(
 
   // needs_pat → ask for the token and re-submit, then poll again.
   if (terminal.result?.status === "needs_pat") {
-    io.log("Autenticação necessária para este repositório.");
-    io.log("Gere um token em github.com/settings/tokens (escopo: repo — somente leitura).");
-    let pat: string | null = (await io.promptSecret("PAT: ")).trim() || null;
+    io.log(warn("Autenticação necessária para este repositório."));
+    io.log(`     ${DIM}Gere um token em github.com/settings/tokens (escopo: repo — somente leitura).${RESET}`);
+    let pat: string | null = (await io.promptSecret("     PAT: ")).trim() || null;
     const reaccepted = await client.importRepository(repoUrl, authorEmail, pat);
     // Discard PAT from local memory immediately after handing it to the engine.
     pat = null;
@@ -250,21 +251,21 @@ async function importOne(
 
   switch (r.status) {
     case "imported":
-      io.log(`✓ ${r.commit_count ?? 0} commits importados.`);
-      io.log("Adicionado ao L1.");
+      io.log(ok(`${bold(String(r.commit_count ?? 0))} commits importados — adicionado ao L1`));
       return { kind: "imported", commits: r.commit_count ?? 0 };
     case "already_imported":
-      io.log(`Repositório já presente no L1 (hash ${shortHash(r.root_commit_hash ?? "")}). Pulando.`);
+      io.log(warn(`Já presente no L1 ${meta(`(hash ${shortHash(r.root_commit_hash ?? "")})`)} — pulado`));
       return { kind: "skipped", reason: "already_imported" };
     case "author_not_found":
-      io.log("Nenhum commit seu encontrado neste repositório. Pulando.");
+      io.log(warn("Nenhum commit seu encontrado neste repositório — pulado"));
       return { kind: "skipped", reason: "author_not_found" };
     case "clone_error":
-      io.log(`Erro ao acessar o repositório: ${r.detail ?? "desconhecido"}. Verifique a URL e tente novamente.`);
+      io.log(fail(`Erro ao acessar o repositório: ${r.detail ?? "desconhecido"}`));
+      io.log(`     ${DIM}Verifique a URL e tente novamente.${RESET}`);
       return { kind: "skipped", reason: "clone_error" };
     case "needs_pat":
       // Reached only if the second attempt still asks for a PAT.
-      io.log("Autenticação ainda necessária. Pulando.");
+      io.log(fail("Autenticação ainda necessária — pulado"));
       return { kind: "skipped", reason: "needs_pat" };
     default:
       return { kind: "skipped", reason: `unknown:${String(r.status)}` };
@@ -281,6 +282,7 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
 
   // --list — render imported repos as a table.
   if (flags.list) {
+    io.log(brand("repositórios que já mapeei"));
     const repos = await client.getL1Repositories();
     io.log(formatRepoTable(repos ?? []));
     return;
@@ -288,18 +290,21 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
 
   // --remove <hash> — confirm + delete one repo.
   if (flags.remove) {
+    io.log(brand("apagando um repositório"));
     const hash = flags.remove;
     const confirmed = await io.confirm(
-      `Remover repositório ${shortHash(hash)} do L1? Esta ação não pode ser desfeita. [s/N] `,
+      `  ${bold("Remover repositório")} ${shortHash(hash)} do L1? ${meta("(esta ação não pode ser desfeita)")} [s/N] `,
     );
     if (!confirmed) {
-      io.log("Operação cancelada.");
+      io.log(warn("Operação cancelada"));
       return;
     }
-    const ok = await client.deleteL1Repository(hash);
-    io.log(ok ? "Repositório removido do L1." : "Repositório não encontrado.");
+    const deleted = await client.deleteL1Repository(hash);
+    io.log(deleted ? ok(`Repositório ${shortHash(hash)} removido do L1`) : fail("Repositório não encontrado"));
     return;
   }
+
+  io.log(brand("trazendo seu histórico"));
 
   // For the import flows we need an author email.
   const authorEmail = await ensureAuthorEmail(io, config);
@@ -309,29 +314,34 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
     const provider = flags.github ? "github" : "gitlab";
     const urls = await listProviderRepoUrls(provider, io);
     if (urls.length === 0) {
-      io.log("Nenhum repositório selecionado.");
+      io.log(warn("Nenhum repositório selecionado"));
       return;
     }
     let importedCount = 0;
     let totalCommits = 0;
     for (const url of urls) {
-      io.log(`\n→ ${url}`);
+      io.log("");
+      io.log(arrow(url));
       const r = await importOne(url, authorEmail, io, client, pollIntervalMs);
       if (r.kind === "imported") {
         importedCount += 1;
         totalCommits += r.commits;
       }
     }
-    io.log(`\nBootstrap concluído. ${importedCount} repositórios · ${totalCommits} commits analisados.`);
+    io.log("");
+    io.log(ok(`Bootstrap concluído ${meta(`· ${importedCount} repositório(s) · ${totalCommits} commits analisados`)}`));
     return;
   }
 
-  // Single-URL invocation: `devprofile import <url>`
+  // Single-URL invocation: `beheld import <url>`
   if (flags.url) {
+    io.log("");
+    io.log(arrow(flags.url));
     const r = await importOne(flags.url, authorEmail, io, client, pollIntervalMs);
     const commits = r.kind === "imported" ? r.commits : 0;
     const count = r.kind === "imported" ? 1 : 0;
-    io.log(`\nBootstrap concluído. ${count} repositórios · ${commits} commits analisados.`);
+    io.log("");
+    io.log(ok(`Bootstrap concluído ${meta(`· ${count} repositório(s) · ${commits} commits analisados`)}`));
     return;
   }
 
@@ -339,7 +349,7 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
   let importedCount = 0;
   let totalCommits = 0;
   while (true) {
-    const url = (await io.prompt("Informe o repositório (ou Enter para finalizar): ")).trim();
+    const url = (await io.prompt(`  URL do repositório ${meta("(Enter para finalizar)")}: `)).trim();
     if (!url) break;
     const r = await importOne(url, authorEmail, io, client, pollIntervalMs);
     if (r.kind === "imported") {
@@ -347,7 +357,8 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
       totalCommits += r.commits;
     }
   }
-  io.log(`\nBootstrap concluído. ${importedCount} repositórios · ${totalCommits} commits analisados.`);
+  io.log("");
+  io.log(ok(`Bootstrap concluído ${meta(`· ${importedCount} repositório(s) · ${totalCommits} commits analisados`)}`));
 }
 
 // ── provider listing (minimal — delegates auth to gh/glab CLIs) ──────────────
@@ -364,9 +375,10 @@ async function listProviderRepoUrls(
   const stdout = await new Response(proc.stdout).text();
   const exit = await proc.exited;
   if (exit !== 0) {
-    io.log(
-      `Não foi possível listar repositórios via ${provider === "github" ? "gh" : "glab"} CLI. Faça login (\`${provider === "github" ? "gh auth login" : "glab auth login"}\`) e tente novamente.`,
-    );
+    const cliName = provider === "github" ? "gh" : "glab";
+    const authCmd = provider === "github" ? "gh auth login" : "glab auth login";
+    io.log(fail(`Não foi possível listar repositórios via ${bold(cliName)} CLI`));
+    io.log(`     ${DIM}Faça login: ${authCmd}${RESET}`);
     return [];
   }
 
@@ -388,18 +400,18 @@ async function listProviderRepoUrls(
       }));
     }
   } catch {
-    io.log("Resposta inválida da CLI do provedor.");
+    io.log(fail("Resposta inválida da CLI do provedor"));
     return [];
   }
 
   if (entries.length === 0) {
-    io.log("Nenhum repositório encontrado.");
+    io.log(warn("Nenhum repositório encontrado"));
     return [];
   }
 
-  io.log("Repositórios disponíveis:");
-  entries.forEach((e, i) => io.log(`  [${i + 1}] ${e.label}`));
-  const sel = (await io.prompt("Quais importar? (ex: 1,3,5 ou 'all') ")).trim();
+  io.log(`\n  ${bold("Repositórios disponíveis:")}`);
+  entries.forEach((e, i) => io.log(`    ${DIM}[${i + 1}]${RESET} ${e.label}`));
+  const sel = (await io.prompt(`\n  Quais importar? ${meta("(ex: 1,3,5 ou 'all')")}: `)).trim();
   if (!sel) return [];
 
   if (sel.toLowerCase() === "all") return entries.map((e) => e.url);

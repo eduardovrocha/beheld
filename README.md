@@ -1,4 +1,4 @@
-# DevProfile
+# Beheld
 
 Privacy-first developer profiling built on real Claude Code and Continue.dev usage. Captures technical metadata silently — never conversation content, file contents, or secrets — and generates four developer scores.
 
@@ -16,7 +16,7 @@ No Node.js, Python, or npm required on the host machine. Ships as a single stand
 | Timestamps and session durations | Absolute paths (SHA-256 hash only) |
 | Prompt character counts | Business data or PII |
 
-All data stays in `~/.devprofile/` — it never leaves your machine.
+All data stays in `~/.beheld/` — it never leaves your machine.
 
 ---
 
@@ -25,33 +25,33 @@ All data stays in `~/.devprofile/` — it never leaves your machine.
 ### Via install script (recommended)
 
 ```sh
-curl -fsSL https://devprofile.app/install | sh
+curl -fsSL https://beheld.dev/install | sh
 ```
 
-The script downloads the binary for your platform, verifies the SHA-256 checksum, installs it to `~/.local/bin/devprofile`, and runs `devprofile init` automatically.
+The script downloads the binary for your platform, verifies the SHA-256 checksum, installs it to `~/.local/bin/beheld`, and runs `beheld init` automatically.
 
 ### From source (development)
 
 ```sh
-git clone https://github.com/ioit-solutions/devprofile
-cd devprofile
+git clone https://github.com/ioit-solutions/beheld
+cd beheld
 bun install
-sh scripts/build.sh          # builds dist/devprofile
-dist/devprofile init
+sh scripts/build.sh          # builds dist/beheld
+dist/beheld init
 ```
 
 ---
 
 ## Quick start
 
-After installation, `devprofile init` runs the onboarding wizard:
+After installation, `beheld init` runs the onboarding wizard:
 
 1. **Screen 1** — What is collected (read-only)
 2. **Screen 2** — Choose which score dimensions to enable
 3. **Screen 3** — Detected environments (Claude Code / Continue.dev)
 4. **Screen 4** — Installs hooks, starts daemon, sets up autostart
 
-Once initialised, type `/devprofile` in any Claude Code chat to see your profile.
+Once initialised, type `/beheld` in any Claude Code chat to see your profile.
 
 ---
 
@@ -64,7 +64,7 @@ Once initialised, type `/devprofile` in any Claude Code chat to see your profile
 | **Tech Breadth** | Ecosystems, platforms, and languages touched |
 | **Growth Rate** | 30-day delta across all dimensions |
 
-Scores range from 0–100. The engine computes them incrementally from JSONL session files and persists them in `~/.devprofile/profile.db`.
+Scores range from 0–100. The engine computes them incrementally from JSONL session files and persists them in `~/.beheld/profile.db`.
 
 ---
 
@@ -72,50 +72,50 @@ Scores range from 0–100. The engine computes them incrementally from JSONL ses
 
 ### Slash command no Claude Code
 
-After `devprofile init`, the `/devprofile` slash command is available directly in Claude Code chat:
+After `beheld init`, the `/beheld` slash command is available directly in Claude Code chat:
 
 ```
-/devprofile              → resumo: score geral + top insights
-/devprofile scores       → os 4 scores com barras de progresso
-/devprofile insights     → próxima ação recomendada (1 insight de "opportunity")
-/devprofile full         → perfil completo com plataformas, ecosystems e workflow
+/beheld              → resumo: score geral + top insights
+/beheld scores       → os 4 scores com barras de progresso
+/beheld insights     → próxima ação recomendada (1 insight de "opportunity")
+/beheld full         → perfil completo com plataformas, ecosystems e workflow
 ```
 
 ### CLI no terminal
 
 ```bash
 # onboarding e daemons
-devprofile init [--force]                      # wizard de 4 telas (--force re-roda)
-devprofile start                               # sobe MCP server (7337) + engine (7338)
-devprofile stop                                # para ambos os daemons
-devprofile restart                             # stop + start
-devprofile status                              # estado dos daemons + sessão atual
+beheld init [--force]                      # wizard de 4 telas (--force re-roda)
+beheld start                               # sobe MCP server (7337) + engine (7338)
+beheld stop                                # para ambos os daemons
+beheld restart                             # stop + start
+beheld status                              # estado dos daemons + sessão atual
 
 # perfil
-devprofile view                                # perfil completo no terminal
-devprofile view --json                         # output JSON para scripts
-devprofile view --scores-only                  # apenas os 4 scores numéricos
-devprofile view --refresh                      # processa eventos órfãos antes de exibir
-devprofile view --coach                        # contexto de coaching (padrões + sugestões)
-devprofile view --coach --session-hint <phase> # phase ∈ feature_work | debug | refactor | exploration
+beheld view                                # perfil completo no terminal
+beheld view --json                         # output JSON para scripts
+beheld view --scores-only                  # apenas os 4 scores numéricos
+beheld view --refresh                      # processa eventos órfãos antes de exibir
+beheld view --coach                        # contexto de coaching (padrões + sugestões)
+beheld view --coach --session-hint <phase> # phase ∈ feature_work | debug | refactor | exploration
 
 # chaves Ed25519 (Fase 5 — assinatura de snapshots)
-devprofile keys show                           # public key + fingerprint
-devprofile keys import <arquivo>               # importa JWK ou PEM (PKCS#8)
-devprofile keys rotate                         # gera novo par, arquiva o anterior
+beheld keys show                           # public key + fingerprint
+beheld keys import <arquivo>               # importa JWK ou PEM (PKCS#8)
+beheld keys rotate                         # gera novo par, arquiva o anterior
 
-# snapshots assinados (.dpbundle — Fase 5)
-devprofile snapshot                            # gera bundle local
-devprofile snapshot --output <path>            # também grava em <path>
-devprofile snapshot --share                    # gera + upload + QR + URL curta
-devprofile snapshot list                       # histórico (newest-first)
-devprofile verify <arquivo.dpbundle>           # schema + hash + signature offline
-devprofile verify <arquivo.dpbundle> --chain   # também walks previous_hash
+# snapshots assinados (.beheld — Fase 5)
+beheld snapshot                            # gera bundle local
+beheld snapshot --output <path>            # também grava em <path>
+beheld snapshot --share                    # gera + upload + QR + URL curta
+beheld snapshot list                       # histórico (newest-first)
+beheld verify <arquivo.beheld>           # schema + hash + signature offline
+beheld verify <arquivo.beheld> --chain   # também walks previous_hash
 
 # manutenção
-devprofile update                              # verifica e instala nova versão
-devprofile delete --local                      # apaga ~/.devprofile/
-devprofile delete --all                        # local + remove hooks
+beheld update                              # verifica e instala nova versão
+beheld delete --local                      # apaga ~/.beheld/
+beheld delete --all                        # local + remove hooks
 ```
 
 ### Subcomando interno
@@ -123,14 +123,14 @@ devprofile delete --all                        # local + remove hooks
 > Usado pelo Claude Code e pelo autostart — não é para uso direto.
 
 ```bash
-devprofile server          # HTTP server na porta 7337 (modo standalone)
-devprofile server --stdio  # protocolo MCP via stdin/stdout (spawned pelo Claude Code)
+beheld server          # HTTP server na porta 7337 (modo standalone)
+beheld server --stdio  # protocolo MCP via stdin/stdout (spawned pelo Claude Code)
 ```
 
-### devprofile view
+### beheld view
 
 ```
-DevProfile — seu perfil de desenvolvedor
+Beheld — seu perfil de desenvolvedor
 
 Scores
   Prompt quality  84  ████████░░
@@ -147,12 +147,12 @@ Perfil técnico
   Total sessões: 847
 ```
 
-### devprofile view --coach
+### beheld view --coach
 
 Coaching context derived from real usage. Patterns are detected deterministically (no LLM call), and a `✓` marks each pattern relevant to the current session's ecosystem.
 
 ```
-DevProfile · coach (v1 · live)
+Beheld · coach (v1 · live)
 
 Padrões (2):
 
@@ -167,32 +167,32 @@ Score: 35/100 · 30 sessões
 ```
 
 ```sh
-devprofile view --coach                          # render ANSI (above)
-devprofile view --coach --session-hint debug     # tag the phase
-devprofile view --coach --json                   # raw CoachPayload (for jq / debug)
+beheld view --coach                          # render ANSI (above)
+beheld view --coach --session-hint debug     # tag the phase
+beheld view --coach --json                   # raw CoachPayload (for jq / debug)
 ```
 
 ### MCP tools exposed to the host LLM
 
-The `mcp-server` registers three tools your IDE's LLM can call. The agent layer is **the LLM you're already using** — DevProfile only provides context, never calls an external API itself.
+The `mcp-server` registers three tools your IDE's LLM can call. The agent layer is **the LLM you're already using** — Beheld only provides context, never calls an external API itself.
 
 | Tool | Purpose |
 |------|---------|
-| `devprofile` | On-demand score + insights (the data behind `/devprofile`) |
-| `devprofile_coach` | Coaching context: patterns + guidance for the host LLM to act on |
-| `devprofile_status` | Compact score for sidebars (Continue.dev) |
+| `beheld` | On-demand score + insights (the data behind `/beheld`) |
+| `beheld_coach` | Coaching context: patterns + guidance for the host LLM to act on |
+| `beheld_status` | Compact score for sidebars (Continue.dev) |
 
-#### How `devprofile_coach` works
+#### How `beheld_coach` works
 
 1. Engine computes `WorkflowMetrics` every scoring cycle — 10 deterministic scalars over the last 30 days (ratios, medians, concentration index).
 2. `detect_patterns()` derives behavioural patterns from those metrics (e.g. `test_after_dominant`, `debug_driven_bash_heavy`). No LLM; pattern matching only.
 3. The tool returns a text block followed by a delimited JSON contract:
 
    ```
-   DevProfile · coaching context (v1)
+   Beheld · coaching context (v1)
    Padrões detectados (N): ...
 
-   ---DEVPROFILE-JSON---
+   ---BEHELD-JSON---
    { "version": 1, "patterns": [...], "coaching_guidance": {...}, ... }
    ---END-JSON---
    ```
@@ -209,26 +209,26 @@ The tool description tells the host **when not to call it** (during debug sessio
 |----------|----------|
 | MCP server | `localhost:7337` |
 | Scoring engine | `localhost:7338` |
-| Session events | `~/.devprofile/sessions/YYYY-MM-DD_<id>.jsonl` |
-| SQLite database | `~/.devprofile/profile.db` |
-| Daemon PID | `~/.devprofile/daemon.pid` |
-| Daemon log | `~/.devprofile/daemon.log` |
-| Config | `~/.devprofile/config.json` |
+| Session events | `~/.beheld/sessions/YYYY-MM-DD_<id>.jsonl` |
+| SQLite database | `~/.beheld/profile.db` |
+| Daemon PID | `~/.beheld/daemon.pid` |
+| Daemon log | `~/.beheld/daemon.log` |
+| Config | `~/.beheld/config.json` |
 
 ---
 
 ## Uninstalling
 
 ```sh
-devprofile delete --all
+beheld delete --all
 ```
 
-Removes `~/.devprofile/`, removes hooks from `~/.claude/settings.json`, and removes the MCP entry from `~/.continue/config.json`. After confirmation (type `apagar tudo`), the uninstall is complete.
+Removes `~/.beheld/`, removes hooks from `~/.claude/settings.json`, and removes the MCP entry from `~/.continue/config.json`. After confirmation (type `apagar tudo`), the uninstall is complete.
 
 To also remove the binary:
 
 ```sh
-rm ~/.local/bin/devprofile
+rm ~/.local/bin/beheld
 ```
 
 ---
@@ -238,10 +238,10 @@ rm ~/.local/bin/devprofile
 The daemon sends one OS notification per day (macOS `osascript` / Linux `notify-send`) after a session ends:
 
 ```
-DevProfile: score 78 (+4 hoje)
+Beheld: score 78 (+4 hoje)
 ```
 
-Notifications are controlled via `~/.devprofile/config.json`:
+Notifications are controlled via `~/.beheld/config.json`:
 
 ```json
 {
@@ -263,19 +263,19 @@ Continue.dev MCP events
         ↓
 [Sanitizer — strips secrets, env values, raw paths before any write]
         ↓
-~/.devprofile/sessions/YYYY-MM-DD_<session-id>.jsonl  (50 MB max, daily rotation)
+~/.beheld/sessions/YYYY-MM-DD_<session-id>.jsonl  (50 MB max, daily rotation)
         ↓
 Scoring Engine (Python FastAPI · localhost:7338)
-  → incremental JSONL reader (cursor at ~/.devprofile/.cursor)
+  → incremental JSONL reader (cursor at ~/.beheld/.cursor)
   → extractors: commands, file extensions, tools, timing
   → classifiers: project type, platform, workflow pattern
   → scorers: prompt_quality, test_maturity, tech_breadth, growth_rate
   → coach pipeline: compute_workflow_metrics + detect_patterns (deterministic, no LLM)
-  → persists to ~/.devprofile/profile.db (SQLite, versioned schema)
+  → persists to ~/.beheld/profile.db (SQLite, versioned schema)
         ↓
-CLI (devprofile view) and Continue.dev sidebar (via MCP server · localhost:7337)
+CLI (beheld view) and Continue.dev sidebar (via MCP server · localhost:7337)
         ↓
-Host LLM (Claude Code, Cursor, …) calls devprofile_coach → applies coaching guidance
+Host LLM (Claude Code, Cursor, …) calls beheld_coach → applies coaching guidance
 ```
 
 The MCP server captures events from Claude Code hooks and Continue.dev, sanitises them, and writes JSONL. The scoring engine processes JSONL incrementally every 60 seconds. The CLI reads from both over HTTP.
@@ -298,10 +298,10 @@ pip install -e "packages/engine[dev]"
 pytest packages/engine/tests
 
 # Build local binary
-sh scripts/build.sh          # → dist/devprofile
+sh scripts/build.sh          # → dist/beheld
 
 # Run MCP server in dev mode
-bun run dev --filter @devprofile/mcp-server
+bun run dev --filter @beheld/mcp-server
 
 # Run scoring engine in dev mode
 uvicorn main:app --host 127.0.0.1 --port 7338 --app-dir packages/engine/src --reload
@@ -310,14 +310,14 @@ uvicorn main:app --host 127.0.0.1 --port 7338 --app-dir packages/engine/src --re
 ### Monorepo layout
 
 ```
-devprofile/
+beheld/
 ├── packages/
 │   ├── mcp-server/    # TypeScript (Bun) · localhost:7337
 │   │   └── src/
 │   │       ├── server.ts          # HTTP server + MCP protocol
 │   │       ├── hooks/             # Claude Code + Continue.dev event handlers
 │   │       ├── sanitizer.ts       # Redacts secrets before any write
-│   │       ├── tools/             # devprofile + devprofile_status MCP tools
+│   │       ├── tools/             # beheld + beheld_status MCP tools
 │   │       └── notifications.ts   # OS notification service
 │   ├── engine/        # Python (FastAPI) · localhost:7338
 │   │   └── src/
@@ -349,11 +349,11 @@ devprofile/
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DEVPROFILE_DATA_DIR` | `$HOME` | Override `~/.devprofile/` parent directory |
-| `DEVPROFILE_PORT` | `7337` | MCP server port |
-| `DEVPROFILE_ENGINE_URL` | `http://127.0.0.1:7338` | Engine base URL (for testing) |
-| `DEVPROFILE_MCP_URL` | `http://127.0.0.1:7337` | MCP base URL (for testing) |
-| `DEVPROFILE_PORTAL_URL` | `https://devprofile.app` | Portal base URL for `snapshot --share` |
+| `BEHELD_DATA_DIR` | `$HOME` | Override `~/.beheld/` parent directory |
+| `BEHELD_PORT` | `7337` | MCP server port |
+| `BEHELD_ENGINE_URL` | `http://127.0.0.1:7338` | Engine base URL (for testing) |
+| `BEHELD_MCP_URL` | `http://127.0.0.1:7337` | MCP base URL (for testing) |
+| `BEHELD_PORTAL_URL` | `https://beheld.dev` | Portal base URL for `snapshot --share` |
 
 ---
 
@@ -361,9 +361,9 @@ devprofile/
 
 | Platform | Binary | Approx. size |
 |----------|--------|-------------|
-| macOS Apple Silicon | `devprofile-darwin-arm64` | ~45 MB |
-| macOS Intel | `devprofile-darwin-x64` | ~45 MB |
-| Linux x64 | `devprofile-linux-x64` | ~48 MB |
+| macOS Apple Silicon | `beheld-darwin-arm64` | ~45 MB |
+| macOS Intel | `beheld-darwin-x64` | ~45 MB |
+| Linux x64 | `beheld-linux-x64` | ~48 MB |
 
 Each release includes a `.sha256` checksum and GPG signature. The install script verifies the checksum before executing.
 

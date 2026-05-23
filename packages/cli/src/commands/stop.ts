@@ -1,17 +1,16 @@
 import * as daemonManager from "../daemon-manager";
-
-const GREEN = "\x1b[32m";
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
+import { ok, meta, brand } from "../ui/styles";
 
 export async function stopCommand(): Promise<void> {
   const running = await daemonManager.isRunning();
   if (!running) {
-    console.log(`${DIM}DevProfile não está em execução.${RESET}`);
+    console.log(brand("nada pra parar"));
+    console.log(`  ${meta("Beheld não está em execução.")}`);
     return;
   }
 
-  process.stdout.write("  Parando DevProfile…");
+  console.log(brand("encerrando o expediente"));
+  process.stdout.write("  Parando Beheld…");
   await daemonManager.stop();
-  process.stdout.write(`\r  ${GREEN}✓${RESET}  DevProfile parado\n`);
+  process.stdout.write(`\r${ok("Beheld parado")}\n`);
 }

@@ -6,12 +6,12 @@ import * as os from "os";
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "devprofile-notif-"));
-  process.env.DEVPROFILE_DATA_DIR = tmpDir;
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "beheld-notif-"));
+  process.env.BEHELD_DATA_DIR = tmpDir;
 });
 
 afterEach(() => {
-  delete process.env.DEVPROFILE_DATA_DIR;
+  delete process.env.BEHELD_DATA_DIR;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -49,8 +49,8 @@ describe("markNotified", () => {
     const svc = await makeService();
     await svc.markNotified("daily_score");
 
-    const devprofileDir = path.join(tmpDir, ".devprofile");
-    const file = path.join(devprofileDir, "notifications.json");
+    const beheldDir = path.join(tmpDir, ".beheld");
+    const file = path.join(beheldDir, "notifications.json");
     expect(fs.existsSync(file)).toBe(true);
 
     const state = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, string>;
@@ -63,7 +63,7 @@ describe("markNotified", () => {
     await svc.markNotified("daily_score");
     await svc.markNotified("update_check");
 
-    const file = path.join(tmpDir, ".devprofile", "notifications.json");
+    const file = path.join(tmpDir, ".beheld", "notifications.json");
     const state = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, string>;
     const todayStr = new Date().toISOString().slice(0, 10);
     expect(state["daily_score"]).toBe(todayStr);
@@ -73,15 +73,15 @@ describe("markNotified", () => {
   test("overwrites stale date with today", async () => {
     const svc = await makeService();
     // Pre-seed with yesterday
-    const devprofileDir = path.join(tmpDir, ".devprofile");
-    fs.mkdirSync(devprofileDir, { recursive: true });
+    const beheldDir = path.join(tmpDir, ".beheld");
+    fs.mkdirSync(beheldDir, { recursive: true });
     fs.writeFileSync(
-      path.join(devprofileDir, "notifications.json"),
+      path.join(beheldDir, "notifications.json"),
       JSON.stringify({ daily_score: "2000-01-01" }),
     );
     await svc.markNotified("daily_score");
     const state = JSON.parse(
-      fs.readFileSync(path.join(devprofileDir, "notifications.json"), "utf8"),
+      fs.readFileSync(path.join(beheldDir, "notifications.json"), "utf8"),
     ) as Record<string, string>;
     const todayStr = new Date().toISOString().slice(0, 10);
     expect(state["daily_score"]).toBe(todayStr);
@@ -92,10 +92,10 @@ describe("markNotified", () => {
 
 describe("notifications config", () => {
   test("checkDailyScore skips when notifications.enabled = false", async () => {
-    const devprofileDir = path.join(tmpDir, ".devprofile");
-    fs.mkdirSync(devprofileDir, { recursive: true });
+    const beheldDir = path.join(tmpDir, ".beheld");
+    fs.mkdirSync(beheldDir, { recursive: true });
     fs.writeFileSync(
-      path.join(devprofileDir, "config.json"),
+      path.join(beheldDir, "config.json"),
       JSON.stringify({ notifications: { enabled: false, daily_score: true, updates: true } }),
     );
 
@@ -107,10 +107,10 @@ describe("notifications config", () => {
   });
 
   test("checkDailyScore skips when daily_score = false", async () => {
-    const devprofileDir = path.join(tmpDir, ".devprofile");
-    fs.mkdirSync(devprofileDir, { recursive: true });
+    const beheldDir = path.join(tmpDir, ".beheld");
+    fs.mkdirSync(beheldDir, { recursive: true });
     fs.writeFileSync(
-      path.join(devprofileDir, "config.json"),
+      path.join(beheldDir, "config.json"),
       JSON.stringify({ notifications: { enabled: true, daily_score: false, updates: true } }),
     );
 
@@ -130,7 +130,7 @@ describe("notifications config", () => {
   test("checkDailyScore marks daily_score even when engine is offline", async () => {
     // Engine at default 7338 is not running in tests, so fetch will fail.
     // After failure, daily_score should still be marked (finally block).
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19999"; // unreachable
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:19999"; // unreachable
     const svc = await makeService();
     await svc.checkDailyScore();
     // Because the engine is offline, the fetch throws and we hit the finally block
@@ -138,7 +138,7 @@ describe("notifications config", () => {
     // Actually looking at the code, if !r.ok we return without marking.
     // But if fetch throws (connection refused), we reach finally.
     // Let's just check it doesn't throw.
-    delete process.env.DEVPROFILE_ENGINE_URL;
+    delete process.env.BEHELD_ENGINE_URL;
   });
 
   test("checkUpdateAvailable marks update_check after checking", async () => {
@@ -165,7 +165,7 @@ describe("send", () => {
     const svc = await makeService();
     // Will spawn osascript/notify-send depending on platform — fire and forget
     // We just verify it doesn't throw synchronously
-    await expect(svc.send("DevProfile", "score 78 (+4 hoje)")).resolves.toBeUndefined();
+    await expect(svc.send("Beheld", "score 78 (+4 hoje)")).resolves.toBeUndefined();
   });
 
   test("sanitizes double-quotes in message to prevent osascript injection", async () => {

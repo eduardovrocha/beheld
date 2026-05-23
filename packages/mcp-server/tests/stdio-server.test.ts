@@ -22,8 +22,8 @@ let engineServer: ReturnType<typeof Bun.serve>;
 let savedEngineUrl: string | undefined;
 
 beforeAll(async () => {
-  savedEngineUrl = process.env.DEVPROFILE_ENGINE_URL;
-  process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  savedEngineUrl = process.env.BEHELD_ENGINE_URL;
+  process.env.BEHELD_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
 
   engineServer = Bun.serve({
     port: MOCK_PORT,
@@ -47,9 +47,9 @@ beforeAll(async () => {
 afterAll(() => {
   engineServer.stop(true);
   if (savedEngineUrl !== undefined) {
-    process.env.DEVPROFILE_ENGINE_URL = savedEngineUrl;
+    process.env.BEHELD_ENGINE_URL = savedEngineUrl;
   } else {
-    delete process.env.DEVPROFILE_ENGINE_URL;
+    delete process.env.BEHELD_ENGINE_URL;
   }
 });
 
@@ -57,14 +57,14 @@ afterAll(() => {
 // Use unique ?v= cache busters so these modules don't share instances with tools.test.ts
 
 describe("stdio-server tool list", () => {
-  test("devprofile tool is named correctly", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-reg1");
-    expect(devprofileTool.name).toBe("devprofile");
+  test("beheld tool is named correctly", async () => {
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-reg1");
+    expect(beheldTool.name).toBe("beheld");
   });
 
-  test("devprofile tool has correct inputSchema with view enum", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-reg1");
-    const viewProp = devprofileTool.inputSchema.properties["view"] as Record<string, unknown>;
+  test("beheld tool has correct inputSchema with view enum", async () => {
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-reg1");
+    const viewProp = beheldTool.inputSchema.properties["view"] as Record<string, unknown>;
     expect(viewProp).toBeDefined();
     expect(viewProp.type).toBe("string");
     const enums = viewProp["enum"] as string[];
@@ -74,19 +74,19 @@ describe("stdio-server tool list", () => {
     expect(enums).toContain("full");
   });
 
-  test("devprofile_status tool is named correctly", async () => {
+  test("beheld_status tool is named correctly", async () => {
     const { statusTool } = await import("../src/tools/status-tool?v=stdio-reg1");
-    expect(statusTool.name).toBe("devprofile_status");
+    expect(statusTool.name).toBe("beheld_status");
   });
 
-  test("devprofile_coach tool is named correctly", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg1");
-    expect(devprofileCoachTool.name).toBe("devprofile_coach");
+  test("beheld_coach tool is named correctly", async () => {
+    const { beheldCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg1");
+    expect(beheldCoachTool.name).toBe("beheld_coach");
   });
 
-  test("devprofile_coach has session_hint enum in inputSchema", async () => {
-    const { devprofileCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg2");
-    const hint = devprofileCoachTool.inputSchema.properties["session_hint"] as Record<string, unknown>;
+  test("beheld_coach has session_hint enum in inputSchema", async () => {
+    const { beheldCoachTool } = await import("../src/tools/coach-tool?v=stdio-reg2");
+    const hint = beheldCoachTool.inputSchema.properties["session_hint"] as Record<string, unknown>;
     expect(hint).toBeDefined();
     const enums = hint["enum"] as string[];
     expect(enums).toContain("feature_work");
@@ -100,8 +100,8 @@ describe("stdio-server tool list", () => {
 
 describe("stdio-server CallTool wrapping", () => {
   test("string result from handler is wrapped as content text", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-wrap1");
-    const result = await devprofileTool.handler({ view: "summary" });
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-wrap1");
+    const result = await beheldTool.handler({ view: "summary" });
     const text = typeof result === "string" ? result : JSON.stringify(result);
     const content = [{ type: "text", text }];
     expect(content[0].type).toBe("text");
@@ -118,18 +118,18 @@ describe("stdio-server CallTool wrapping", () => {
   });
 });
 
-// ── devprofile tool via summary view ─────────────────────────────────────────
+// ── beheld tool via summary view ─────────────────────────────────────────
 
 describe("CallTool summary returns formatted profile", () => {
   test("contains score geral header", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-sum1");
-    const text = (await devprofileTool.handler({ view: "summary" })) as string;
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-sum1");
+    const text = (await beheldTool.handler({ view: "summary" })) as string;
     expect(text).toContain("Score geral");
   });
 
   test("contains overall score", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-sum1");
-    const text = (await devprofileTool.handler({ view: "summary" })) as string;
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-sum1");
+    const text = (await beheldTool.handler({ view: "summary" })) as string;
     expect(text).toContain("78");
   });
 });
@@ -153,12 +153,12 @@ describe("CallTool returns collecting message when readiness.ready = false", () 
       },
     });
 
-    const saved = process.env.DEVPROFILE_ENGINE_URL;
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:17361";
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-notready");
-    const text = (await devprofileTool.handler({})) as string;
+    const saved = process.env.BEHELD_ENGINE_URL;
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:17361";
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-notready");
+    const text = (await beheldTool.handler({})) as string;
     notReadyServer.stop(true);
-    process.env.DEVPROFILE_ENGINE_URL = saved;
+    process.env.BEHELD_ENGINE_URL = saved;
 
     expect(text).toContain("coletando dados");
     expect(text).toContain("1/3");
@@ -169,15 +169,15 @@ describe("CallTool returns collecting message when readiness.ready = false", () 
 
 describe("CallTool returns offline message when engine unavailable", () => {
   test("returns engine offline message when scores are null", async () => {
-    const savedUrl = process.env.DEVPROFILE_ENGINE_URL;
-    const savedDb = process.env.DEVPROFILE_CACHE_DB;
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19993";
-    process.env.DEVPROFILE_CACHE_DB = "/tmp/devprofile-stdio-offline-test.db";
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-offline");
-    const text = (await devprofileTool.handler({})) as string;
-    process.env.DEVPROFILE_ENGINE_URL = savedUrl;
-    if (savedDb !== undefined) process.env.DEVPROFILE_CACHE_DB = savedDb;
-    else delete process.env.DEVPROFILE_CACHE_DB;
+    const savedUrl = process.env.BEHELD_ENGINE_URL;
+    const savedDb = process.env.BEHELD_CACHE_DB;
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:19993";
+    process.env.BEHELD_CACHE_DB = "/tmp/beheld-stdio-offline-test.db";
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-offline");
+    const text = (await beheldTool.handler({})) as string;
+    process.env.BEHELD_ENGINE_URL = savedUrl;
+    if (savedDb !== undefined) process.env.BEHELD_CACHE_DB = savedDb;
+    else delete process.env.BEHELD_CACHE_DB;
 
     expect(text).toContain("engine offline");
   });
@@ -187,14 +187,14 @@ describe("CallTool returns offline message when engine unavailable", () => {
 
 describe("scores view progress bars", () => {
   test("scores view contains progress bars (█ characters)", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-bars1");
-    const text = (await devprofileTool.handler({ view: "scores" })) as string;
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-bars1");
+    const text = (await beheldTool.handler({ view: "scores" })) as string;
     expect(text).toContain("█");
   });
 
   test("scores view contains at least 8 filled bar segments for prompt_quality = 84", async () => {
-    const { devprofileTool } = await import("../src/tools/devprofile-tool?v=stdio-bars1");
-    const text = (await devprofileTool.handler({ view: "scores" })) as string;
+    const { beheldTool } = await import("../src/tools/beheld-tool?v=stdio-bars1");
+    const text = (await beheldTool.handler({ view: "scores" })) as string;
     expect(text).toContain("████████");
   });
 });

@@ -20,7 +20,7 @@ export async function triggerEngineProcessing(sessionId: string): Promise<void> 
   const last = lastTriggeredAt.get(sessionId);
   if (last !== undefined && Date.now() - last < COALESCE_WINDOW_MS) return;
 
-  const engineUrl = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+  const engineUrl = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const t0 = Date.now();

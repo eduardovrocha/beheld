@@ -20,23 +20,23 @@ let workDir: string;
 let savedEnv: string | undefined;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), "devprofile-keys-"));
-  savedEnv = process.env.DEVPROFILE_DATA_DIR;
-  process.env.DEVPROFILE_DATA_DIR = workDir;
+  workDir = mkdtempSync(join(tmpdir(), "beheld-keys-"));
+  savedEnv = process.env.BEHELD_DATA_DIR;
+  process.env.BEHELD_DATA_DIR = workDir;
 });
 
 afterEach(() => {
-  if (savedEnv === undefined) delete process.env.DEVPROFILE_DATA_DIR;
-  else process.env.DEVPROFILE_DATA_DIR = savedEnv;
+  if (savedEnv === undefined) delete process.env.BEHELD_DATA_DIR;
+  else process.env.BEHELD_DATA_DIR = savedEnv;
   rmSync(workDir, { recursive: true, force: true });
 });
 
 // ── paths ────────────────────────────────────────────────────────────────────
 
 describe("getKeyPaths", () => {
-  test("uses DEVPROFILE_DATA_DIR when set", () => {
+  test("uses BEHELD_DATA_DIR when set", () => {
     const p = getKeyPaths();
-    expect(p.dir).toBe(join(workDir, ".devprofile", "keys"));
+    expect(p.dir).toBe(join(workDir, ".beheld", "keys"));
     expect(p.publicPath).toContain("public.jwk");
     expect(p.privatePath).toContain("private.jwk");
   });

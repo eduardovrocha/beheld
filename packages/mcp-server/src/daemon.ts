@@ -4,23 +4,23 @@ import * as os from "os";
 
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export function getDevProfileDir(): string {
-  const override = process.env.DEVPROFILE_DATA_DIR;
+export function getBeheldDir(): string {
+  const override = process.env.BEHELD_DATA_DIR;
   return override
-    ? path.join(override, ".devprofile")
-    : path.join(os.homedir(), ".devprofile");
+    ? path.join(override, ".beheld")
+    : path.join(os.homedir(), ".beheld");
 }
 
 function getPidFile(): string {
-  return path.join(getDevProfileDir(), "daemon.pid");
+  return path.join(getBeheldDir(), "daemon.pid");
 }
 
 function getLogFile(): string {
-  return path.join(getDevProfileDir(), "daemon.log");
+  return path.join(getBeheldDir(), "daemon.log");
 }
 
 function ensureDir(): void {
-  const dir = getDevProfileDir();
+  const dir = getBeheldDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 

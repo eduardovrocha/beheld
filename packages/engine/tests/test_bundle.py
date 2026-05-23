@@ -1,4 +1,4 @@
-"""Cross-language contract tests for .dpbundle canonical serialization.
+"""Cross-language contract tests for .beheld canonical serialization.
 
 The same fixture is built in Python here and in TypeScript at
 packages/cli/tests/bundle.test.ts. Both files assert against the same expected
@@ -26,6 +26,7 @@ from models import (
     BundleL1Section,
     BundleL2Section,
     BundlePayload,
+    L1RepositoryRef,
     Scores,
     WorkflowMetrics,
 )
@@ -37,7 +38,7 @@ from models import (
 def _fixture_payload() -> BundlePayload:
     return BundlePayload(
         created_at="2026-05-14T00:00:00+00:00",
-        devprofile_version="0.2.0",
+        beheld_version="0.2.0",
         previous_hash=None,
         scores=Scores(
             date="2026-05-13",
@@ -52,7 +53,10 @@ def _fixture_payload() -> BundlePayload:
             ecosystems={"python": True, "rails": True},
             platforms={"docker": True, "github": True},
             avg_test_ratio=0.42,
-            root_commit_hashes=["a" * 40, "b" * 40],
+            root_commit_hashes=[
+                L1RepositoryRef(hash="a" * 40, first_seen_at="2026-04-01T00:00:00+00:00"),
+                L1RepositoryRef(hash="b" * 40, first_seen_at="2026-04-15T00:00:00+00:00"),
+            ],
         ),
         l2=BundleL2Section(
             platforms={"docker": 10, "github": 5},
@@ -63,6 +67,7 @@ def _fixture_payload() -> BundlePayload:
             sessions_analyzed=30,
             period_days=30,
         ),
+        engine_version_hash="0" * 64,
     )
 
 
@@ -70,14 +75,17 @@ def _fixture_payload() -> BundlePayload:
 # If you change the fixture above or the canonical_json rules, regenerate by:
 #   PYTHONPATH=src python -c "..."  (see commit message of the change)
 EXPECTED_CANONICAL = (
-    '{"created_at":"2026-05-14T00:00:00+00:00","devprofile_version":"0.2.0",'
+    '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",'
+    '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",'
     '"l1":{"avg_test_ratio":0.42,'
     '"earliest_commit":"2023-01-01T00:00:00+00:00",'
     '"ecosystems":{"python":true,"rails":true},'
     '"latest_commit":"2026-05-13T00:00:00+00:00",'
     '"platforms":{"docker":true,"github":true},'
-    '"root_commit_hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
-    '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],'
+    '"root_commit_hashes":['
+    '{"first_seen_at":"2026-04-01T00:00:00+00:00","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},'
+    '{"first_seen_at":"2026-04-15T00:00:00+00:00","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+    '],'
     '"total_commits":1200,"total_repos":2},'
     '"l2":{"ecosystems":{"rails":8,"react":4},"period_days":30,'
     '"platforms":{"docker":10,"github":5},"project_categories":{"saas_b2b":1},'
@@ -94,7 +102,7 @@ EXPECTED_CANONICAL = (
     '"test_maturity":20}}'
 )
 
-EXPECTED_HASH = "sha256:60168f63bb60ff60bcbfb382733f2da1813284ee75ab03459c02ca6cd7abb509"
+EXPECTED_HASH = "sha256:0521f98e1a40a6f0adbc605d20a4552f696c81a43a8fa21e11167c810423c4fe"
 
 
 # ── canonical_json basics ────────────────────────────────────────────────────
@@ -156,7 +164,7 @@ def test_fixture_canonical_matches_expected() -> None:
     verify in the Rails verification page (Phase 5 G)."""
     actual = payload_to_canonical(_fixture_payload())
     assert actual == EXPECTED_CANONICAL
-    assert len(actual) == 1052
+    assert len(actual) == 1243
 
 
 def test_fixture_hash_matches_expected() -> None:
@@ -177,7 +185,7 @@ def test_changing_any_field_changes_hash() -> None:
     base = _fixture_payload()
     tampered = BundlePayload(
         created_at=base.created_at,
-        devprofile_version=base.devprofile_version,
+        beheld_version=base.beheld_version,
         previous_hash=base.previous_hash,
         scores=Scores(
             date=base.scores.date,
@@ -230,8 +238,8 @@ def test_bundle_payload_dataclass_is_frozen() -> None:
 def _fixture_attestation() -> BundleAttestation:
     return BundleAttestation(
         payload=AttestationPayload(
-            type="devprofile-identity-attestation/v1",
-            platform_key_id="devprofile-platform-2026-q2",
+            type="beheld-identity-attestation/v1",
+            platform_key_id="beheld-platform-2026-q2",
             dev_pubkey="ed25519-pub:AAAA",
             github=AttestationGithub(user_id=12345, login="octocat", verified_at="2026-05-19T18:00:00Z"),
             attested_at="2026-05-19T18:00:00Z",

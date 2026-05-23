@@ -8,10 +8,10 @@ export interface RunResult {
 }
 
 export interface SpawnEnv {
-  DEVPROFILE_DATA_DIR: string;
-  DEVPROFILE_PORT: string;
-  DEVPROFILE_MCP_URL: string;
-  DEVPROFILE_ENGINE_URL: string;
+  BEHELD_DATA_DIR: string;
+  BEHELD_PORT: string;
+  BEHELD_MCP_URL: string;
+  BEHELD_ENGINE_URL: string;
   FAKE_ENGINE_PORT: string;
 }
 
@@ -31,10 +31,10 @@ export function buildEnv(opts: {
 }): SpawnEnv & Record<string, string> {
   const env = {
     ...(process.env as Record<string, string>),
-    DEVPROFILE_DATA_DIR: opts.dataDir,
-    DEVPROFILE_PORT: String(opts.mcpPort),
-    DEVPROFILE_MCP_URL: `http://127.0.0.1:${opts.mcpPort}`,
-    DEVPROFILE_ENGINE_URL: `http://127.0.0.1:${opts.enginePort}`,
+    BEHELD_DATA_DIR: opts.dataDir,
+    BEHELD_PORT: String(opts.mcpPort),
+    BEHELD_MCP_URL: `http://127.0.0.1:${opts.mcpPort}`,
+    BEHELD_ENGINE_URL: `http://127.0.0.1:${opts.enginePort}`,
     FAKE_ENGINE_PORT: String(opts.enginePort),
   };
   return env;

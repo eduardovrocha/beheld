@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../bundle/types";
+import { BUNDLE_VERSION, type Bundle, type BundlePayload, type RekorEntry } from "../bundle/types";
 import { payloadHash, payloadToCanonical } from "../bundle/canonical";
 import { composition } from "../bundle/verify";
 import { renderQr, uploadBundle } from "../bundle/share";
@@ -13,16 +13,23 @@ import {
   publicKeyFingerprint,
 } from "../keys/keystore";
 import { loadAttestationCache } from "../keys/attestation-cache";
-import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET } from "../ui/styles";
+import { submitToRekor } from "../lib/rekor";
+import { computeTier } from "../lib/tier";
+import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET, YELLOW, GREEN } from "../ui/styles";
 import { renderSnapshotHtml, type SnapshotHtmlData } from "../ui/snapshot-html";
 
-const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface SnapshotOptions {
   output?: string;
   share?: boolean;
   html?: boolean;
   authorName?: string;
+  /** F5.8 — promote an existing bundle to fully_verifiable by submitting
+   *  its hash + signature to Rekor and rewriting the file in place. */
+  rekorSubmit?: string;
+  /** F5.8 — skip Rekor submission for this snapshot (offline mode). */
+  noRekor?: boolean;
 }
 
 interface SnapshotRow {
@@ -34,9 +41,9 @@ interface SnapshotRow {
 }
 
 function dataDir(): string {
-  return process.env.DEVPROFILE_DATA_DIR
-    ? join(process.env.DEVPROFILE_DATA_DIR, ".devprofile")
-    : join(homedir(), ".devprofile");
+  return process.env.BEHELD_DATA_DIR
+    ? join(process.env.BEHELD_DATA_DIR, ".beheld")
+    : join(homedir(), ".beheld");
 }
 
 function toHex(buf: ArrayBuffer): string {
@@ -45,33 +52,54 @@ function toHex(buf: ArrayBuffer): string {
     .join("");
 }
 
+/** "sha256:abcd…" → "abcd…" / "ed25519:abcd…" → "abcd…". */
+function stripPrefix(value: string, prefix: string): string {
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+/** JWK `x` (base64url, unpadded) → 32-byte raw key in hex. */
+function jwkXToHex(jwkX: string): string {
+  return Buffer.from(jwkX, "base64url").toString("hex");
+}
+
+function renderRekorLine(rekor: RekorEntry | null): string {
+  if (rekor) {
+    return `${GREEN}✓${RESET} log #${rekor.logIndex} · ${rekor.integratedTime}`;
+  }
+  return `${YELLOW}⚠${RESET} não registrado ${meta("(rede indisponível — re-submeter: beheld snapshot --rekor-submit <bundle>)")}`;
+}
+
 function bundleFilename(createdAt: string, hash: string): string {
   // 2026-05-14T03:42:00+00:00 → 20260514
   const dateStr = createdAt.slice(0, 10).replace(/-/g, "");
   // sha256:abc... → abc
   const hashShort = hash.slice("sha256:".length, "sha256:".length + 8);
-  return `${dateStr}_${hashShort}.dpbundle`;
+  return `${dateStr}_${hashShort}.beheld`;
 }
 
 /** Resolve the convenience-copy directory. Returns null when no usable
  *  destination exists — caller should silently skip in that case.
  *
  *  Precedence:
- *    1. DEVPROFILE_DESKTOP_DIR env (explicit override, e.g. for tests or CI)
+ *    1. BEHELD_DESKTOP_DIR env (explicit override, e.g. for tests or CI)
  *    2. ~/Desktop if it exists (works on macOS, Windows, and most Linux setups)
  *    3. null
  *
- *  Set DEVPROFILE_NO_DESKTOP_COPY=1 to opt out entirely.
+ *  Set BEHELD_NO_DESKTOP_COPY=1 to opt out entirely.
  */
 function desktopCopyDir(): string | null {
-  if (process.env.DEVPROFILE_NO_DESKTOP_COPY === "1") return null;
-  const override = process.env.DEVPROFILE_DESKTOP_DIR;
+  if (process.env.BEHELD_NO_DESKTOP_COPY === "1") return null;
+  const override = process.env.BEHELD_DESKTOP_DIR;
   if (override) return existsSync(override) ? override : null;
   const candidate = join(homedir(), "Desktop");
   return existsSync(candidate) ? candidate : null;
 }
 
 export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void> {
+  if (opts.rekorSubmit) {
+    await rekorSubmitExisting(opts.rekorSubmit);
+    return;
+  }
   console.log(brand("capturando o momento"));
   await ensureKeys();
 
@@ -87,13 +115,13 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
     }
     if (!r.ok) {
       console.error(fail(`Engine respondeu ${r.status}`));
-      console.error(`     ${DIM}Execute: devprofile start${RESET}`);
+      console.error(`     ${DIM}Execute: beheld start${RESET}`);
       process.exit(1);
     }
     payload = (await r.json()) as BundlePayload;
   } catch (err) {
     console.error(fail("Engine offline ou inacessível"));
-    console.error(`     ${DIM}Execute: devprofile start${RESET}`);
+    console.error(`     ${DIM}Execute: beheld start${RESET}`);
     process.exit(1);
   }
 
@@ -108,21 +136,35 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   );
   const pubJwk = loadPublicJwk();
 
-  // Embed the identity attestation if the dev has run `devprofile attest`.
+  // Embed the identity attestation if the dev has run `beheld attest`.
   // The attestation lives at the wrapper level so adding it doesn't change
   // the bundle hash (Phase 5 / F5.6.1.e).
   const attestation = loadAttestationCache();
+
+  const signatureHex = toHex(sigBuf);
+  const publicKeyHex = jwkXToHex(pubJwk.x);
+  const payloadHashHex = stripPrefix(hash, "sha256:");
+
+  // F5.8 — best-effort Rekor submission BEFORE we write the bundle so the
+  // inclusion proof can be embedded in the wrapper. Failure (offline / 5xx /
+  // timeout) returns null; the bundle is still saved without rekor and the
+  // user can promote it later with `beheld snapshot --rekor-submit`.
+  let rekor: RekorEntry | null = null;
+  if (opts.noRekor !== true) {
+    rekor = await submitToRekor(payloadHashHex, signatureHex, publicKeyHex);
+  }
 
   const bundle: Bundle = {
     version: BUNDLE_VERSION,
     payload,
     hash,
-    signature: `ed25519:${toHex(sigBuf)}`,
+    signature: `ed25519:${signatureHex}`,
     public_key: `ed25519:${pubJwk.x}`,
     ...(attestation ? { attestation } : {}),
+    ...(rekor ? { rekor } : { rekor: null }),
   };
 
-  // 3. Write bundle to disk (always to ~/.devprofile/snapshots/, plus --output if given)
+  // 3. Write bundle to disk (always to ~/.beheld/snapshots/, plus --output if given)
   const snapDir = join(dataDir(), "snapshots");
   mkdirSync(snapDir, { recursive: true, mode: 0o700 });
   const fileName = bundleFilename(payload.created_at, hash);
@@ -137,8 +179,8 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   }
 
   // Convenience copy to the desktop so the user can find the bundle without
-  // having to know about ~/.devprofile/snapshots/. Skipped silently if the
-  // target dir doesn't exist or DEVPROFILE_NO_DESKTOP_COPY=1.
+  // having to know about ~/.beheld/snapshots/. Skipped silently if the
+  // target dir doesn't exist or BEHELD_NO_DESKTOP_COPY=1.
   let desktopPath: string | undefined;
   const desktop = desktopCopyDir();
   if (desktop) {
@@ -177,17 +219,30 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   if (outputPath)  console.log(`     ${DIM}cópia:${RESET}        ${outputPath}`);
   console.log(`     ${DIM}assinado por:${RESET} ${fp}`);
 
+  // F5.6 — surface GitHub identity tier inferred from the embedded attestation.
+  if (attestation) {
+    console.log(`     ${DIM}identidade:${RESET}   @${attestation.payload.github.login} ${meta("· GitHub OAuth")}`);
+  } else {
+    console.log(`     ${DIM}identidade:${RESET}   não verificada ${meta("(execute beheld identity link)")}`);
+  }
+
   // L1 / L2 composition surfaced from the just-signed payload (Phase 6 / F6.8).
   const comp = composition(payload as unknown as Record<string, unknown>);
   console.log("");
   console.log(`  ${bold("Perfil capturado")}`);
+  console.log(`     ${DIM}Engine:${RESET}               beheld-engine v${payload.beheld_version}`);
+  if (payload.engine_version_hash) {
+    console.log(`     ${DIM}Hash do engine:${RESET}       ${payload.engine_version_hash.slice(0, 16)}…`);
+  }
   console.log(`     ${DIM}Base histórica:${RESET}       ${comp.base}`);
   console.log(`     ${DIM}Trajetória observada:${RESET} ${comp.trajectory}`);
+  console.log(`     ${DIM}Rekor:${RESET}                ${renderRekorLine(rekor)}`);
+  console.log(`     ${DIM}Tier:${RESET}                 ${bold(computeTier(bundle))}`);
 
   if (!saveOk) {
     console.log("");
     console.log(warn("Bundle criado no disco mas não registrado na chain"));
-    console.log(`     ${DIM}Execute \`devprofile snapshot\` novamente quando o engine subir.${RESET}`);
+    console.log(`     ${DIM}Execute \`beheld snapshot\` novamente quando o engine subir.${RESET}`);
   }
 
   if (opts.html === true) {
@@ -223,7 +278,7 @@ async function writeHtmlRetrato(
   if (!extras) {
     console.log("");
     console.log(warn("Engine offline — HTML não gerado"));
-    console.log(`     ${DIM}O .dpbundle local continua válido. Tente novamente quando o engine subir.${RESET}`);
+    console.log(`     ${DIM}O .beheld local continua válido. Tente novamente quando o engine subir.${RESET}`);
     return;
   }
 
@@ -235,7 +290,7 @@ async function writeHtmlRetrato(
     authorName,
   });
 
-  const htmlPath = bundlePath.replace(/\.dpbundle$/, ".html");
+  const htmlPath = bundlePath.replace(/\.beheld$/, ".html");
   const { writeFileSync } = await import("node:fs");
   writeFileSync(htmlPath, html, "utf8");
 
@@ -244,6 +299,54 @@ async function writeHtmlRetrato(
   console.log(`     ${DIM}arquivo:${RESET}    ${htmlPath}`);
   console.log(`     ${DIM}identity:${RESET}   ${extras.identity.identity_long}`);
   console.log(`     ${DIM}confidence:${RESET} ${extras.identity.confidence} ${meta(`(via ${extras.identity.generation_path})`)}`);
+}
+
+/** F5.8.3 — Re-submit an existing bundle to Rekor and rewrite the file in
+ *  place with the inclusion proof. Used when the original snapshot ran
+ *  offline; promotes the bundle to `fully_verifiable` without changing the
+ *  signed payload bytes. */
+async function rekorSubmitExisting(bundlePath: string): Promise<void> {
+  console.log(brand("registrando bundle no Rekor"));
+  if (!existsSync(bundlePath)) {
+    console.error(fail(`Arquivo não encontrado: ${bundlePath}`));
+    process.exit(1);
+  }
+  let bundle: Bundle;
+  try {
+    bundle = JSON.parse(readFileSync(bundlePath, "utf8")) as Bundle;
+  } catch (e) {
+    console.error(fail(`JSON inválido: ${(e as Error).message}`));
+    process.exit(1);
+  }
+  if (bundle.rekor && bundle.rekor.logIndex) {
+    console.log(arrow(`bundle já registrado — log #${bundle.rekor.logIndex}`));
+    console.log(`     ${DIM}Tier:${RESET}  ${bold(computeTier(bundle))}`);
+    return;
+  }
+
+  const sigHex = stripPrefix(bundle.signature ?? "", "ed25519:");
+  const hashHex = stripPrefix(bundle.hash ?? "", "sha256:");
+  const pubB64u = stripPrefix(bundle.public_key ?? "", "ed25519:");
+  if (!sigHex || !hashHex || !pubB64u) {
+    console.error(fail("Bundle não tem signature/hash/public_key — não é submissível"));
+    process.exit(1);
+  }
+  const pubHex = jwkXToHex(pubB64u);
+
+  console.log(arrow("submetendo ao rekor.sigstore.dev"));
+  const rekor = await submitToRekor(hashHex, sigHex, pubHex);
+  if (!rekor) {
+    console.error(fail("Submissão ao Rekor falhou — verifique sua conexão e tente novamente"));
+    process.exit(1);
+  }
+
+  const updated: Bundle = { ...bundle, rekor };
+  writeFileSync(bundlePath, JSON.stringify(updated, null, 2) + "\n");
+  console.log(ok("Rekor registrado"));
+  console.log(`     ${DIM}log index:${RESET}       ${rekor.logIndex}`);
+  console.log(`     ${DIM}uuid:${RESET}            ${rekor.uuid}`);
+  console.log(`     ${DIM}integratedTime:${RESET}  ${rekor.integratedTime}`);
+  console.log(`     ${DIM}Tier:${RESET}            ${bold(computeTier(updated))}`);
 }
 
 async function shareBundle(bundle: Bundle): Promise<void> {
@@ -280,19 +383,19 @@ export async function snapshotListCommand(): Promise<void> {
     const r = await fetch(`${ENGINE_URL}/snapshots`);
     if (!r.ok) {
       console.error(fail(`Engine respondeu ${r.status}`));
-      console.error(`     ${DIM}Execute: devprofile start${RESET}`);
+      console.error(`     ${DIM}Execute: beheld start${RESET}`);
       process.exit(1);
     }
     rows = (await r.json()) as SnapshotRow[];
   } catch {
     console.error(fail("Engine offline"));
-    console.error(`     ${DIM}Execute: devprofile start${RESET}`);
+    console.error(`     ${DIM}Execute: beheld start${RESET}`);
     process.exit(1);
   }
 
   if (rows.length === 0) {
     console.log("");
-    console.log(`  ${DIM}Nenhum snapshot ainda.${RESET} Execute: ${bold("devprofile snapshot")}`);
+    console.log(`  ${DIM}Nenhum snapshot ainda.${RESET} Execute: ${bold("beheld snapshot")}`);
     console.log("");
     return;
   }

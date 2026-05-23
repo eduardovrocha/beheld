@@ -41,7 +41,7 @@ describe("bootstrapScreen — Tela 3.5", () => {
     const { deps, logs } = makeDeps({ prompts: ["3"] });
     await bootstrapScreen(deps);
     const out = logs.join("\n");
-    expect(out).toContain("DevProfile · Histórico git (opcional)");
+    expect(out).toContain("Beheld · Histórico git (opcional)");
     expect(out).toContain("[1] Importar agora");
     expect(out).toContain("[2] Importar depois");
     expect(out).toContain("[3] Pular");
@@ -65,7 +65,7 @@ describe("bootstrapScreen — Tela 3.5", () => {
     expect(result.author_email).toBe("dev@example.com");
     expect(importCalls).toEqual([{ email: "dev@example.com" }]);
     // No "execute depois" hint should show on [1].
-    expect(logs.join("\n")).not.toContain("Execute devprofile import quando quiser");
+    expect(logs.join("\n")).not.toContain("Execute beheld import quando quiser");
   });
 
   test("option [2] shows the 'execute later' message without importing", async () => {
@@ -74,7 +74,7 @@ describe("bootstrapScreen — Tela 3.5", () => {
     expect(result.choice).toBe("later");
     expect(result.author_email).toBeUndefined();
     expect(importCalls.length).toBe(0);
-    expect(logs.join("\n")).toContain("Ok. Execute devprofile import quando quiser.");
+    expect(logs.join("\n")).toContain("Ok. Execute beheld import quando quiser.");
   });
 
   test("option [3] skips silently (no later-hint, no import)", async () => {
@@ -83,7 +83,7 @@ describe("bootstrapScreen — Tela 3.5", () => {
     expect(result.choice).toBe("skip");
     expect(result.author_email).toBeUndefined();
     expect(importCalls.length).toBe(0);
-    expect(logs.join("\n")).not.toContain("Execute devprofile import quando quiser");
+    expect(logs.join("\n")).not.toContain("Execute beheld import quando quiser");
   });
 
   test("empty / unrecognized input falls back to skip", async () => {

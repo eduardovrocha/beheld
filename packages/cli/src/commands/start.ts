@@ -1,10 +1,5 @@
 import * as daemonManager from "../daemon-manager";
-
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
+import { ok, fail, meta, bold, brand, GREEN, RESET } from "../ui/styles";
 
 export async function startCommand(): Promise<void> {
   // Pre-check so we only show the "this might take a while" hint when we're
@@ -15,26 +10,28 @@ export async function startCommand(): Promise<void> {
     daemonManager.isEngineRunning(),
   ]);
 
+  if (mcpUp && engineUp) {
+    console.log(brand("já estou no ar"));
+    console.log(`  ${bold("MCP server")}      ${GREEN}●${RESET}  porta 7337`);
+    console.log(`  ${bold("Scoring engine")}  ${GREEN}●${RESET}  porta 7338`);
+    console.log("");
+    // No need to call daemonManager.start() — return early.
+    return;
+  }
+
+  console.log(brand("subindo os daemons"));
   if (!engineUp) {
-    console.log(`\n  ${DIM}Iniciando daemons (engine pode levar 15-30s no primeiro start)…${RESET}`);
+    console.log(`  ${meta("Engine pode levar 15-30s no primeiro start…")}`);
   }
 
   const result = await daemonManager.start();
 
-  if (result.alreadyRunning) {
-    console.log(`\n  ${GREEN}●${RESET}  DevProfile já está rodando.\n`);
-    console.log(`  ${BOLD}MCP server${RESET}      ${GREEN}●${RESET}  porta 7337`);
-    console.log(`  ${BOLD}Scoring engine${RESET}  ${GREEN}●${RESET}  porta 7338`);
-    console.log("");
-    return;
-  }
-
   if (result.mcp && result.engine) {
-    console.log(`\n  ${GREEN}✓${RESET}  MCP server iniciado    ${DIM}porta 7337${RESET}`);
-    console.log(`  ${GREEN}✓${RESET}  Engine iniciado        ${DIM}porta 7338${RESET}\n`);
+    console.log(`\n${ok(`MCP server iniciado    ${meta("porta 7337")}`)}`);
+    console.log(`${ok(`Engine iniciado        ${meta("porta 7338")}`)}\n`);
   } else {
-    if (!result.mcp)    console.log(`  ${RED}✗${RESET}  MCP server falhou ao iniciar`);
-    if (!result.engine) console.log(`  ${RED}✗${RESET}  Engine falhou ao iniciar`);
+    if (!result.mcp)    console.log(fail("MCP server falhou ao iniciar"));
+    if (!result.engine) console.log(fail("Engine falhou ao iniciar"));
     process.exit(1);
   }
 }

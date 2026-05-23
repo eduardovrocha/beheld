@@ -73,7 +73,7 @@ const noPatternsPayload: CoachPayload = {
 describe("renderCoachText — live mode", () => {
   test("header includes 'coach' and version", () => {
     const out = stripAnsi(renderCoachText(livePayload));
-    expect(out).toContain("DevProfile · coach");
+    expect(out).toContain("Beheld · coach");
     expect(out).toContain("v1");
     expect(out).toContain("live");
   });
@@ -133,7 +133,7 @@ describe("renderCoachText — live mode", () => {
 
   test("does NOT leak the JSON delimiter — that's only for MCP", () => {
     const out = renderCoachText(livePayload);
-    expect(out).not.toContain("---DEVPROFILE-JSON---");
+    expect(out).not.toContain("---BEHELD-JSON---");
     expect(out).not.toContain("---END-JSON---");
   });
 });
@@ -193,7 +193,7 @@ let server: ReturnType<typeof Bun.serve>;
 let lastRequest: URL | null = null;
 
 beforeAll(async () => {
-  process.env.DEVPROFILE_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+  process.env.BEHELD_ENGINE_URL = `http://127.0.0.1:${MOCK_PORT}`;
   server = Bun.serve({
     port: MOCK_PORT,
     hostname: "127.0.0.1",
@@ -213,7 +213,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.stop(true);
-  delete process.env.DEVPROFILE_ENGINE_URL;
+  delete process.env.BEHELD_ENGINE_URL;
 });
 
 describe("engine-client.coach()", () => {
@@ -227,12 +227,12 @@ describe("engine-client.coach()", () => {
   });
 
   test("returns null when engine is offline", async () => {
-    const saved = process.env.DEVPROFILE_ENGINE_URL;
-    process.env.DEVPROFILE_ENGINE_URL = "http://127.0.0.1:19996";
+    const saved = process.env.BEHELD_ENGINE_URL;
+    process.env.BEHELD_ENGINE_URL = "http://127.0.0.1:19996";
     const { coach } = await import("../src/client/engine-client?v=coach-client-offline");
     const result = await coach();
     expect(result).toBeNull();
-    process.env.DEVPROFILE_ENGINE_URL = saved;
+    process.env.BEHELD_ENGINE_URL = saved;
   });
 
   test("default hint is 'unknown'", async () => {

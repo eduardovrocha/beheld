@@ -71,7 +71,7 @@ export interface WizardEnvironments {
   continueDev: boolean;
 }
 
-export interface DevProfileConfig {
+export interface BeheldConfig {
   version: string;
   initialized_at: string;
   dimensions: WizardDimensions;

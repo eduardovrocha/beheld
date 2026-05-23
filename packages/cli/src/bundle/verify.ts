@@ -1,5 +1,5 @@
 /**
- * Offline .dpbundle verification (Phase 5 / F5.3.8).
+ * Offline .beheld verification (Phase 5 / F5.3.8).
  *
  * Pure functions — no filesystem, no network. The CLI command at
  * commands/verify.ts wires these to disk I/O + console output.
@@ -58,7 +58,7 @@ function validateSchema(raw: unknown): CheckResult {
     return { ok: false, reason: "malformed 'public_key'" };
   if (!isObject(raw.payload)) return { ok: false, reason: "missing or invalid 'payload'" };
   const payload = raw.payload as Record<string, unknown>;
-  for (const required of ["created_at", "devprofile_version", "previous_hash", "scores"]) {
+  for (const required of ["created_at", "beheld_version", "previous_hash", "scores"]) {
     if (!(required in payload)) {
       return { ok: false, reason: `payload missing '${required}'` };
     }
@@ -82,7 +82,7 @@ function validateL1Section(payload: PayloadView): VerifyResult["checks"]["l1_sec
   if (!payload.l1 || typeof payload.l1 !== "object") {
     return {
       ok: false,
-      reason: "Seção L1 ausente — bundle gerado com versão anterior do DevProfile",
+      reason: "Seção L1 ausente — bundle gerado com versão anterior do Beheld",
     };
   }
   const count = typeof payload.l1.total_repos === "number" ? payload.l1.total_repos : 0;
@@ -235,8 +235,8 @@ export function summarize(payload: BundlePayload): string {
   return `score ${s.overall}/100 · ${s.sessions_analyzed} sessões · ${payload.created_at.slice(0, 10)}`;
 }
 
-/** Two-line composition string surfaced by `devprofile snapshot` and
- *  `devprofile verify`. Falls back when L1 is empty / absent. */
+/** Two-line composition string surfaced by `beheld snapshot` and
+ *  `beheld verify`. Falls back when L1 is empty / absent. */
 export function composition(payload: BundlePayload | Record<string, unknown>): {
   base: string;
   trajectory: string;
@@ -254,7 +254,7 @@ export function composition(payload: BundlePayload | Record<string, unknown>): {
 
   if (!l1 || (typeof l1.total_repos === "number" && l1.total_repos === 0)) {
     return {
-      base: "não disponível (execute devprofile import)",
+      base: "não disponível (execute beheld import)",
       trajectory,
     };
   }

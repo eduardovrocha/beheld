@@ -2,16 +2,11 @@ import { createWriteStream, existsSync } from "node:fs";
 import { chmod, rename, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import * as daemonManager from "../daemon-manager";
+import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 const VERSION = "0.1.1";
-const API_BASE = "https://devprofile.app/api";
-const RELEASES_BASE = "https://github.com/ioit-solutions/devprofile/releases/download";
-
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+const API_BASE = "https://beheld.dev/api";
+const RELEASES_BASE = "https://github.com/ioit-solutions/beheld/releases/download";
 
 function platform(): string {
   if (process.platform === "darwin") {
@@ -77,6 +72,7 @@ async function verifySha256(file: string, expected: string): Promise<boolean> {
 }
 
 export async function updateCommand(): Promise<void> {
+  console.log(brand("buscando uma versão mais nova"));
   process.stdout.write("  Verificando versão disponível…");
   const latest = await fetchLatestVersion();
   process.stdout.write("\r                                    \r");
@@ -87,11 +83,11 @@ export async function updateCommand(): Promise<void> {
   }
 
   if (latest === VERSION) {
-    console.log(`${GREEN}✓${RESET}  DevProfile ${BOLD}${VERSION}${RESET} já é a versão mais recente.`);
+    console.log(`${GREEN}✓${RESET}  Beheld ${BOLD}${VERSION}${RESET} já é a versão mais recente.`);
     return;
   }
 
-  console.log(`  DevProfile ${BOLD}${latest}${RESET} disponível  ${DIM}(atual: ${VERSION})${RESET}`);
+  console.log(`  Beheld ${BOLD}${latest}${RESET} disponível  ${DIM}(atual: ${VERSION})${RESET}`);
   const confirmed = await askConfirm("  Atualizar agora? [S/n] ");
   if (!confirmed) {
     console.log("Abortado.");
@@ -99,7 +95,7 @@ export async function updateCommand(): Promise<void> {
   }
 
   const plat = platform();
-  const binaryName = `devprofile-${plat}`;
+  const binaryName = `beheld-${plat}`;
   const binaryUrl = `${RELEASES_BASE}/v${latest}/${binaryName}`;
   const checksumUrl = `${RELEASES_BASE}/v${latest}/${binaryName}.sha256`;
   const currentBinary = process.execPath;

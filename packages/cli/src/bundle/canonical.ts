@@ -1,5 +1,5 @@
 /**
- * Canonical JSON + SHA-256 for .dpbundle payloads.
+ * Canonical JSON + SHA-256 for .beheld payloads.
  *
  * Twin of engine/src/bundle.py. Rules MUST stay byte-identical:
  *   - Object keys sorted alphabetically at every depth.

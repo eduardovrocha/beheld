@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Sync platform pub keys from devprofile-web → packages/cli/src/keys.
+ * Sync platform pub keys from beheld-web → packages/cli/src/keys.
  *
  * Reads the source-of-truth at `web/source/backend/keys/platform/` (which
- * lives in the gitignored sibling repo `devprofile-web`) and writes a
+ * lives in the gitignored sibling repo `beheld-web`) and writes a
  * single JSON snapshot at `packages/cli/src/keys/platform-keys.json`.
  *
  * The compiled CLI binary embeds this JSON at build time, so the offline
@@ -46,7 +46,7 @@ export function buildSyncOutput(
 ): SyncOutput {
   if (!existsSync(webKeysDir)) {
     throw new Error(
-      `Missing ${webKeysDir}. The devprofile-web repo must be checked out as a sibling at web/.`,
+      `Missing ${webKeysDir}. The beheld-web repo must be checked out as a sibling at web/.`,
     );
   }
   const files = readdirSync(webKeysDir)

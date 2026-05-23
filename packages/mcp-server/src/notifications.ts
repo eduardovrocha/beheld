@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { getDevProfileDir } from "./daemon";
+import { getBeheldDir } from "./daemon";
 
-const ENGINE_URL = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 const VERSION = "0.1.1";
 
 interface NotificationState {
@@ -21,11 +21,11 @@ function today(): string {
 }
 
 function statePath(): string {
-  return join(getDevProfileDir(), "notifications.json");
+  return join(getBeheldDir(), "notifications.json");
 }
 
 function configFilePath(): string {
-  return join(getDevProfileDir(), "config.json");
+  return join(getBeheldDir(), "config.json");
 }
 
 function readState(): NotificationState {
@@ -83,7 +83,7 @@ export class NotificationService {
   }
 
   async markNotified(type: string): Promise<void> {
-    mkdirSync(getDevProfileDir(), { recursive: true });
+    mkdirSync(getBeheldDir(), { recursive: true });
     const state = readState();
     state[type] = today();
     writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n");
@@ -118,7 +118,7 @@ export class NotificationService {
 
       const deltaStr =
         delta !== null ? ` (${delta >= 0 ? "+" : ""}${delta} hoje)` : "";
-      await this.send("DevProfile", `score ${scores.overall}${deltaStr}`);
+      await this.send("Beheld", `score ${scores.overall}${deltaStr}`);
     } catch (err) {
       console.error("[notifications] daily_score check failed:", err);
     } finally {
@@ -132,14 +132,14 @@ export class NotificationService {
     if (!(await this.shouldNotifyToday("update_check"))) return;
 
     try {
-      const res = await fetch("https://devprofile.app/api/version", {
+      const res = await fetch("https://beheld.dev/api/version", {
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
         const data = (await res.json()) as { version?: string };
         const latest = data.version;
         if (latest && latest !== VERSION) {
-          await this.send("DevProfile", `v${latest} disponível — devprofile update`);
+          await this.send("Beheld", `v${latest} disponível — beheld update`);
         }
       }
     } catch {

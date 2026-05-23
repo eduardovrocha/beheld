@@ -7,7 +7,7 @@ DIST_DIR="${REPO_ROOT}/dist"
 mkdir -p "$DIST_DIR"
 mkdir -p "${REPO_ROOT}/packages/cli/assets"
 
-echo "==> Building devprofile-engine (Python/PyInstaller)..."
+echo "==> Building beheld-engine (Python/PyInstaller)..."
 cd "${REPO_ROOT}/packages/engine"
 
 if ! command -v pyinstaller > /dev/null 2>&1; then
@@ -15,51 +15,61 @@ if ! command -v pyinstaller > /dev/null 2>&1; then
   echo "    Install with: pip install pyinstaller"
   echo "    Engine binary required for full build."
 else
+  export SOURCE_DATE_EPOCH=0
+  export PYTHONHASHSEED=0
+  export PYTHONDONTWRITEBYTECODE=1
+
   pyinstaller \
     --onefile \
-    --name devprofile-engine \
+    --clean \
+    --strip \
+    --name beheld-engine \
     --distpath dist \
     src/main.py
 
-  cp dist/devprofile-engine "${REPO_ROOT}/packages/cli/assets/devprofile-engine"
-  echo "    Engine → packages/cli/assets/devprofile-engine"
+  cp dist/beheld-engine "${REPO_ROOT}/packages/cli/assets/beheld-engine"
+  echo "    Engine → packages/cli/assets/beheld-engine"
+
+  HASH=$(shasum -a 256 dist/beheld-engine | awk '{print $1}')
+  echo "    beheld-engine sha256: ${HASH}"
+  echo "${HASH}" > dist/beheld-engine.sha256
 fi
 
 echo ""
-echo "==> Building devprofile CLI (TypeScript/Bun)..."
+echo "==> Building beheld CLI (TypeScript/Bun)..."
 cd "$REPO_ROOT"
 
 bun build packages/cli/src/index.ts \
   --compile \
-  --outfile dist/devprofile
+  --outfile dist/beheld
 
-echo "    CLI    → dist/devprofile"
+echo "    CLI    → dist/beheld"
 echo ""
 echo "==> Smoke test..."
-dist/devprofile --version
+dist/beheld --version
 
 # Engine endpoint smoke — only when the engine binary was actually built.
 # Verifies the coach feature (workflow_metrics + /coach payload) is reachable
 # end-to-end on a fresh install before shipping a release.
-if [ -f "${REPO_ROOT}/packages/cli/assets/devprofile-engine" ]; then
+if [ -f "${REPO_ROOT}/packages/cli/assets/beheld-engine" ]; then
   echo ""
   echo "==> Engine smoke (coach + workflow_metrics)..."
   SMOKE_HOME="$(mktemp -d)"
   SMOKE_PORT=17499
   trap 'rm -rf "${SMOKE_HOME}"; [ -n "${ENGINE_PID:-}" ] && kill "${ENGINE_PID}" 2>/dev/null || true' EXIT
 
-  DEVPROFILE_DATA_DIR="${SMOKE_HOME}" \
-    "${REPO_ROOT}/packages/cli/assets/devprofile-engine" \
+  BEHELD_DATA_DIR="${SMOKE_HOME}" \
+    "${REPO_ROOT}/packages/cli/assets/beheld-engine" \
     --port "${SMOKE_PORT}" \
     > "${SMOKE_HOME}/engine.log" 2>&1 &
   ENGINE_PID=$!
 
-  # Wait for engine to come up (max ~5s)
+  # Wait for engine to come up (max ~15s; --strip bootstraps slower on first run)
   ATTEMPTS=0
   until curl -sf "http://127.0.0.1:${SMOKE_PORT}/health" > /dev/null 2>&1; do
     ATTEMPTS=$((ATTEMPTS + 1))
-    if [ "$ATTEMPTS" -ge 25 ]; then
-      echo "    ✗ engine did not respond on /health after 5s"
+    if [ "$ATTEMPTS" -ge 75 ]; then
+      echo "    ✗ engine did not respond on /health after 15s"
       cat "${SMOKE_HOME}/engine.log" || true
       exit 1
     fi

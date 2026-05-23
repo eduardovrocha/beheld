@@ -14,7 +14,7 @@ import type { PlatformKey as EmbeddedPlatformKey } from "../src/keys/platform-ke
 function fixturePayload(): BundlePayload {
   return {
     created_at: "2026-05-14T03:00:00+00:00",
-    devprofile_version: "0.3.0",
+    beheld_version: "0.3.0",
     previous_hash: null,
     scores: {
       date: "2026-05-13",
@@ -123,7 +123,7 @@ async function buildSignedBundle(
     ? bytesToB64(new Uint8Array(32).fill(0xff))
     : devKey.pubB64Std;
   const payload = {
-    type: "devprofile-identity-attestation/v1",
+    type: "beheld-identity-attestation/v1",
     platform_key_id: embeddedKey.key_id,
     dev_pubkey: `ed25519-pub:${devPubB64}`,
     github: {

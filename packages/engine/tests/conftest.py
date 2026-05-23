@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from models import DevProfileEvent, Session
+from models import BeheldEvent, Session
 from reader.jsonl_reader import JsonlReader
 
 # ── raw event dicts ───────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ def jsonl_reader(sessions_dir: Path, cursor_file: Path) -> JsonlReader:
 
 @pytest.fixture
 def sample_session_1() -> Session:
-    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_1]
+    events = [BeheldEvent.from_dict(e) for e in EVENTS_SESSION_1]
     return Session(
         session_id="sess-1",
         source="claude-code",
@@ -176,7 +176,7 @@ def sample_session_1() -> Session:
 
 @pytest.fixture
 def sample_session_2() -> Session:
-    events = [DevProfileEvent.from_dict(e) for e in EVENTS_SESSION_2]
+    events = [BeheldEvent.from_dict(e) for e in EVENTS_SESSION_2]
     return Session(
         session_id="sess-2",
         source="continue-vscode",

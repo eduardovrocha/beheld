@@ -24,7 +24,7 @@ export interface EngineReadiness {
   sessions_remaining: number;
 }
 
-const BASE = process.env.DEVPROFILE_ENGINE_URL ?? "http://127.0.0.1:7338";
+const BASE = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 const TIMEOUT = 3000;
 
 async function get<T>(path: string): Promise<T | null> {

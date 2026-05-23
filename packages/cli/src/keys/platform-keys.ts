@@ -3,7 +3,7 @@
  * (Phase 5 / F5.6.0.d).
  *
  * Frozen snapshot of `web/source/backend/keys/platform/` from the
- * devprofile-web repo, captured at the moment of the last CLI release.
+ * beheld-web repo, captured at the moment of the last CLI release.
  * Refresh after rotating or revoking a platform key:
  *
  *   bun run sync:platform-keys

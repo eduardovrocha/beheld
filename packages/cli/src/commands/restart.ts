@@ -1,30 +1,27 @@
 import * as daemonManager from "../daemon-manager";
-
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
+import { ok, fail, meta, bold, brand, GREEN, RESET } from "../ui/styles";
 
 export async function restartCommand(): Promise<void> {
   const wasRunning = await daemonManager.isRunning();
 
+  console.log(brand("começando do zero"));
+
   if (wasRunning) {
-    process.stdout.write("  Parando DevProfile…");
+    process.stdout.write("  Parando Beheld…");
     // daemonManager.stop() already SIGTERM with 5s wait, then SIGKILL fallback
     await daemonManager.stop();
-    process.stdout.write(`\r  ${GREEN}✓${RESET}  DevProfile parado     ${DIM}(graceful, fallback kill -9 se necessário)${RESET}\n`);
+    process.stdout.write(`\r${ok(`Beheld parado     ${meta("(graceful, fallback kill -9 se necessário)")}`)}\n`);
   } else {
-    console.log(`  ${DIM}DevProfile não estava rodando — pulando stop.${RESET}`);
+    console.log(`  ${meta("Beheld não estava rodando — pulando stop.")}`);
   }
 
   const result = await daemonManager.start();
 
   if (!result.mcp || !result.engine) {
-    if (!result.mcp)    console.log(`  ${RED}✗${RESET}  MCP server falhou ao iniciar`);
-    if (!result.engine) console.log(`  ${RED}✗${RESET}  Engine falhou ao iniciar`);
+    if (!result.mcp)    console.log(fail("MCP server falhou ao iniciar"));
+    if (!result.engine) console.log(fail("Engine falhou ao iniciar"));
     console.log("");
-    console.log(`  Diagnóstico: ${BOLD}devprofile doctor${RESET}`);
+    console.log(`  Diagnóstico: ${bold("beheld doctor")}`);
     process.exit(1);
   }
 
@@ -36,17 +33,17 @@ export async function restartCommand(): Promise<void> {
   ]);
 
   if (mcpOk && engineOk) {
-    console.log(`  ${GREEN}✓${RESET}  MCP server respondendo em /health     ${DIM}porta 7337${RESET}`);
-    console.log(`  ${GREEN}✓${RESET}  Engine respondendo em /health         ${DIM}porta 7338${RESET}`);
+    console.log(ok(`MCP server respondendo em /health     ${meta("porta 7337")}`));
+    console.log(ok(`Engine respondendo em /health         ${meta("porta 7338")}`));
     console.log("");
-    console.log(`  ${GREEN}DevProfile reiniciado com sucesso.${RESET}`);
+    console.log(`  ${GREEN}Beheld reiniciado com sucesso.${RESET}`);
     console.log("");
     return;
   }
 
-  if (!mcpOk)    console.log(`  ${RED}✗${RESET}  MCP /health não responde após restart`);
-  if (!engineOk) console.log(`  ${RED}✗${RESET}  Engine /health não responde após restart`);
+  if (!mcpOk)    console.log(fail("MCP /health não responde após restart"));
+  if (!engineOk) console.log(fail("Engine /health não responde após restart"));
   console.log("");
-  console.log(`  Diagnóstico: ${BOLD}devprofile doctor${RESET}`);
+  console.log(`  Diagnóstico: ${bold("beheld doctor")}`);
   process.exit(1);
 }

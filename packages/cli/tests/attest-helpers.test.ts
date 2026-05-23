@@ -80,7 +80,7 @@ describe("claimAttestation", () => {
   test("faz POST com claim_code e retorna o JSON da attestation", async () => {
     const expected = {
       payload: {
-        type: "devprofile-identity-attestation/v1",
+        type: "beheld-identity-attestation/v1",
         platform_key_id: "k",
         dev_pubkey: "ed25519-pub:AAAA",
         github: { user_id: 1, login: "u", verified_at: "t" },

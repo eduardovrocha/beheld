@@ -5,13 +5,13 @@ export const VERSION = "0.1.1";
 const program = new Command();
 
 program
-  .name("devprofile")
+  .name("beheld")
   .description("Privacy-first developer profiling for Claude Code and Continue.dev")
   .version(VERSION, "-v, --version");
 
 program
   .command("init")
-  .description("Configure DevProfile for Claude Code and Continue.dev")
+  .description("Configure Beheld for Claude Code and Continue.dev")
   .option("--force", "skip reinit prompt and run all setup steps")
   .action(async (opts: { force?: boolean }) => {
     const { initCommand } = await import("./commands/init");
@@ -20,7 +20,7 @@ program
 
 program
   .command("start")
-  .description("Start the DevProfile daemon")
+  .description("Start the Beheld daemon")
   .action(async () => {
     const { startCommand } = await import("./commands/start");
     await startCommand();
@@ -28,7 +28,7 @@ program
 
 program
   .command("stop")
-  .description("Stop the DevProfile daemon")
+  .description("Stop the Beheld daemon")
   .action(async () => {
     const { stopCommand } = await import("./commands/stop");
     await stopCommand();
@@ -36,7 +36,7 @@ program
 
 program
   .command("restart")
-  .description("Restart the DevProfile daemon (graceful stop + fresh start, validates via /health)")
+  .description("Restart the Beheld daemon (graceful stop + fresh start, validates via /health)")
   .action(async () => {
     const { restartCommand } = await import("./commands/restart");
     await restartCommand();
@@ -52,7 +52,7 @@ program
 
 program
   .command("doctor")
-  .description("Diagnose DevProfile health (daemons, PID file, codesign, JSONL, orphans)")
+  .description("Diagnose Beheld health (daemons, PID file, codesign, JSONL, orphans)")
   .action(async () => {
     const { doctorCommand } = await import("./commands/doctor");
     await doctorCommand();
@@ -83,22 +83,63 @@ program
 program
   .command("attest")
   .description("Bind your Ed25519 pubkey to your GitHub identity (Phase 5 / F5.6.1)")
-  .option("--url <url>", "Platform API base URL (defaults to DEVPROFILE_API_URL or http://localhost:3000)")
+  .option("--url <url>", "Platform API base URL (defaults to BEHELD_API_URL or http://localhost:3000)")
   .action(async (opts: { url?: string }) => {
     const { attestCommand } = await import("./commands/attest");
     await attestCommand(opts);
   });
 
+const identityCmd = program
+  .command("identity")
+  .description("Manage the GitHub identity binding (Phase 5 / F5.6)");
+
+identityCmd
+  .command("link")
+  .description("Bind your Ed25519 pubkey to your GitHub identity (alias of `beheld attest`)")
+  .option("--url <url>", "Platform API base URL (defaults to BEHELD_API_URL or http://localhost:3000)")
+  .action(async (opts: { url?: string }) => {
+    const { identityLinkCommand } = await import("./commands/identity");
+    await identityLinkCommand(opts);
+  });
+
+identityCmd
+  .command("status")
+  .description("Show the GitHub identity currently bound to your key, if any")
+  .action(async () => {
+    const { identityStatusCommand } = await import("./commands/identity");
+    await identityStatusCommand();
+  });
+
 const snapshotCmd = program
   .command("snapshot")
-  .description("Generate a signed .dpbundle of your current profile")
+  .description("Generate a signed .beheld of your current profile")
   .option("--output <path>", "Also write the bundle to this path")
   .option("--share", "Upload to the portal and print a QR + short URL")
   .option("--html", "Also generate a self-contained HTML retrato técnico")
   .option("--author-name <name>", "Name displayed on the HTML retrato (defaults to 'dev')")
-  .action(async (opts: { output?: string; share?: boolean; html?: boolean; authorName?: string }) => {
+  .option("--no-rekor", "Skip Sigstore Rekor submission (Phase 5 / F5.8)")
+  .option(
+    "--rekor-submit <path>",
+    "Re-submit an existing bundle to Rekor and promote it to fully_verifiable",
+  )
+  .action(async (opts: {
+    output?: string;
+    share?: boolean;
+    html?: boolean;
+    authorName?: string;
+    rekor?: boolean;
+    rekorSubmit?: string;
+  }) => {
     const { snapshotCommand } = await import("./commands/snapshot");
-    await snapshotCommand(opts);
+    // commander's --no-rekor sets `opts.rekor = false`; translate to noRekor.
+    await snapshotCommand({
+      output: opts.output,
+      share: opts.share,
+      html: opts.html,
+      authorName: opts.authorName,
+      noRekor: opts.rekor === false,
+      rekorSubmit: opts.rekorSubmit,
+    });
   });
 
 snapshotCmd
@@ -111,16 +152,17 @@ snapshotCmd
 
 program
   .command("verify <file>")
-  .description("Verify a .dpbundle offline (schema + hash + signature)")
-  .option("--chain", "Also walk previous_hash links resolving from ~/.devprofile/snapshots/")
-  .action(async (file: string, opts: { chain?: boolean }) => {
+  .description("Verify a .beheld offline (schema + hash + signature)")
+  .option("--chain", "Also walk previous_hash links resolving from ~/.beheld/snapshots/")
+  .option("--verify-rekor", "Confirm the Rekor inclusion proof via the public log (Phase 5 / F5.8)")
+  .action(async (file: string, opts: { chain?: boolean; verifyRekor?: boolean }) => {
     const { verifyCommand } = await import("./commands/verify");
     await verifyCommand(file, opts);
   });
 
 const keysCmd = program
   .command("keys")
-  .description("Manage Ed25519 keys used to sign .dpbundle snapshots");
+  .description("Manage Ed25519 keys used to sign .beheld snapshots");
 
 keysCmd
   .command("show")
@@ -163,7 +205,7 @@ program
 
 program
   .command("update")
-  .description("Update DevProfile to the latest version")
+  .description("Update Beheld to the latest version")
   .action(async () => {
     const { updateCommand } = await import("./commands/update");
     await updateCommand();
@@ -171,8 +213,8 @@ program
 
 program
   .command("delete")
-  .description("Remove DevProfile data")
-  .option("--local", "Delete local data (~/.devprofile/)")
+  .description("Remove Beheld data")
+  .option("--local", "Delete local data (~/.beheld/)")
   .option("--remote", "Delete remote account and data")
   .option("--all", "Delete everything (local + remote + hooks)")
   .action(async (opts: { local?: boolean; remote?: boolean; all?: boolean }) => {

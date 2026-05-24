@@ -17,6 +17,7 @@ import {
   claudeJsonPath,
   migrateProjectScopedRegistrations,
   installClaudeSlashCommand,
+  selfHealClaudeIntegration,
 } from "../src/config/hooks";
 import type { ProfileData, Scores, ViewFlags } from "../src/types";
 
@@ -275,7 +276,30 @@ describe("hooks idempotency", () => {
     expect(cfg.hooks.PreToolUse).toHaveLength(1);
     expect(cfg.hooks.PostToolUse).toHaveLength(1);
     expect(cfg.hooks.Stop).toHaveLength(1);
+    expect(cfg.hooks.SessionStart).toHaveLength(1);
     expect(cfg.mcpServers?.beheld).toBeUndefined();
+  });
+
+  test("installClaudeCodeHooks registers a SessionStart hook that heals /beheld", async () => {
+    await installClaudeCodeHooks(settingsFile);
+    const cfg = JSON.parse(readFileSync(settingsFile, "utf8"));
+    const ss = cfg.hooks.SessionStart as Array<{
+      hooks?: Array<{ command?: string }>;
+    }>;
+    expect(ss).toHaveLength(1);
+    const cmd = ss[0].hooks?.[0].command ?? "";
+    expect(cmd).toContain("beheld-session-start"); // marker for idempotency
+    expect(cmd).toContain("beheld.md"); // points at the slash command file
+    expect(cmd).toContain("beheld self-heal"); // invokes the new subcommand
+    expect(cmd).toContain("beheld doctor"); // fallback for older binaries
+    expect(cmd).toContain("exit 0"); // never fails the session
+  });
+
+  test("installClaudeCodeHooks SessionStart is idempotent", async () => {
+    await installClaudeCodeHooks(settingsFile);
+    await installClaudeCodeHooks(settingsFile);
+    const cfg = JSON.parse(readFileSync(settingsFile, "utf8"));
+    expect(cfg.hooks.SessionStart).toHaveLength(1);
   });
 
   test("installClaudeMcpServer adds beheld to ~/.claude.json with stdio", async () => {
@@ -334,6 +358,15 @@ describe("hooks idempotency", () => {
       }>;
       expect(hooks.some((m) => m.hooks?.some((h) => h.command?.includes("7337")))).toBe(false);
     }
+    // SessionStart hook (marker-based, not port-based) must also be cleaned.
+    const ssHooks = (claudeCfg.hooks?.SessionStart ?? []) as Array<{
+      hooks?: Array<{ command?: string }>;
+    }>;
+    expect(
+      ssHooks.some((m) =>
+        m.hooks?.some((h) => h.command?.includes("beheld-session-start")),
+      ),
+    ).toBe(false);
 
     const continueCfg = JSON.parse(readFileSync(configFile, "utf8"));
     const servers = continueCfg.mcpServers as Array<{ name: string }>;
@@ -420,6 +453,83 @@ describe("hooks idempotency", () => {
   test("continueConfigPath builds path under given base", () => {
     const p = continueConfigPath("/home/test");
     expect(p).toBe(join("/home/test", ".continue", "config.json"));
+  });
+});
+
+// ── selfHealClaudeIntegration (regression: /beheld vanishing) ──────────────────
+
+describe("selfHealClaudeIntegration", () => {
+  let base: string;
+
+  function writeConfig(claudeCode: boolean): void {
+    mkdirSync(join(base, ".beheld"), { recursive: true });
+    writeFileSync(
+      join(base, ".beheld", "config.json"),
+      JSON.stringify({ environments: { claudeCode, continueDev: false } }),
+    );
+  }
+
+  function commandFile(): string {
+    return join(base, ".claude", "commands", "beheld.md");
+  }
+  function claudeJson(): string {
+    return join(base, ".claude.json");
+  }
+
+  beforeEach(() => {
+    base = join(tmpdir(), `beheld-heal-${randomUUID()}`);
+    mkdirSync(base, { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  test("no-op when Claude Code was not opted in", async () => {
+    writeConfig(false);
+    const healed = await selfHealClaudeIntegration(base);
+    expect(healed.slashCommandRestored).toBe(false);
+    expect(healed.mcpServerRestored).toBe(false);
+    expect(existsSync(commandFile())).toBe(false);
+    expect(existsSync(claudeJson())).toBe(false);
+  });
+
+  test("no-op when ~/.beheld/config.json is missing", async () => {
+    const healed = await selfHealClaudeIntegration(base);
+    expect(healed.slashCommandRestored).toBe(false);
+    expect(healed.mcpServerRestored).toBe(false);
+  });
+
+  test("restores both slash command and MCP entry when opted in and both missing", async () => {
+    writeConfig(true);
+    const healed = await selfHealClaudeIntegration(base);
+
+    expect(healed.slashCommandRestored).toBe(true);
+    expect(healed.mcpServerRestored).toBe(true);
+
+    // v3 slash command content — frontmatter + greeting + routing rules.
+    const slashContent = readFileSync(commandFile(), "utf8");
+    expect(slashContent).toContain('version: "3"');
+    expect(slashContent).toContain("B3H31D");
+    const cfg = JSON.parse(readFileSync(claudeJson(), "utf8"));
+    expect(cfg.mcpServers?.beheld?.args).toEqual(["server", "--stdio"]);
+  });
+
+  test("is idempotent — second call restores nothing", async () => {
+    writeConfig(true);
+    await selfHealClaudeIntegration(base);
+    const healed = await selfHealClaudeIntegration(base);
+    expect(healed.slashCommandRestored).toBe(false);
+    expect(healed.mcpServerRestored).toBe(false);
+  });
+
+  test("restores only the slash command when MCP entry already present", async () => {
+    writeConfig(true);
+    await installClaudeMcpServer(claudeJson(), base);
+
+    const healed = await selfHealClaudeIntegration(base);
+    expect(healed.mcpServerRestored).toBe(false);
+    expect(healed.slashCommandRestored).toBe(true);
+    expect(existsSync(commandFile())).toBe(true);
   });
 });
 

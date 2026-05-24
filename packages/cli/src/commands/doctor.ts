@@ -208,6 +208,70 @@ function checkCodesignMacOS(): CheckResult | null {
   return { severity, label: "Codesign (macOS)", lines, hint };
 }
 
+function claudeCodeOptedIn(): boolean {
+  try {
+    const cfg = JSON.parse(
+      readFileSync(join(beheldDir(), "config.json"), "utf8"),
+    ) as { environments?: { claudeCode?: unknown } };
+    return cfg.environments?.claudeCode === true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkClaudeIntegration(): Promise<CheckResult> {
+  const { claudeCommandPath, claudeJsonPath, selfHealClaudeIntegration } =
+    await import("../config/hooks");
+
+  if (!claudeCodeOptedIn()) {
+    return {
+      severity: "ok",
+      label: "Integração Claude Code (/beheld)",
+      lines: [`${DIM}Claude Code não habilitado — etapa opcional${RESET}`],
+    };
+  }
+
+  // Self-heal first: doctor both diagnoses AND repairs a vanished /beheld.
+  let healed = { slashCommandRestored: false, mcpServerRestored: false };
+  try {
+    healed = await selfHealClaudeIntegration();
+  } catch {
+    /* fall through to report raw state */
+  }
+
+  const commandFile = claudeCommandPath();
+  const hasCommand =
+    existsSync(commandFile) && readFileSync(commandFile, "utf8").trim().length > 0;
+
+  let hasMcp = false;
+  try {
+    const cfg = JSON.parse(readFileSync(claudeJsonPath(), "utf8")) as {
+      mcpServers?: Record<string, { args?: unknown }>;
+    };
+    const entry = cfg.mcpServers?.["beheld"];
+    hasMcp = !!entry && Array.isArray(entry.args) && entry.args.includes("--stdio");
+  } catch {
+    /* hasMcp stays false */
+  }
+
+  const lines = [
+    hasCommand
+      ? `${GREEN}✓${RESET} Slash command ${commandFile.replace(homedir(), "~")}${healed.slashCommandRestored ? " (restaurado agora)" : ""}`
+      : `${RED}✗${RESET} Slash command ausente — /beheld não aparece`,
+    hasMcp
+      ? `${GREEN}✓${RESET} MCP server registrado em ~/.claude.json${healed.mcpServerRestored ? " (restaurado agora)" : ""}`
+      : `${RED}✗${RESET} MCP server não registrado em ~/.claude.json`,
+  ];
+
+  const severity: Severity = hasCommand && hasMcp ? "ok" : "crit";
+  return {
+    severity,
+    label: "Integração Claude Code (/beheld)",
+    lines,
+    hint: severity === "ok" ? undefined : "Execute: beheld init (marque Claude Code)",
+  };
+}
+
 async function checkOrphans(): Promise<CheckResult> {
   const status = await engineStatus();
   if (!status) {
@@ -358,6 +422,9 @@ export async function doctorCommand(): Promise<void> {
   const codesign = checkCodesignMacOS();
   if (codesign) printResult(codesign);
 
+  const integration = await checkClaudeIntegration();
+  printResult(integration);
+
   const orphans = await checkOrphans();
   printResult(orphans);
 
@@ -365,7 +432,7 @@ export async function doctorCommand(): Promise<void> {
   printResult(jsonl);
 
   // ── summary ────────────────────────────────────────────────────────────────
-  const all: CheckResult[] = [mcp, engine, pid, ...(codesign ? [codesign] : []), orphans, jsonl];
+  const all: CheckResult[] = [mcp, engine, pid, ...(codesign ? [codesign] : []), integration, orphans, jsonl];
   const crits = all.filter((c) => c.severity === "crit");
   const warns = all.filter((c) => c.severity === "warn");
 

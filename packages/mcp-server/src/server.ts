@@ -238,6 +238,39 @@ export function startServer(): ReturnType<typeof Bun.serve> {
 
 // ─── Daemon entry point ───────────────────────────────────────────────────────
 
+/**
+ * Defense-in-depth heartbeat — every minute the daemon re-runs the integration
+ * self-heal. This catches the `/beheld` slash command file vanishing mid-session
+ * (e.g. wiped by Claude Code's periodic command housekeeping or an external
+ * cleanup), without relying on the SessionStart hook firing.
+ *
+ * The check is sub-millisecond when the file is present (just a stat). It only
+ * does I/O when the file is missing or outdated. Failures stay silent — a heal
+ * crash must never destabilise the daemon.
+ */
+async function startHealHeartbeat(): Promise<void> {
+  const { selfHealClaudeIntegration } = await import("../../cli/src/config/hooks");
+  const tick = (): void => {
+    selfHealClaudeIntegration()
+      .then((healed) => {
+        if (healed.slashCommandRestored || healed.mcpServerRestored) {
+          console.error(
+            `[heal] restored: ${[
+              healed.slashCommandRestored ? "slashCommand" : null,
+              healed.mcpServerRestored ? "mcpServer" : null,
+            ]
+              .filter(Boolean)
+              .join("+")}`,
+          );
+        }
+      })
+      .catch(() => { /* best-effort */ });
+  };
+  // Don't fire on the first tick — `beheld start` already healed once. First
+  // run is one interval out.
+  setInterval(tick, 60_000);
+}
+
 if (import.meta.main) {
   rotateLogs();
   writePid(process.pid);
@@ -247,4 +280,7 @@ if (import.meta.main) {
 
   const server = startServer();
   console.log(`Beheld MCP server listening on http://127.0.0.1:${server.port}`);
+
+  // Periodic self-heal so the slash command can't stay gone for more than ~1min.
+  startHealHeartbeat().catch(() => { /* never block startup */ });
 }

@@ -101,6 +101,10 @@ export interface L1ImportStatus {
         root_commit_hash?: string;
         commit_count?: number;
         detail?: string;
+        ecosystems?: string[];
+        test_ratio?: number;
+        first_commit_at?: string;
+        last_commit_at?: string;
       };
 }
 

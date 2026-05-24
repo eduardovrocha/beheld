@@ -159,6 +159,10 @@ class L1Importer:
                 "status": "imported",
                 "root_commit_hash": signals.root_commit_hash,
                 "commit_count": signals.commit_count,
+                "ecosystems": list(signals.ecosystems),
+                "test_ratio": signals.test_ratio,
+                "first_commit_at": signals.first_commit_at,
+                "last_commit_at": signals.last_commit_at,
             }
             self._finish(result)
             return result

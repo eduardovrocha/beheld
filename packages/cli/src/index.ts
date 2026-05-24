@@ -59,6 +59,15 @@ program
   });
 
 program
+  .command("self-heal")
+  .description("Silently restore /beheld slash command + MCP server entry if missing (used by SessionStart hook)")
+  .option("--verbose", "print a one-line summary of what was restored")
+  .action(async (opts: { verbose?: boolean }) => {
+    const { selfHealCommand } = await import("./commands/self-heal");
+    await selfHealCommand(opts);
+  });
+
+program
   .command("view")
   .description("Display your developer profile")
   .option("--json", "Output as JSON")

@@ -506,9 +506,9 @@ describe("selfHealClaudeIntegration", () => {
     expect(healed.slashCommandRestored).toBe(true);
     expect(healed.mcpServerRestored).toBe(true);
 
-    // v3 slash command content — frontmatter + greeting + routing rules.
+    // v4 slash command content — frontmatter + greeting + routing rules.
     const slashContent = readFileSync(commandFile(), "utf8");
-    expect(slashContent).toContain('version: "3"');
+    expect(slashContent).toContain('version: "4"');
     expect(slashContent).toContain("B3H31D");
     const cfg = JSON.parse(readFileSync(claudeJson(), "utf8"));
     expect(cfg.mcpServers?.beheld?.args).toEqual(["server", "--stdio"]);

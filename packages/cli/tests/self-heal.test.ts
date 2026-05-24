@@ -49,7 +49,7 @@ describe("selfHealCommand", () => {
     await selfHealCommand({ base });
     const file = join(base, ".claude", "commands", "beheld.md");
     expect(existsSync(file)).toBe(true);
-    expect(readFileSync(file, "utf8")).toContain('version: "3"');
+    expect(readFileSync(file, "utf8")).toContain('version: "4"');
   });
 
   test("restores ~/.claude.json MCP entry when opted in and missing", async () => {

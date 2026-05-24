@@ -10,6 +10,7 @@ import type {
   ImportInitResponse,
   ImportStatusResponse,
 } from "../types/import";
+import type { StackResponse } from "../types/stack";
 
 export const DEFAULT_ENGINE_URL =
   process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
@@ -74,5 +75,18 @@ export class EngineClient {
       throw new Error(`engine GET /l1/import/status failed: ${res.status}`);
     }
     return (await res.json()) as ImportStatusResponse;
+  }
+
+  /** GET /l1/stack — language distribution + architecture patterns
+   *  aggregated across all imported repos (F6.12b). Throws on non-2xx so the
+   *  caller can fall back to an offline hint message. */
+  async getStack(): Promise<StackResponse> {
+    const res = await this.fetchImpl(`${this.baseUrl}/l1/stack`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) {
+      throw new Error(`engine GET /l1/stack failed: ${res.status}`);
+    }
+    return (await res.json()) as StackResponse;
   }
 }

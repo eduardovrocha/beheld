@@ -6,6 +6,11 @@ import type { McpTool } from "./types";
 import { getLastCachedScores } from "../../../cli/src/storage/local-cache";
 import { EngineClient } from "../clients/engine-client";
 import type { ImportResult, ImportStatusResponse } from "../types/import";
+import type {
+  ArchitectureEntry,
+  LanguageEntry,
+  StackResponse,
+} from "../types/stack";
 
 // Read at call time so tests can swap BEHELD_ENGINE_URL between assertions
 // without having to hot-reload this module.
@@ -369,6 +374,128 @@ export async function handleImport(
   ].join("\n");
 }
 
+// ── /beheld stack — slash command surface (F6.12b) ───────────────────────────
+
+const STACK_BAR_WIDTH = 12;
+const STACK_LANG_LIMIT = 8;
+/** FULL BLOCK · LIGHT SHADE — match the score-bar palette already in use. */
+const BLOCK_FILLED = "█";
+const BLOCK_EMPTY = "░";
+
+/** Human-readable label per canonical architecture-pattern id (mirrors the
+ *  engine's `architecture_detector.py`). Patterns not in this map fall back
+ *  to the raw id so a new pattern never silently disappears from the UI. */
+const PATTERN_LABELS: Record<string, string> = {
+  mvc: "MVC",
+  monorepo: "Monorepo",
+  microservices: "Microsserviços",
+  graphql: "GraphQL",
+  rest_api: "REST API",
+  serverless: "Serverless",
+  event_driven: "Event-driven",
+  iac: "IaC",
+  container_orchestration: "Orquestração",
+  ci_cd: "CI/CD",
+};
+
+function patternLabel(id: string): string {
+  return PATTERN_LABELS[id] ?? id;
+}
+
+/** PT-BR thousand separator (1247 → "1.247"). Numbers above 1,000,000 are
+ *  rare for commit counts so toLocaleString is enough. */
+function thousands(n: number): string {
+  return n.toLocaleString("pt-BR");
+}
+
+function stackBar(pct: number, width: number = STACK_BAR_WIDTH): string {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
+  return BLOCK_FILLED.repeat(filled) + BLOCK_EMPTY.repeat(width - filled);
+}
+
+function formatLanguageRow(lang: LanguageEntry): string {
+  const name = lang.language.padEnd(11);
+  const pct = `${Math.round(lang.weight_pct)}%`.padStart(4);
+  const bar = stackBar(lang.weight_pct);
+  const commits = thousands(lang.commit_count).padStart(5);
+  const period =
+    lang.first_seen && lang.last_seen
+      ? `${lang.first_seen} → ${lang.last_seen}`
+      : (lang.first_seen || lang.last_seen || "");
+  return `| ${name} | ${bar} ${pct} | ${commits} | ${period.padEnd(20)} |`;
+}
+
+export function formatStackResponse(stack: StackResponse): string {
+  const lines: string[] = [
+    `## Stack · ${stack.repos_analyzed} repositório${stack.repos_analyzed === 1 ? "" : "s"} · ${thousands(stack.total_commits_analyzed)} commits analisados`,
+    "",
+    "### Linguagens",
+    "",
+    "| Linguagem   | Peso              | Commits | Período              |",
+    "|-------------|-------------------|---------|----------------------|",
+  ];
+
+  const langs = stack.language_distribution.slice(0, STACK_LANG_LIMIT);
+  for (const lang of langs) {
+    lines.push(formatLanguageRow(lang));
+  }
+  const overflow = stack.language_distribution.length - STACK_LANG_LIMIT;
+  if (overflow > 0) {
+    lines.push(`· e mais ${overflow} linguagen${overflow === 1 ? "" : "s"}`);
+  }
+
+  lines.push("");
+  lines.push("### Arquitetura");
+  lines.push("");
+
+  const strong = stack.architecture_patterns.filter((p) => p.confidence === "strong");
+  const weak = stack.architecture_patterns.filter((p) => p.confidence === "weak");
+
+  if (strong.length === 0 && weak.length === 0) {
+    lines.push("Nenhum padrão de arquitetura identificado.");
+  } else {
+    if (strong.length > 0) {
+      const repoCount = strong.reduce((acc, p) => Math.max(acc, p.repo_count), 0);
+      lines.push(`Padrões detectados em ${repoCount} repositório${repoCount === 1 ? "" : "s"}:`);
+      lines.push("");
+      lines.push(strong.map((p) => patternLabel(p.pattern)).join(" · "));
+    }
+    if (weak.length > 0) {
+      if (strong.length > 0) lines.push("");
+      lines.push(`Indícios: ${weak.map((p) => patternLabel(p.pattern)).join(" · ")}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("---");
+  lines.push("*Baseado em commits do autor. Atualizado em cada `beheld import`.*");
+  return lines.join("\n");
+}
+
+export interface StackDeps {
+  engine: EngineClient;
+}
+
+export async function handleStack(deps: StackDeps): Promise<string> {
+  let stack: StackResponse;
+  try {
+    stack = await deps.engine.getStack();
+  } catch {
+    return "⚠ Engine offline. Execute `beheld start` e tente novamente.";
+  }
+
+  if (stack.repos_analyzed === 0) {
+    return [
+      "Nenhum repositório importado ainda.",
+      "",
+      "Execute /beheld import <url> para adicionar repositórios ao perfil.",
+    ].join("\n");
+  }
+
+  return formatStackResponse(stack);
+}
+
 // ── beheld tool (slash command entry point) ──────────────────────────────────
 
 export const beheldTool: McpTool = {
@@ -379,9 +506,9 @@ export const beheldTool: McpTool = {
     properties: {
       action: {
         type: "string",
-        enum: ["view", "import"],
+        enum: ["view", "import", "stack"],
         description:
-          "view: exibe perfil · import: importa repositório git para L1",
+          "view: exibe perfil · import: importa repositório git para L1 · stack: linguagens + arquitetura",
       },
       url: {
         type: "string",
@@ -397,6 +524,11 @@ export const beheldTool: McpTool = {
       const url = typeof args.url === "string" ? args.url : "";
       const engine = new EngineClient({ baseUrl: engineUrl() });
       return handleImport(url, { engine });
+    }
+
+    if (action === "stack") {
+      const engine = new EngineClient({ baseUrl: engineUrl() });
+      return handleStack({ engine });
     }
 
     const view = (args.view as string) ?? "summary";

@@ -238,7 +238,7 @@ export function claudeCommandPath(base = homedir()): string {
 /** Bump whenever SLASH_COMMAND_CONTENT changes in a way that should override
  *  previously-installed copies. The installer rewrites any file whose
  *  detectable version is below this value. */
-export const SLASH_COMMAND_VERSION = "3";
+export const SLASH_COMMAND_VERSION = "4";
 
 /**
  * Body of `~/.claude/commands/beheld.md`. Exported so tests can pin it as a
@@ -249,12 +249,14 @@ export const SLASH_COMMAND_VERSION = "3";
  *   - frontmatter declares the current SLASH_COMMAND_VERSION
  *   - greeting instruction with `[nome]` placeholder (Claude resolves at runtime;
  *     MCP server never resolves the user name)
- *   - four routing rules: b3 conversational mode, import-prefix, bare-import,
- *     fallback-view (in that exact order — b3 must precede import to avoid
- *     ambiguity, since "b3 import ..." is conversational, not an import)
+ *   - five routing rules: b3 conversational mode, import-prefix, bare-import,
+ *     stack-keywords (F6.12b), fallback-view. b3 must precede import to avoid
+ *     ambiguity ("b3 import ..." is conversational, not an import). Stack is
+ *     placed before the catch-all view so the keywords don't fall into it.
  *   - b3 mode embeds the literal blockquote template, including the signal
  *     symbol `─ ( · · · ⊙ · · · ) ─`, so the on-disk prompt fully specifies
  *     the visual format without runtime branching
+ *   - stack keywords accepted: stack | linguagens | frameworks | arquitetura
  */
 export const SLASH_COMMAND_CONTENT = `---
 version: "${SLASH_COMMAND_VERSION}"
@@ -301,7 +303,12 @@ Regra 3 — Import sem URL:
   → Chame a tool \`beheld\` com: action="import", url=""
   → Retorne exatamente o que a tool retornar
 
-Regra 4 — View (padrão):
+Regra 4 — Stack:
+  Se "$ARGUMENTS" for exatamente "stack" OU "linguagens" OU "frameworks" OU "arquitetura":
+  → Chame a tool \`beheld\` com: action="stack"
+  → Retorne exatamente o que a tool retornar
+
+Regra 5 — View (padrão):
   Em qualquer outro caso (vazio, "summary", "scores", "insights", "full", etc.):
   → Chame a tool \`beheld\` com: action="view", view="$ARGUMENTS" (default: "summary")
   → Retorne exatamente o que a tool retornar

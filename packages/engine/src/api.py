@@ -364,6 +364,7 @@ def snapshot_payload() -> dict:
             VERSION,
             engine_version_hash=get_engine_hash(),
             identity_gen=identity_gen,
+            insights_gen=insights_gen,
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -386,6 +387,7 @@ def snapshot_html_data() -> dict:
             VERSION,
             engine_version_hash=get_engine_hash(),
             identity_gen=identity_gen,
+            insights_gen=insights_gen,
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))

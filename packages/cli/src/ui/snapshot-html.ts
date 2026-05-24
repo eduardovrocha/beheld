@@ -269,6 +269,59 @@ function renderStackSection(stack: BundleStackSection | null | undefined): strin
     </section>`;
 }
 
+// F6.12 / v5 — Perfil técnico + Insights, both read from bundle.payload
+// (l2 for perfil técnico, payload.insights for the bullets).
+
+interface BundleL2 {
+  platforms?: Record<string, number>;
+  workflow_distribution?: Record<string, number>;
+  sessions_analyzed?: number;
+}
+
+function renderPerfilTecnicoSection(l2: BundleL2 | undefined): string {
+  if (!l2) return "";
+  const platforms = l2.platforms ?? {};
+  const wf = l2.workflow_distribution ?? {};
+  const sessions = l2.sessions_analyzed ?? 0;
+
+  // Top 5 platforms by count.
+  const platLabel = Object.entries(platforms)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([k]) => PLATFORM_LABEL[k] ?? k)
+    .join(", ");
+
+  // Top 3 workflow patterns by share, formatted "name (NN%)".
+  const wfLabel = Object.entries(wf)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k, v]) => `${k} (${Math.round(v * 100)}%)`)
+    .join(" · ");
+
+  const hasPlat = platLabel.length > 0;
+  const hasWf = wfLabel.length > 0;
+  if (!hasPlat && !hasWf && sessions === 0) return "";
+
+  return `
+    <section class="perfil-tecnico" aria-label="Perfil técnico">
+      <div class="label">Perfil técnico</div>
+      <div class="perfil-row"><span class="key">Plataformas</span><span class="val">${escapeHtml(hasPlat ? platLabel : "—")}</span></div>
+      <div class="perfil-row"><span class="key">Workflow</span><span class="val">${escapeHtml(hasWf ? wfLabel : "—")}</span></div>
+      <div class="perfil-row"><span class="key">Total sessões</span><span class="val">${sessions.toLocaleString("pt-BR")}</span></div>
+    </section>`;
+}
+
+function renderInsightsSection(insights: { insights?: string[] } | null | undefined): string {
+  const bullets = (insights?.insights ?? []).filter((s) => typeof s === "string" && s.trim().length > 0);
+  if (bullets.length === 0) return "";
+  const items = bullets.slice(0, 5).map((b) => `<li>${escapeHtml(b)}</li>`).join("");
+  return `
+    <section class="insights" aria-label="Insights">
+      <div class="label">Insights</div>
+      <ul class="insights-list">${items}</ul>
+    </section>`;
+}
+
 // ── main renderer ────────────────────────────────────────────────────────────
 
 export function renderSnapshotHtml(data: SnapshotHtmlData): string {
@@ -306,12 +359,18 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
     </section>`
     : "";
 
-  // F6.12 — scores + stack rendered server-side from the signed bundle.
-  // The HTML now needs zero runtime fetches to display these sections;
-  // a shared `.html` is fully portable.
+  // F6.12 — scores + perfil técnico + stack + insights rendered server-side
+  // from the signed bundle. The HTML now needs zero runtime fetches to
+  // display these sections; a shared `.html` is fully portable.
   const scoresBlock = renderScoresSection(data.bundle.payload.scores);
+  const perfilTecnicoBlock = renderPerfilTecnicoSection(
+    (data.bundle.payload as { l2?: BundleL2 }).l2,
+  );
   const stackPayload = (data.bundle.payload as { stack?: BundleStackSection | null }).stack ?? null;
   const stackBlock = renderStackSection(stackPayload);
+  const insightsBlock = renderInsightsSection(
+    (data.bundle.payload as { insights?: { insights?: string[] } | null }).insights,
+  );
 
   const captureLine = repoCount > 0
     ? `Capturado a partir de ${repoCount} repositório${repoCount === 1 ? "" : "s"} e meses de uso real, não auto-declarado.`
@@ -453,6 +512,41 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       color: var(--ink);
     }
 
+    /* F6.12 / v5 — Perfil técnico: 3 key:value rows from bundle.payload.l2.
+       Compact list-style — fits next to the scores block. */
+    .perfil-tecnico { margin-top: 48px; }
+    .perfil-tecnico .label {
+      font-size: 13px; font-weight: 500; color: var(--ink-soft);
+      margin-bottom: 12px;
+    }
+    .perfil-row {
+      display: grid; grid-template-columns: 130px 1fr;
+      gap: 12px; padding: 4px 0;
+      font-size: 13px;
+    }
+    .perfil-row .key { color: var(--ink-soft); }
+    .perfil-row .val { color: var(--ink); }
+
+    /* F6.12 / v5 — Insights: bullets from bundle.payload.insights.insights. */
+    .insights { margin-top: 48px; }
+    .insights .label {
+      font-size: 13px; font-weight: 500; color: var(--ink-soft);
+      margin-bottom: 12px;
+    }
+    .insights-list {
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .insights-list li {
+      font-size: 14px; color: var(--ink);
+      padding-left: 18px; position: relative;
+      line-height: 1.5;
+    }
+    .insights-list li::before {
+      content: "→"; position: absolute; left: 0;
+      color: var(--ink-soft);
+    }
+
     /* F6.12c — stack section: language bars + architecture chips.
        Now rendered server-side from bundle.payload.stack — no live fetch.
        Tokens match the existing page palette (--ink, --ink-soft, --rule, --bg). */
@@ -517,6 +611,10 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       .scores { margin-top: 48px; }
       .score-overall-num { font-size: 40px; }
       .score-row { grid-template-columns: 110px 1fr 30px; gap: 10px; font-size: 12px; }
+      .perfil-tecnico { margin-top: 36px; }
+      .perfil-row { grid-template-columns: 110px 1fr; gap: 10px; font-size: 12px; }
+      .insights { margin-top: 36px; }
+      .insights-list li { font-size: 13px; }
       .stack { margin-top: 48px; }
       .stack-lang { grid-template-columns: 90px 1fr auto; gap: 10px; font-size: 13px; }
     }
@@ -557,7 +655,9 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       </div>
     </section>${emergentBlock}
 ${scoresBlock}
+${perfilTecnicoBlock}
 ${stackBlock}
+${insightsBlock}
 
     <footer class="footer">
       <div class="verification" data-status="checking" id="verification">

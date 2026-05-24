@@ -5,7 +5,7 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-export const BUNDLE_VERSION = "4";
+export const BUNDLE_VERSION = "5";
 
 export interface BundleScores {
   date: string;
@@ -114,6 +114,10 @@ export interface BundlePayload {
   /** F6.12 — emergent-pattern diff (recent vs baseline). Null when no
    *  meaningful shift was detected. */
   emergent?: Record<string, unknown> | null;
+  /** F6.12 / schema v5 — insights bullets generated at snapshot time.
+   *  Shape: `{ insights: string[]; generated_at: string | null }` mirroring
+   *  the engine's GET /insights response. */
+  insights?: { insights?: string[]; generated_at?: string | null } | null;
 }
 
 /** Legacy v1 payload shape — only used by `verifyBundle` to detect bundles

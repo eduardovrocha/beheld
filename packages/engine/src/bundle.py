@@ -94,6 +94,7 @@ def build_bundle_payload(
     period_days: int = 30,
     engine_version_hash: Optional[str] = None,
     identity_gen: Optional[object] = None,
+    insights_gen: Optional[object] = None,
 ) -> BundlePayload:
     """Assemble the signed half of a .beheld from current DB state.
 
@@ -109,6 +110,11 @@ def build_bundle_payload(
     embeds it in the signed payload (so the HTML page renders the same text
     a verifier reads from the bytes). When None, the identity field stays
     None in the payload — used by tests that don't care about identity.
+
+    `insights_gen` (F6.12 / schema v5) — optional InsightGenerator. When
+    provided, the bullets shown on the public HTML page are produced at
+    snapshot time and embedded in the signed payload. None leaves the
+    `insights` field null in the payload (no bullets on the page).
     """
     scores = db.get_current_scores()
     if scores is None:
@@ -192,6 +198,16 @@ def build_bundle_payload(
         # stub the engine), just leave signals/emergent as None.
         pass
 
+    insights: Optional[dict] = None
+    if insights_gen is not None:
+        try:
+            ins = insights_gen.generate()
+            # Defensive copy — generator may return a dataclass-ish object
+            # or a plain dict; both serialise the same in canonical bytes.
+            insights = dict(ins) if not isinstance(ins, dict) else ins
+        except Exception:
+            insights = None
+
     return BundlePayload(
         created_at=datetime.now(timezone.utc).isoformat(),
         beheld_version=beheld_version,
@@ -204,6 +220,7 @@ def build_bundle_payload(
         signals=signals,
         identity=identity,
         emergent=emergent,
+        insights=insights,
     )
 
 

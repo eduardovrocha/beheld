@@ -119,6 +119,14 @@ function fixturePayload(): BundlePayload {
       recent_window_days: 30,
       baseline_window_days: 180,
     },
+    // Schema v5 — insights bullets embedded in signed bytes.
+    insights: {
+      insights: [
+        "Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",
+        "Baixa cobertura de testes — oportunidade de crescimento com TDD",
+      ],
+      generated_at: "2026-05-14T00:00:00+00:00",
+    },
   };
 }
 
@@ -132,6 +140,9 @@ const EXPECTED_CANONICAL =
   '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",' +
   '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",' +
   '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},' +
+  '"insights":{"generated_at":"2026-05-14T00:00:00+00:00",' +
+  '"insights":["Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",' +
+  '"Baixa cobertura de testes — oportunidade de crescimento com TDD"]},' +
   '"l1":{"avg_test_ratio":0.42,' +
   '"earliest_commit":"2023-01-01T00:00:00+00:00",' +
   '"ecosystems":{"python":true,"rails":true},' +
@@ -169,13 +180,13 @@ const EXPECTED_CANONICAL =
   '"repos_analyzed":2,"total_commits_analyzed":150}}';
 
 const EXPECTED_HASH =
-  "sha256:6f58ff5a9e79a24cf6e788ab02096b83e2ae8f24a6ac52fd6860540d0ef98899";
+  "sha256:175aa083f06b458a55c3cfe4dd9692e0f0f3b43fecd7b032ec1dfe687fa391fd";
 
 // ── canonical_json basics ────────────────────────────────────────────────────
 
 describe("canonicalJson — primitives", () => {
-  test("BUNDLE_VERSION is '4'", () => {
-    expect(BUNDLE_VERSION).toBe("4");
+  test("BUNDLE_VERSION is '5'", () => {
+    expect(BUNDLE_VERSION).toBe("5");
   });
 
   test("sorts keys alphabetically", () => {
@@ -221,7 +232,7 @@ describe("bundle contract", () => {
   test("fixture serializes to the same canonical bytes as Python", () => {
     const actual = payloadToCanonical(fixturePayload());
     expect(actual).toBe(EXPECTED_CANONICAL);
-    expect(actual.length).toBe(2248);
+    expect(actual.length).toBe(2464);
   });
 
   test("fixture hash matches Python's hash byte-for-byte", async () => {
@@ -252,6 +263,7 @@ describe("bundle contract", () => {
     const shuffled: BundlePayload = {
       emergent: base.emergent,
       l2: base.l2,
+      insights: base.insights,
       identity: base.identity,
       engine_version_hash: base.engine_version_hash,
       l1: base.l1,

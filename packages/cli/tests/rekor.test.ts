@@ -1,15 +1,20 @@
 /**
  * F5.8 — Sigstore Rekor submission + trust tier derivation.
  *
- * `submitToRekor` is contract-bound to NEVER throw: any failure (network,
- * timeout, HTTP error, malformed response) must resolve to `null`. These
- * tests pin that contract by injecting a `fetchImpl` test seam.
+ * `submitToRekor` is contract-bound to NEVER throw: every failure path
+ * resolves to `{ ok: false, reason, detail }` so the CLI can surface an
+ * honest message instead of a catch-all "rede indisponível". These tests
+ * pin both the wire-format contract (PEM key, SHA-512 hash, hashedrekord
+ * shape) and each failure reason.
+ *
+ * Live integration: set REKOR_LIVE=1 to also hit rekor.sigstore.dev.
+ * Skipped by default so PRs don't depend on the public log being up.
  */
 import { describe, expect, test } from "bun:test";
 
 import {
   buildHashedRekord,
-  ed25519HexToDerB64,
+  ed25519HexToPemB64,
   parseRekorResponse,
   rekorEntryUrl,
   submitToRekor,
@@ -19,9 +24,9 @@ import type { Bundle, RekorEntry } from "../src/bundle/types";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-const HASH_HEX = "a".repeat(64);
-const SIG_HEX = "b".repeat(128);
-const PUB_HEX = "c".repeat(64);
+const HASH_HEX = "a".repeat(128); // SHA-512 = 64 bytes = 128 hex chars
+const SIG_HEX = "b".repeat(128);  // Ed25519 = 64 bytes = 128 hex chars
+const PUB_HEX = "c".repeat(64);   // Ed25519 pub = 32 bytes = 64 hex chars
 const SAMPLE_UUID = "abc123uuid";
 
 function rekorSuccessBody(): unknown {
@@ -49,55 +54,46 @@ function rekorResponse(status: number, body: unknown): Response {
   });
 }
 
+function makeArgs(over: Partial<{ pub: string; hash: string; sig: string }> = {}) {
+  return {
+    rekorHashHex: over.hash ?? HASH_HEX,
+    rekorSignatureHex: over.sig ?? SIG_HEX,
+    publicKeyHex: over.pub ?? PUB_HEX,
+  };
+}
+
 function bareBundle(): Bundle {
   return {
-    version: "3",
+    version: "5",
     payload: {
       created_at: "2026-05-21T00:00:00+00:00",
       beheld_version: "0.1.1",
       previous_hash: null,
       scores: {
         date: "2026-05-21",
-        prompt_quality: 10,
-        test_maturity: 10,
-        tech_breadth: 10,
-        growth_rate: 10,
-        overall: 10,
-        sessions_analyzed: 1,
+        prompt_quality: 10, test_maturity: 10, tech_breadth: 10,
+        growth_rate: 10, overall: 10, sessions_analyzed: 1,
       },
       l1: {
-        total_repos: 0,
-        total_commits: 0,
-        earliest_commit: null,
-        latest_commit: null,
-        ecosystems: {},
-        platforms: {},
-        avg_test_ratio: 0,
-        root_commit_hashes: [],
+        total_repos: 0, total_commits: 0, earliest_commit: null,
+        latest_commit: null, ecosystems: {}, platforms: {},
+        avg_test_ratio: 0, root_commit_hashes: [],
       },
       l2: {
-        platforms: {},
-        ecosystems: {},
-        workflow_distribution: {},
+        platforms: {}, ecosystems: {}, workflow_distribution: {},
         project_categories: {},
         workflow_metrics: {
-          test_after_ratio: 0,
-          test_first_ratio: 0,
-          median_test_delay_min: 0,
-          edit_to_test_lag_min: 0,
-          bash_to_read_ratio: 0,
-          prompt_avg_chars: 0,
-          prompt_median_chars: 0,
-          session_avg_duration_min: 0,
-          tool_variety_avg: 0,
-          ecosystem_concentration: 0,
+          test_after_ratio: 0, test_first_ratio: 0,
+          median_test_delay_min: 0, edit_to_test_lag_min: 0,
+          bash_to_read_ratio: 0, prompt_avg_chars: 0,
+          prompt_median_chars: 0, session_avg_duration_min: 0,
+          tool_variety_avg: 0, ecosystem_concentration: 0,
         },
-        sessions_analyzed: 1,
-        period_days: 30,
+        sessions_analyzed: 1, period_days: 30,
       },
       engine_version_hash: null,
     },
-    hash: `sha256:${HASH_HEX}`,
+    hash: `sha256:${"a".repeat(64)}`,
     signature: `ed25519:${SIG_HEX}`,
     public_key: `ed25519:${"A".repeat(43)}`,
   };
@@ -123,22 +119,44 @@ const VALID_REKOR: RekorEntry = {
   signedEntryTimestamp: "set==",
 };
 
-// ── DER + body shape ────────────────────────────────────────────────────────
+// ── PEM wrapping (the bug that silently broke production) ──────────────────
 
-describe("ed25519HexToDerB64", () => {
-  test("wraps a 32-byte raw key with the SPKI prefix", () => {
-    const der = Buffer.from(ed25519HexToDerB64("00".repeat(32)), "base64");
-    expect(der.length).toBe(44);
+describe("ed25519HexToPemB64", () => {
+  test("wraps a 32-byte raw key in PEM envelope (base64)", () => {
+    const pemB64 = ed25519HexToPemB64("00".repeat(32));
+    const pem = Buffer.from(pemB64, "base64").toString("utf8");
+    expect(pem.startsWith("-----BEGIN PUBLIC KEY-----")).toBe(true);
+    expect(pem.includes("-----END PUBLIC KEY-----")).toBe(true);
+    // PEM body is base64 of DER SPKI — strip envelope and check length.
+    const der = Buffer.from(
+      pem.split("-----")[2]!.replace(/\s+/g, ""),
+      "base64",
+    );
+    expect(der.length).toBe(44); // SPKI prefix (12) + raw key (32)
     expect(der.toString("hex").startsWith("302a300506032b6570032100")).toBe(true);
   });
 
   test("rejects non-32-byte input", () => {
-    expect(() => ed25519HexToDerB64("ab")).toThrow();
+    expect(() => ed25519HexToPemB64("ab")).toThrow();
+    expect(() => ed25519HexToPemB64("a".repeat(63))).toThrow();
+  });
+
+  test("PEM body line-wraps at 64 chars (RFC 7468)", () => {
+    const pem = Buffer.from(
+      ed25519HexToPemB64("00".repeat(32)),
+      "base64",
+    ).toString("utf8");
+    const bodyLines = pem
+      .split("\n")
+      .filter((l) => l && !l.startsWith("-----"));
+    for (const line of bodyLines) {
+      expect(line.length).toBeLessThanOrEqual(64);
+    }
   });
 });
 
 describe("buildHashedRekord", () => {
-  test("emits the hashedrekord shape Rekor's POST endpoint expects", () => {
+  test("emits the shape Rekor's POST endpoint expects (sha512 + PEM key)", () => {
     const body = buildHashedRekord({
       payloadHashHex: HASH_HEX,
       signatureHex: SIG_HEX,
@@ -146,80 +164,119 @@ describe("buildHashedRekord", () => {
     }) as {
       kind: string;
       apiVersion: string;
-      spec: { data: { hash: { algorithm: string; value: string } }; signature: { content: string; publicKey: { content: string } } };
+      spec: {
+        data: { hash: { algorithm: string; value: string } };
+        signature: { content: string; publicKey: { content: string } };
+      };
     };
     expect(body.kind).toBe("hashedrekord");
     expect(body.apiVersion).toBe("0.0.1");
-    expect(body.spec.data.hash.algorithm).toBe("sha256");
+    // Rekor's Ed25519 verifier requires sha512 — sha256 is rejected.
+    expect(body.spec.data.hash.algorithm).toBe("sha512");
     expect(body.spec.data.hash.value).toBe(HASH_HEX);
-    expect(body.spec.signature.content).toBe(Buffer.from(SIG_HEX, "hex").toString("base64"));
-    // publicKey is wrapped in DER SPKI envelope
-    const der = Buffer.from(body.spec.signature.publicKey.content, "base64");
-    expect(der.length).toBe(44);
+    expect(body.spec.signature.content).toBe(
+      Buffer.from(SIG_HEX, "hex").toString("base64"),
+    );
+    // publicKey is PEM-wrapped, not raw DER.
+    const pem = Buffer.from(
+      body.spec.signature.publicKey.content,
+      "base64",
+    ).toString("utf8");
+    expect(pem.startsWith("-----BEGIN PUBLIC KEY-----")).toBe(true);
   });
 });
 
-// ── submitToRekor — happy & sad paths ───────────────────────────────────────
+// ── submitToRekor — discriminated result, one branch per reason ─────────────
 
 describe("submitToRekor", () => {
-  test("returns RekorEntry on HTTP 201 with valid body", async () => {
-    const fetchImpl = (async () => rekorResponse(201, rekorSuccessBody())) as typeof fetch;
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, PUB_HEX, { fetchImpl });
-    expect(entry).not.toBeNull();
-    expect(entry!.logIndex).toBe(12345678);
-    expect(entry!.uuid).toBe(SAMPLE_UUID);
-    expect(entry!.integratedTime).toBe("2025-06-01T16:00:00.000Z");
-    expect(entry!.signedEntryTimestamp).toBe("MEUCIQ==");
+  test("returns ok=true + entry on HTTP 201 with valid body", async () => {
+    const fetchImpl = (async () =>
+      rekorResponse(201, rekorSuccessBody())) as typeof fetch;
+    const r = await submitToRekor(makeArgs(), { fetchImpl });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.entry.logIndex).toBe(12345678);
+      expect(r.entry.uuid).toBe(SAMPLE_UUID);
+      expect(r.entry.integratedTime).toBe("2025-06-01T16:00:00.000Z");
+      expect(r.entry.signedEntryTimestamp).toBe("MEUCIQ==");
+    }
   });
 
-  test("returns null on network error (fetch throws)", async () => {
+  test("reason='network' when fetch throws", async () => {
     const fetchImpl = (async () => {
-      throw new Error("network down");
+      throw new Error("ECONNREFUSED");
     }) as typeof fetch;
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, PUB_HEX, { fetchImpl });
-    expect(entry).toBeNull();
+    const r = await submitToRekor(makeArgs(), { fetchImpl });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("network");
+      expect(r.detail).toContain("ECONNREFUSED");
+    }
   });
 
-  test("returns null on HTTP 500", async () => {
-    const fetchImpl = (async () => rekorResponse(500, { error: "internal" })) as typeof fetch;
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, PUB_HEX, { fetchImpl });
-    expect(entry).toBeNull();
+  test("reason='rejected' on HTTP 400 — surfaces Rekor's error body", async () => {
+    const fetchImpl = (async () =>
+      rekorResponse(400, { code: 400, message: "invalid public key" })) as typeof fetch;
+    const r = await submitToRekor(makeArgs(), { fetchImpl });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("rejected");
+      expect(r.detail).toContain("HTTP 400");
+      expect(r.detail).toContain("invalid public key");
+    }
   });
 
-  test("returns null when response body is malformed", async () => {
-    const fetchImpl = (async () => rekorResponse(201, "not-json")) as typeof fetch;
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, PUB_HEX, { fetchImpl });
-    expect(entry).toBeNull();
+  test("reason='rejected' on HTTP 500", async () => {
+    const fetchImpl = (async () =>
+      rekorResponse(500, { error: "internal" })) as typeof fetch;
+    const r = await submitToRekor(makeArgs(), { fetchImpl });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("rejected");
   });
 
-  test("aborts and returns null after the configured timeout", async () => {
+  test("reason='malformed' when body parses to something Rekor-incompatible", async () => {
+    const fetchImpl = (async () =>
+      rekorResponse(201, { not_a_rekor_response: true })) as typeof fetch;
+    const r = await submitToRekor(makeArgs(), { fetchImpl });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("malformed");
+  });
+
+  test("reason='timeout' when fetch aborts at timeoutMs", async () => {
     const fetchImpl = (async (_url, init?: RequestInit) => {
-      // Honour the AbortSignal by rejecting when aborted, like real fetch.
       const signal = init?.signal as AbortSignal | undefined;
       return new Promise<Response>((_resolve, reject) => {
-        if (signal?.aborted) reject(new Error("aborted"));
-        signal?.addEventListener("abort", () => reject(new Error("aborted")));
-        // Otherwise hang.
+        if (signal?.aborted) {
+          const e = new Error("aborted"); (e as { name: string }).name = "AbortError";
+          reject(e); return;
+        }
+        signal?.addEventListener("abort", () => {
+          const e = new Error("aborted"); (e as { name: string }).name = "AbortError";
+          reject(e);
+        });
       });
     }) as typeof fetch;
     const t0 = Date.now();
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, PUB_HEX, {
-      fetchImpl,
-      timeoutMs: 50,
-    });
+    const r = await submitToRekor(makeArgs(), { fetchImpl, timeoutMs: 50 });
     const elapsed = Date.now() - t0;
-    expect(entry).toBeNull();
-    // Timed out close to the limit (allow generous slack on slow CI).
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("timeout");
+      expect(r.detail).toContain("50ms");
+    }
     expect(elapsed).toBeLessThan(2000);
   });
 
-  test("returns null when the DER conversion fails (invalid pubkey)", async () => {
-    // Force the body builder to throw before any HTTP call happens.
+  test("reason='encoding' on bad pubkey hex (never reaches network)", async () => {
+    let called = false;
     const fetchImpl = (async () => {
-      throw new Error("should not be called");
+      called = true;
+      return rekorResponse(201, rekorSuccessBody());
     }) as typeof fetch;
-    const entry = await submitToRekor(HASH_HEX, SIG_HEX, "deadbeef", { fetchImpl });
-    expect(entry).toBeNull();
+    const r = await submitToRekor(makeArgs({ pub: "deadbeef" }), { fetchImpl });
+    expect(called).toBe(false);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("encoding");
   });
 });
 
@@ -255,7 +312,7 @@ describe("rekorEntryUrl", () => {
   });
 });
 
-// ── computeTier ─────────────────────────────────────────────────────────────
+// ── computeTier — unchanged contract ───────────────────────────────────────
 
 describe("computeTier", () => {
   test("unsigned: missing wrapper signature", () => {
@@ -300,4 +357,47 @@ describe("computeTier", () => {
     b.rekor = VALID_REKOR;
     expect(computeTier(b)).toBe<TrustTier>("fully_verifiable");
   });
+});
+
+// ── live integration (opt-in via REKOR_LIVE=1) ─────────────────────────────
+//
+// Exercises the full path against the public rekor.sigstore.dev. Skipped by
+// default so PRs don't depend on the public log being up. Uses ephemeral
+// crypto.subtle keys — nothing local is touched.
+
+const LIVE = process.env.REKOR_LIVE === "1";
+
+(LIVE ? describe : describe.skip)("live — rekor.sigstore.dev", () => {
+  test("real submission produces a logIndex + the entry is fetchable", async () => {
+    // Generate a fresh ephemeral Ed25519 keypair for this test.
+    const kp = await crypto.subtle.generateKey(
+      { name: "Ed25519" } as unknown as Algorithm,
+      true,
+      ["sign", "verify"],
+    ) as CryptoKeyPair;
+    const jwk = await crypto.subtle.exportKey("jwk", kp.publicKey) as JsonWebKey;
+    const pubHex = Buffer.from(jwk.x as string, "base64url").toString("hex");
+
+    // Sign a SHA-512 of some unique bytes (Rekor would reject a duplicate).
+    const unique = `beheld-live-test-${Date.now()}-${Math.random()}`;
+    const data = new TextEncoder().encode(unique);
+    const sha512 = await crypto.subtle.digest("SHA-512", data);
+    const sig = await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, sha512);
+
+    const hashHex = Array.from(new Uint8Array(sha512))
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+    const sigHex = Array.from(new Uint8Array(sig))
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+
+    const r = await submitToRekor(
+      { rekorHashHex: hashHex, rekorSignatureHex: sigHex, publicKeyHex: pubHex },
+      { timeoutMs: 15000 },
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(typeof r.entry.logIndex).toBe("number");
+      expect(r.entry.logIndex).toBeGreaterThan(0);
+      expect(r.entry.uuid.length).toBeGreaterThan(20);
+    }
+  }, 30000);
 });

@@ -13,7 +13,11 @@ import {
   publicKeyFingerprint,
 } from "../keys/keystore";
 import { loadAttestationCache } from "../keys/attestation-cache";
-import { submitToRekor } from "../lib/rekor";
+import {
+  submitToRekor,
+  type RekorFailureReason,
+  type RekorSubmitResult,
+} from "../lib/rekor";
 import { computeTier } from "../lib/tier";
 import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET, YELLOW, GREEN } from "../ui/styles";
 import { renderSnapshotHtml, type SnapshotHtmlData } from "../ui/snapshot-html";
@@ -62,11 +66,36 @@ function jwkXToHex(jwkX: string): string {
   return Buffer.from(jwkX, "base64url").toString("hex");
 }
 
-function renderRekorLine(rekor: RekorEntry | null): string {
-  if (rekor) {
-    return `${GREEN}✓${RESET} log #${rekor.logIndex} · ${rekor.integratedTime}`;
+/** Human-facing label for a Rekor failure reason — replaces the previous
+ *  catch-all "rede indisponível" with an honest message per cause. */
+function rekorFailureLabel(reason: RekorFailureReason, detail: string): string {
+  switch (reason) {
+    case "timeout":
+      return `tempo esgotado (${detail})`;
+    case "network":
+      return `rede indisponível (${detail})`;
+    case "rejected":
+      return `Rekor recusou: ${detail}`;
+    case "encoding":
+      return `erro local de codificação: ${detail}`;
+    case "malformed":
+      return `resposta inválida do Rekor: ${detail}`;
+    default:
+      return `falha desconhecida (${detail})`;
   }
-  return `${YELLOW}⚠${RESET} não registrado ${meta("(rede indisponível — re-submeter: beheld snapshot --rekor-submit <bundle>)")}`;
+}
+
+function renderRekorLine(result: RekorSubmitResult | null): string {
+  if (result == null) {
+    // --no-rekor: opt-out. Different message from a failure.
+    return `${YELLOW}⚠${RESET} pulado por --no-rekor`;
+  }
+  if (result.ok) {
+    return `${GREEN}✓${RESET} log #${result.entry.logIndex} · ${result.entry.integratedTime}`;
+  }
+  return `${YELLOW}⚠${RESET} não registrado ${meta(
+    `(${rekorFailureLabel(result.reason, result.detail)} — re-submeter: beheld snapshot --rekor-submit <bundle>)`,
+  )}`;
 }
 
 function bundleFilename(createdAt: string, hash: string): string {
@@ -143,16 +172,40 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
 
   const signatureHex = toHex(sigBuf);
   const publicKeyHex = jwkXToHex(pubJwk.x);
-  const payloadHashHex = stripPrefix(hash, "sha256:");
 
   // F5.8 — best-effort Rekor submission BEFORE we write the bundle so the
-  // inclusion proof can be embedded in the wrapper. Failure (offline / 5xx /
-  // timeout) returns null; the bundle is still saved without rekor and the
-  // user can promote it later with `beheld snapshot --rekor-submit`.
-  let rekor: RekorEntry | null = null;
+  // inclusion proof can be embedded in the wrapper. Submission is synchronous
+  // with an 8s timeout — if Rekor doesn't respond in time, the bundle is
+  // still saved without rekor and the user can promote it later with
+  // `beheld snapshot --rekor-submit <bundle>`.
+  //
+  // Rekor's hashedrekord verifier requires that the *signed bytes* be the
+  // SHA-512 hash of the data, not the data itself. This is incompatible
+  // with the bundle's primary signature, which signs the canonical bytes
+  // directly. We solve this by producing a SECONDARY signature here —
+  // Ed25519 over SHA-512(canonical) — purely for Rekor. The bundle's
+  // primary signature stays as-is. Both bind to the same public key, so a
+  // verifier walking from `bundle.rekor.uuid` to the Rekor entry and back
+  // to the bundle's pubkey establishes the chain.
+  let rekorResult: RekorSubmitResult | null = null;
   if (opts.noRekor !== true) {
-    rekor = await submitToRekor(payloadHashHex, signatureHex, publicKeyHex);
+    const canonicalBytes = new TextEncoder().encode(canonical);
+    const sha512Buf = await crypto.subtle.digest("SHA-512", canonicalBytes);
+    const rekorHashHex = toHex(sha512Buf);
+    const rekorSigBuf = await crypto.subtle.sign(
+      { name: "Ed25519" },
+      privKey,
+      sha512Buf,
+    );
+    const rekorSignatureHex = toHex(rekorSigBuf);
+
+    rekorResult = await submitToRekor({
+      rekorHashHex,
+      rekorSignatureHex,
+      publicKeyHex,
+    });
   }
+  const rekor: RekorEntry | null = rekorResult?.ok ? rekorResult.entry : null;
 
   const bundle: Bundle = {
     version: BUNDLE_VERSION,
@@ -236,7 +289,7 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   }
   console.log(`     ${DIM}Base histórica:${RESET}       ${comp.base}`);
   console.log(`     ${DIM}Trajetória observada:${RESET} ${comp.trajectory}`);
-  console.log(`     ${DIM}Rekor:${RESET}                ${renderRekorLine(rekor)}`);
+  console.log(`     ${DIM}Rekor:${RESET}                ${renderRekorLine(rekorResult)}`);
   console.log(`     ${DIM}Tier:${RESET}                 ${bold(computeTier(bundle))}`);
 
   if (!saveOk) {
@@ -328,28 +381,57 @@ async function rekorSubmitExisting(bundlePath: string): Promise<void> {
     return;
   }
 
-  const sigHex = stripPrefix(bundle.signature ?? "", "ed25519:");
-  const hashHex = stripPrefix(bundle.hash ?? "", "sha256:");
   const pubB64u = stripPrefix(bundle.public_key ?? "", "ed25519:");
-  if (!sigHex || !hashHex || !pubB64u) {
-    console.error(fail("Bundle não tem signature/hash/public_key — não é submissível"));
+  if (!bundle.payload || !pubB64u) {
+    console.error(fail("Bundle não tem payload/public_key — não é submissível"));
     process.exit(1);
   }
   const pubHex = jwkXToHex(pubB64u);
 
-  console.log(arrow("submetendo ao rekor.sigstore.dev"));
-  const rekor = await submitToRekor(hashHex, sigHex, pubHex);
-  if (!rekor) {
-    console.error(fail("Submissão ao Rekor falhou — verifique sua conexão e tente novamente"));
+  // Re-derive the Rekor signing material from the bundle's payload, same as
+  // the fresh-snapshot path. Bundle.signature itself is NOT what Rekor wants:
+  // we need Ed25519(SHA-512(canonical)), not Ed25519(canonical). The dev's
+  // current private key must still match the bundle's public key — verify
+  // that before submitting so we don't quietly produce a signature that
+  // can't be cross-checked.
+  await ensureKeys();
+  const currentPubJwk = loadPublicJwk();
+  if (currentPubJwk.x !== pubB64u) {
+    console.error(fail("A chave atual não corresponde à chave que assinou este bundle"));
+    console.error(`     ${DIM}Bundle pub:  ed25519:${pubB64u.slice(0, 12)}…${RESET}`);
+    console.error(`     ${DIM}Chave atual: ed25519:${currentPubJwk.x.slice(0, 12)}…${RESET}`);
     process.exit(1);
   }
 
-  const updated: Bundle = { ...bundle, rekor };
+  const canonical = payloadToCanonical(bundle.payload);
+  const canonicalBytes = new TextEncoder().encode(canonical);
+  const sha512Buf = await crypto.subtle.digest("SHA-512", canonicalBytes);
+  const rekorHashHex = toHex(sha512Buf);
+  const privKey = await loadPrivateKey();
+  const rekorSigBuf = await crypto.subtle.sign(
+    { name: "Ed25519" },
+    privKey,
+    sha512Buf,
+  );
+  const rekorSignatureHex = toHex(rekorSigBuf);
+
+  console.log(arrow("submetendo ao rekor.sigstore.dev"));
+  const result = await submitToRekor({
+    rekorHashHex,
+    rekorSignatureHex,
+    publicKeyHex: pubHex,
+  });
+  if (!result.ok) {
+    console.error(fail(`Submissão ao Rekor falhou: ${rekorFailureLabel(result.reason, result.detail)}`));
+    process.exit(1);
+  }
+
+  const updated: Bundle = { ...bundle, rekor: result.entry };
   writeFileSync(bundlePath, JSON.stringify(updated, null, 2) + "\n");
   console.log(ok("Rekor registrado"));
-  console.log(`     ${DIM}log index:${RESET}       ${rekor.logIndex}`);
-  console.log(`     ${DIM}uuid:${RESET}            ${rekor.uuid}`);
-  console.log(`     ${DIM}integratedTime:${RESET}  ${rekor.integratedTime}`);
+  console.log(`     ${DIM}log index:${RESET}       ${result.entry.logIndex}`);
+  console.log(`     ${DIM}uuid:${RESET}            ${result.entry.uuid}`);
+  console.log(`     ${DIM}integratedTime:${RESET}  ${result.entry.integratedTime}`);
   console.log(`     ${DIM}Tier:${RESET}            ${bold(computeTier(updated))}`);
 }
 

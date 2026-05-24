@@ -131,6 +131,9 @@ describe("renderTrustDetails — Rekor block", () => {
 
     expect(html).toContain("Sigstore Rekor");
     expect(html).toContain("log #287435982");
+    // 🎉 prefix marks the inclusion as a confirmed success — recrutador
+    // não passa por isso por acidente.
+    expect(html).toMatch(/🎉\s+<a class="trust-link"[^>]*>log #287435982/);
     // Primary link: user-friendly Sigstore search UI by logIndex.
     expect(html).toContain("search.sigstore.dev/?logIndex=287435982");
     // Secondary link: raw API URL for auditors, with full UUID.

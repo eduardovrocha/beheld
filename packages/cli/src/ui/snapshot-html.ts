@@ -451,7 +451,7 @@ function renderRekorSection(rekor: BundleRekorView | null | undefined): string {
         <div class="trust-section">
           <p class="trust-section-title">Sigstore Rekor</p>
           <p class="trust-section-body">
-            <a class="trust-link" href="${escapeHtml(searchUrl)}" target="_blank" rel="noopener">log #${rekor!.logIndex}</a>
+            🎉 <a class="trust-link" href="${escapeHtml(searchUrl)}" target="_blank" rel="noopener">log #${rekor!.logIndex}</a>
             <span class="trust-meta"> · integrado em ${escapeHtml(integratedLabel)}</span>
           </p>
           <p class="trust-section-body trust-meta" style="margin-top:4px;">

@@ -146,6 +146,29 @@ SELECT
     (SELECT COALESCE(json_group_array(json(ecosystems)), '[]') FROM l1_signals) AS all_ecosystems_json,
     (SELECT COALESCE(json_group_array(json(platforms)), '[]') FROM l1_signals) AS all_platforms_json,
     (SELECT COALESCE(AVG(test_ratio), 0.0) FROM l1_signals) AS avg_test_ratio;
+
+CREATE TABLE IF NOT EXISTS l1_language_weights (
+    root_commit_hash TEXT NOT NULL REFERENCES l1_repositories(root_commit_hash),
+    language TEXT NOT NULL,
+    commit_count INTEGER NOT NULL,
+    file_count INTEGER NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    PRIMARY KEY (root_commit_hash, language)
+);
+
+CREATE INDEX IF NOT EXISTS idx_l1_language_weights_lang
+    ON l1_language_weights(language);
+
+CREATE TABLE IF NOT EXISTS l1_architecture_patterns (
+    root_commit_hash TEXT NOT NULL REFERENCES l1_repositories(root_commit_hash),
+    pattern TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    PRIMARY KEY (root_commit_hash, pattern)
+);
+
+CREATE INDEX IF NOT EXISTS idx_l1_arch_patterns_pattern
+    ON l1_architecture_patterns(pattern);
 """
 
 
@@ -295,6 +318,38 @@ def _migration_6_add_identity_phrases(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_8_add_stack_tables(conn: sqlite3.Connection) -> None:
+    """F6.12a — language-weight + architecture-pattern tables per repo."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS l1_language_weights (
+            root_commit_hash TEXT NOT NULL
+                REFERENCES l1_repositories(root_commit_hash),
+            language TEXT NOT NULL,
+            commit_count INTEGER NOT NULL,
+            file_count INTEGER NOT NULL,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            PRIMARY KEY (root_commit_hash, language)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_l1_language_weights_lang
+            ON l1_language_weights(language);
+
+        CREATE TABLE IF NOT EXISTS l1_architecture_patterns (
+            root_commit_hash TEXT NOT NULL
+                REFERENCES l1_repositories(root_commit_hash),
+            pattern TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            PRIMARY KEY (root_commit_hash, pattern)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_l1_arch_patterns_pattern
+            ON l1_architecture_patterns(pattern);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
@@ -304,6 +359,8 @@ MIGRATIONS: list[Migration] = [
               _migration_5_truncate_tool_sequences),
     Migration(6, "add identity_phrases table", _migration_6_add_identity_phrases),
     Migration(7, "add first_seen_at to l1_repositories (F5.7.2)", _migration_7_add_first_seen_at),
+    Migration(8, "add l1 stack tables (language_weights + architecture_patterns) F6.12a",
+              _migration_8_add_stack_tables),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
@@ -875,11 +932,152 @@ class BeheldDB:
         removed, False if none existed with that hash."""
         conn = self.connect()
         conn.execute("DELETE FROM l1_signals WHERE root_commit_hash = ?", (root_commit_hash,))
+        # F6.12a cascade — keep the FK constraint clean.
+        conn.execute(
+            "DELETE FROM l1_language_weights WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
+        conn.execute(
+            "DELETE FROM l1_architecture_patterns WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
         cur = conn.execute(
             "DELETE FROM l1_repositories WHERE root_commit_hash = ?", (root_commit_hash,)
         )
         conn.commit()
         return cur.rowcount > 0
+
+    # ── L1 stack (F6.12a) ─────────────────────────────────────────────────────
+
+    def save_l1_language_weights(
+        self,
+        root_commit_hash: str,
+        weights: list,
+    ) -> None:
+        """Replace any existing language-weight rows for this repo.
+
+        `weights` is a list of objects with attributes language, commit_count,
+        file_count, first_seen, last_seen (typically `LanguageWeight` from
+        the extractor, but any duck-typed object works for tests)."""
+        conn = self.connect()
+        conn.execute(
+            "DELETE FROM l1_language_weights WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
+        conn.executemany(
+            """
+            INSERT INTO l1_language_weights
+            (root_commit_hash, language, commit_count, file_count, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    root_commit_hash,
+                    w.language,
+                    int(w.commit_count),
+                    int(w.file_count),
+                    w.first_seen,
+                    w.last_seen,
+                )
+                for w in weights
+            ],
+        )
+        conn.commit()
+
+    def save_l1_architecture_patterns(
+        self,
+        root_commit_hash: str,
+        patterns: list,
+    ) -> None:
+        """Replace any existing architecture-pattern rows for this repo.
+
+        `patterns` is a list of objects with attributes pattern, confidence."""
+        conn = self.connect()
+        conn.execute(
+            "DELETE FROM l1_architecture_patterns WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
+        conn.executemany(
+            """
+            INSERT INTO l1_architecture_patterns
+            (root_commit_hash, pattern, confidence)
+            VALUES (?, ?, ?)
+            """,
+            [(root_commit_hash, p.pattern, p.confidence) for p in patterns],
+        )
+        conn.commit()
+
+    def get_l1_stack(self) -> dict:
+        """Aggregate language weights + architecture patterns across all
+        imported repos. Returns the shape consumed by GET /l1/stack."""
+        conn = self.connect()
+        lang_rows = conn.execute(
+            """
+            SELECT language,
+                   SUM(commit_count) AS total_commits,
+                   SUM(file_count)   AS total_files,
+                   MIN(first_seen)   AS first_seen,
+                   MAX(last_seen)    AS last_seen
+            FROM l1_language_weights
+            GROUP BY language
+            ORDER BY total_commits DESC, language ASC
+            """
+        ).fetchall()
+
+        # Strong overrides weak when a pattern appears under both confidences
+        # across different repos. MAX() on the raw text is wrong ("weak" >
+        # "strong" lexicographically), so we rank explicitly with CASE.
+        pattern_rows = conn.execute(
+            """
+            SELECT pattern,
+                   COUNT(DISTINCT root_commit_hash) AS repo_count,
+                   CASE WHEN MAX(CASE confidence WHEN 'strong' THEN 1 ELSE 0 END) = 1
+                        THEN 'strong'
+                        ELSE 'weak'
+                   END AS confidence
+            FROM l1_architecture_patterns
+            GROUP BY pattern
+            ORDER BY repo_count DESC, pattern ASC
+            """
+        ).fetchall()
+
+        repos_analyzed = conn.execute(
+            "SELECT COUNT(DISTINCT root_commit_hash) FROM l1_language_weights"
+        ).fetchone()[0]
+
+        total_commits = sum(int(r["total_commits"] or 0) for r in lang_rows)
+
+        def _ym(iso_date: Optional[str]) -> str:
+            return (iso_date or "")[:7]
+
+        language_distribution = []
+        for r in lang_rows:
+            commits = int(r["total_commits"] or 0)
+            pct = round((commits / total_commits) * 100, 1) if total_commits else 0.0
+            language_distribution.append({
+                "language": r["language"],
+                "commit_count": commits,
+                "file_count": int(r["total_files"] or 0),
+                "first_seen": _ym(r["first_seen"]),
+                "last_seen": _ym(r["last_seen"]),
+                "weight_pct": pct,
+            })
+
+        architecture_patterns = [
+            {
+                "pattern": r["pattern"],
+                "repo_count": int(r["repo_count"] or 0),
+                "confidence": r["confidence"],
+            }
+            for r in pattern_rows
+        ]
+
+        return {
+            "language_distribution": language_distribution,
+            "architecture_patterns": architecture_patterns,
+            "total_commits_analyzed": total_commits,
+            "repos_analyzed": int(repos_analyzed or 0),
+        }
 
     # ── identity_phrases (Phase 6 — public portrait) ──────────────────────────
 

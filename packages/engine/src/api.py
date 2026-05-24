@@ -448,6 +448,14 @@ def l1_repositories() -> list[dict]:
     return db.get_l1_repositories()
 
 
+@app.get("/l1/stack")
+def l1_stack() -> dict:
+    """F6.12a — language distribution + architecture patterns across all
+    imported repos. Languages weighted by commit count (not file count) to
+    avoid distortion by refactors. Empty payload when no repos imported."""
+    return db.get_l1_stack()
+
+
 @app.delete("/l1/repositories/{root_hash}")
 def l1_delete_repository(root_hash: str) -> dict:
     removed = db.delete_l1_repository(root_hash)

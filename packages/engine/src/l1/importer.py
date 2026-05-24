@@ -151,6 +151,22 @@ class L1Importer:
                 last_commit_at=signals.last_commit_at,
             )
 
+            # 5b. F6.12a — persist language weights + architecture patterns.
+            #     Fail-soft per the spec: a save failure here must never abort
+            #     the ingest (the F6.2 signals were already saved above).
+            try:
+                self._db.save_l1_language_weights(
+                    signals.root_commit_hash, signals.language_weights
+                )
+            except Exception:
+                pass
+            try:
+                self._db.save_l1_architecture_patterns(
+                    signals.root_commit_hash, signals.architecture_patterns
+                )
+            except Exception:
+                pass
+
             # 6. Persist the URL→root-hash mapping for future pre-clone bypass.
             self._cache_store(repo_url, signals.root_commit_hash)
             self._set_status(progress_pct=100)

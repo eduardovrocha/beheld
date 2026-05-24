@@ -12,10 +12,13 @@ import shutil
 import subprocess
 import tempfile
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from extractors.timing import analyze_timing
+from l1 import architecture_detector
+from l1.architecture_detector import ArchitecturePattern
+from l1.language_map import get_language
 
 
 class AuthorNotFoundError(Exception):
@@ -31,6 +34,17 @@ class ExtractionError(Exception):
 
 
 @dataclass
+class LanguageWeight:
+    """F6.12a — per-language weight derived from the author's commits."""
+
+    language: str
+    commit_count: int
+    file_count: int
+    first_seen: str  # ISO date of the oldest commit touching this language
+    last_seen: str   # ISO date of the newest commit touching this language
+
+
+@dataclass
 class L1ExtractedSignals:
     root_commit_hash: str
     commit_count: int
@@ -42,6 +56,10 @@ class L1ExtractedSignals:
     timing: dict
     first_commit_at: str
     last_commit_at: str
+    # F6.12a — populated by extract_language_weights + architecture_detector.
+    # Empty list on failure so the importer can still persist the rest.
+    language_weights: list[LanguageWeight] = field(default_factory=list)
+    architecture_patterns: list[ArchitecturePattern] = field(default_factory=list)
 
 
 _ECOSYSTEM_MANIFESTS: dict[str, str] = {
@@ -117,6 +135,84 @@ def _detect_ecosystems(unique_paths: set[str]) -> dict:
         if base in _ECOSYSTEM_MANIFESTS:
             eco[_ECOSYSTEM_MANIFESTS[base]] = True
     return eco
+
+
+def extract_language_weights(
+    repo_path: str,
+    author_email: str,
+    env: Optional[dict] = None,
+) -> list[LanguageWeight]:
+    """Compute per-language weights from the author's commit history.
+
+    Uses a single `git log --name-only` pass with a sentinel format string so
+    we can attribute each file path to its commit hash and author date. Per
+    F6.2 invariant: file paths are walked for extension + counting only,
+    never persisted.
+
+    Returns [] on any git failure — caller treats absence of language data
+    as a soft failure and continues the ingest.
+    """
+    sentinel = "__BEHELD_COMMIT__"
+    author_filter = "--author=" + re.escape(author_email)
+    try:
+        raw = _run_git(
+            [
+                "git", "-C", repo_path, "log", author_filter,
+                f"--format=format:{sentinel} %H %aI",
+                "--name-only",
+            ],
+            env=env,
+        )
+    except ExtractionError:
+        return []
+
+    # Per-language aggregation buckets.
+    commits_by_lang: dict[str, set[str]] = {}
+    files_by_lang: dict[str, set[str]] = {}
+    dates_by_lang: dict[str, list[str]] = {}
+
+    current_hash: Optional[str] = None
+    current_date: Optional[str] = None
+
+    for line in raw.splitlines():
+        if line.startswith(sentinel + " "):
+            parts = line.split(" ", 2)
+            if len(parts) >= 3:
+                current_hash = parts[1]
+                current_date = parts[2][:10]  # YYYY-MM-DD only
+            continue
+        path = line.strip()
+        if not path or current_hash is None or current_date is None:
+            continue
+        ext = _ext_of(path)
+        if not ext:
+            continue
+        # _ext_of returns the bare extension without a leading dot; the
+        # language map normalizes input shape.
+        language = get_language("." + ext)
+        if language is None:
+            continue
+        commits_by_lang.setdefault(language, set()).add(current_hash)
+        files_by_lang.setdefault(language, set()).add(path)
+        dates_by_lang.setdefault(language, []).append(current_date)
+
+    weights: list[LanguageWeight] = []
+    for lang, hashes in commits_by_lang.items():
+        if not hashes:
+            continue
+        dates = sorted(dates_by_lang[lang])
+        weights.append(
+            LanguageWeight(
+                language=lang,
+                commit_count=len(hashes),
+                file_count=len(files_by_lang[lang]),
+                first_seen=dates[0],
+                last_seen=dates[-1],
+            )
+        )
+    # Heaviest first — keeps writes deterministic and human-readable in tests.
+    weights.sort(key=lambda w: (-w.commit_count, w.language))
+    return weights
 
 
 def _detect_platforms(unique_paths: set[str]) -> dict:
@@ -237,6 +333,20 @@ def extract(
         first_commit_at = author_timestamps[-1] if author_timestamps else ""
         last_commit_at = author_timestamps[0] if author_timestamps else ""
 
+        # 10. F6.12a — language weights + architecture patterns.
+        #     Both are fail-soft: returning [] on extractor exception keeps
+        #     the rest of the ingest intact (existing F6.2 behavior).
+        try:
+            language_weights = extract_language_weights(tmpdir, author_email, git_env)
+        except Exception:
+            language_weights = []
+        try:
+            architecture_patterns = architecture_detector.detect_patterns(
+                tmpdir, ecosystems=ecosystems, env=git_env
+            )
+        except Exception:
+            architecture_patterns = []
+
         return L1ExtractedSignals(
             root_commit_hash=root_commit_hash,
             commit_count=commit_count,
@@ -248,6 +358,8 @@ def extract(
             timing=timing,
             first_commit_at=first_commit_at,
             last_commit_at=last_commit_at,
+            language_weights=language_weights,
+            architecture_patterns=architecture_patterns,
         )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

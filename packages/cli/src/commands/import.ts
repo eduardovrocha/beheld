@@ -12,10 +12,13 @@ import {
 import { ok, fail, warn, arrow, meta, bold, brand, DIM, RESET } from "../ui/styles";
 import type {
   BeheldConfig,
+  HostName,
+  ImportResult,
   L1ImportResponse,
   L1ImportStatus,
   L1Repository,
 } from "../types";
+import { runHostImport, type HostImportDeps } from "./import-host";
 
 // ── IO + dependency injection (drives the command and makes it testable) ─────
 
@@ -41,6 +44,8 @@ export interface ImportClient {
 export interface ImportConfigStore {
   getAuthorEmail: () => string | null;
   setAuthorEmail: (email: string) => void;
+  getBitbucketUsername?: () => string | null;
+  setBitbucketUsername?: (username: string) => void;
 }
 
 export interface ImportDeps {
@@ -54,9 +59,15 @@ export interface ImportDeps {
 export interface ImportFlags {
   github?: boolean;
   gitlab?: boolean;
+  bitbucket?: boolean;
   list?: boolean;
   remove?: string;
   url?: string;
+}
+
+export interface HostOrchestratorDeps {
+  /** Override the host-import orchestrator (tests stub this). */
+  runHostImport?: typeof runHostImport;
 }
 
 // ── default IO + config + client (real terminal / fs / network) ──────────────
@@ -84,19 +95,29 @@ function writeBeheldConfig(cfg: BeheldConfig): void {
   writeFileSync(p, JSON.stringify(cfg, null, 2));
 }
 
+function ensureBaseConfig(): BeheldConfig {
+  return (
+    readBeheldConfig() ?? {
+      version: "0.1.0",
+      initialized_at: new Date().toISOString(),
+      dimensions: { code: true, prompts: true, workflow: true } as BeheldConfig["dimensions"],
+      environments: { claudeCode: false, continueDev: false },
+    }
+  );
+}
+
 export const defaultConfigStore: ImportConfigStore = {
   getAuthorEmail(): string | null {
     return readBeheldConfig()?.author_email ?? null;
   },
   setAuthorEmail(email: string): void {
-    const existing =
-      readBeheldConfig() ?? {
-        version: "0.1.0",
-        initialized_at: new Date().toISOString(),
-        dimensions: { code: true, prompts: true, workflow: true } as BeheldConfig["dimensions"],
-        environments: { claudeCode: false, continueDev: false },
-      };
-    writeBeheldConfig({ ...existing, author_email: email });
+    writeBeheldConfig({ ...ensureBaseConfig(), author_email: email });
+  },
+  getBitbucketUsername(): string | null {
+    return readBeheldConfig()?.bitbucket_username ?? null;
+  },
+  setBitbucketUsername(username: string): void {
+    writeBeheldConfig({ ...ensureBaseConfig(), bitbucket_username: username });
   },
 };
 
@@ -215,6 +236,10 @@ async function pollUntilTerminal(
   throw new Error("Timeout aguardando ingestão do repositório.");
 }
 
+type LocalImportOutcome =
+  | { kind: "imported"; commits: number }
+  | { kind: "skipped"; reason: string };
+
 /** Run one repo through the importer + status polling, prompting for a PAT
  *  if the engine reports `needs_pat`. Returns the terminal result. */
 async function importOne(
@@ -223,7 +248,7 @@ async function importOne(
   io: ImportIO,
   client: ImportClient,
   pollIntervalMs: number,
-): Promise<{ kind: "imported"; commits: number } | { kind: "skipped"; reason: string }> {
+): Promise<LocalImportOutcome> {
   // First attempt — no PAT.
   const accepted = await client.importRepository(repoUrl, authorEmail, null);
   if (!accepted) {
@@ -274,11 +299,15 @@ async function importOne(
 
 // ── public entry point ───────────────────────────────────────────────────────
 
-export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Promise<void> {
+export async function runImport(
+  flags: ImportFlags,
+  deps: ImportDeps & HostOrchestratorDeps = {},
+): Promise<void> {
   const io = deps.io ?? defaultIO;
   const client = deps.client ?? defaultClient;
   const config = deps.config ?? defaultConfigStore;
   const pollIntervalMs = deps.pollIntervalMs ?? 1000;
+  const orchestrator = deps.runHostImport ?? runHostImport;
 
   // --list — render imported repos as a table.
   if (flags.list) {
@@ -309,27 +338,38 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
   // For the import flows we need an author email.
   const authorEmail = await ensureAuthorEmail(io, config);
 
-  // --github / --gitlab — provider-driven listing.
-  if (flags.github || flags.gitlab) {
-    const provider = flags.github ? "github" : "gitlab";
-    const urls = await listProviderRepoUrls(provider, io);
-    if (urls.length === 0) {
-      io.log(warn("Nenhum repositório selecionado"));
-      return;
-    }
-    let importedCount = 0;
-    let totalCommits = 0;
-    for (const url of urls) {
-      io.log("");
+  // --github / --gitlab / --bitbucket — host-driven listing + checkbox selector.
+  const host: HostName | null = flags.github
+    ? "github"
+    : flags.gitlab
+      ? "gitlab"
+      : flags.bitbucket
+        ? "bitbucket"
+        : null;
+  if (host) {
+    const hostDeps: HostImportDeps = {
+      auth: {
+        prompt: io.prompt,
+        promptSecret: io.promptSecret,
+        log: io.log,
+        getCachedBitbucketUsername: config.getBitbucketUsername,
+        setCachedBitbucketUsername: config.setBitbucketUsername,
+      },
+      log: io.log,
+      getAlreadyImportedUrls: async (): Promise<Set<string>> => {
+        // Engine returns L1 rows keyed by root_commit_hash, not URL. Until the
+        // engine exposes URL fingerprints, we cannot pre-mark anything — the
+        // engine still rejects re-imports with `already_imported`, which the
+        // ingest adapter below maps cleanly.
+        return new Set<string>();
+      },
+    };
+    const ingest = async (url: string): Promise<ImportResult> => {
       io.log(arrow(url));
       const r = await importOne(url, authorEmail, io, client, pollIntervalMs);
-      if (r.kind === "imported") {
-        importedCount += 1;
-        totalCommits += r.commits;
-      }
-    }
-    io.log("");
-    io.log(ok(`Bootstrap concluído ${meta(`· ${importedCount} repositório(s) · ${totalCommits} commits analisados`)}`));
+      return toImportResult(r);
+    };
+    await orchestrator(host, ingest, hostDeps);
     return;
   }
 
@@ -361,64 +401,18 @@ export async function runImport(flags: ImportFlags, deps: ImportDeps = {}): Prom
   io.log(ok(`Bootstrap concluído ${meta(`· ${importedCount} repositório(s) · ${totalCommits} commits analisados`)}`));
 }
 
-// ── provider listing (minimal — delegates auth to gh/glab CLIs) ──────────────
+// ── adapter: legacy importOne outcome → F6.11 ImportResult ───────────────────
 
-async function listProviderRepoUrls(
-  provider: "github" | "gitlab",
-  io: ImportIO,
-): Promise<string[]> {
-  const cmd = provider === "github"
-    ? ["gh", "repo", "list", "--limit", "100", "--json", "url,name,primaryLanguage,updatedAt"]
-    : ["glab", "repo", "list", "--per-page", "100", "--output", "json"];
-
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-  const stdout = await new Response(proc.stdout).text();
-  const exit = await proc.exited;
-  if (exit !== 0) {
-    const cliName = provider === "github" ? "gh" : "glab";
-    const authCmd = provider === "github" ? "gh auth login" : "glab auth login";
-    io.log(fail(`Não foi possível listar repositórios via ${bold(cliName)} CLI`));
-    io.log(`     ${DIM}Faça login: ${authCmd}${RESET}`);
-    return [];
+function toImportResult(outcome: LocalImportOutcome): ImportResult {
+  if (outcome.kind === "imported") {
+    return { kind: "imported", commits: outcome.commits };
   }
-
-  type GhRepo = { url: string; name: string; primaryLanguage?: { name?: string }; updatedAt?: string };
-  type GlabRepo = { web_url: string; name: string; last_activity_at?: string };
-
-  let entries: { url: string; label: string }[] = [];
-  try {
-    const parsed = JSON.parse(stdout);
-    if (provider === "github") {
-      entries = (parsed as GhRepo[]).map((r) => ({
-        url: r.url,
-        label: `${r.name}  (${r.primaryLanguage?.name ?? "—"} · último commit: ${(r.updatedAt ?? "").slice(0, 10)})`,
-      }));
-    } else {
-      entries = (parsed as GlabRepo[]).map((r) => ({
-        url: r.web_url,
-        label: `${r.name}  (último commit: ${(r.last_activity_at ?? "").slice(0, 10)})`,
-      }));
-    }
-  } catch {
-    io.log(fail("Resposta inválida da CLI do provedor"));
-    return [];
+  switch (outcome.reason) {
+    case "already_imported":
+      return { kind: "already_existing", commits: 0 };
+    case "author_not_found":
+      return { kind: "no_commits", commits: 0 };
+    default:
+      return { kind: "failed", commits: 0 };
   }
-
-  if (entries.length === 0) {
-    io.log(warn("Nenhum repositório encontrado"));
-    return [];
-  }
-
-  io.log(`\n  ${bold("Repositórios disponíveis:")}`);
-  entries.forEach((e, i) => io.log(`    ${DIM}[${i + 1}]${RESET} ${e.label}`));
-  const sel = (await io.prompt(`\n  Quais importar? ${meta("(ex: 1,3,5 ou 'all')")}: `)).trim();
-  if (!sel) return [];
-
-  if (sel.toLowerCase() === "all") return entries.map((e) => e.url);
-
-  const indices = sel
-    .split(",")
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n) && n >= 1 && n <= entries.length);
-  return [...new Set(indices)].map((n) => entries[n - 1].url);
 }

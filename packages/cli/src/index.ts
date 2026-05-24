@@ -202,11 +202,18 @@ program
   .description("Import repositories into L1 (git history bootstrap)")
   .option("--list", "List imported repositories")
   .option("--remove <hash>", "Remove an imported repository by its root commit hash")
-  .option("--github", "Select from your GitHub repositories (uses gh CLI)")
-  .option("--gitlab", "Select from your GitLab projects (uses glab CLI)")
+  .option("--github", "List + select repos from your GitHub account (gh CLI or PAT)")
+  .option("--gitlab", "List + select projects from your GitLab account (glab CLI or PAT)")
+  .option("--bitbucket", "List + select repos from your Bitbucket account (app password)")
   .action(async (
     url: string | undefined,
-    opts: { list?: boolean; remove?: string; github?: boolean; gitlab?: boolean },
+    opts: {
+      list?: boolean;
+      remove?: string;
+      github?: boolean;
+      gitlab?: boolean;
+      bitbucket?: boolean;
+    },
   ) => {
     const { runImport } = await import("./commands/import");
     await runImport({ ...opts, url });

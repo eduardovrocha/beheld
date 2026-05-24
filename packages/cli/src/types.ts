@@ -78,6 +78,9 @@ export interface BeheldConfig {
   environments: WizardEnvironments;
   /** Author email used to filter commits during L1 import. */
   author_email?: string;
+  /** Bitbucket username (public identifier, NOT a credential). Cached so the
+   *  user doesn't retype it on every `beheld import --bitbucket`. */
+  bitbucket_username?: string;
 }
 
 export interface L1ImportResponse {
@@ -112,4 +115,52 @@ export interface L1Repository {
   root_commit_hash: string;
   imported_at: string;
   commit_count: number;
+}
+
+// ── F6.11 — listing + selective import per host ─────────────────────────────
+
+export type HostName = "github" | "gitlab" | "bitbucket";
+
+/** Credential obtained for the LISTING API. Never persisted, never reused for
+ *  clone — clone goes through the engine's F6.3 auth cascade. */
+export type HostToken =
+  | { method: "cli"; token: string; host: "github" | "gitlab" }
+  | { method: "pat"; token: string; host: HostName }
+  | {
+      method: "app_password";
+      username: string;
+      app_password: string;
+      host: "bitbucket";
+    };
+
+/** Unified repo shape returned by every host listing client. */
+export interface RemoteRepo {
+  full_name: string;
+  clone_url_https: string;
+  clone_url_ssh: string;
+  language: string | null;
+  last_pushed_at: string;
+  is_private: boolean;
+}
+
+export interface HostImportSummary {
+  imported: number;
+  already_existing: number;
+  no_commits: number;
+  failed: number;
+  total_commits: number;
+}
+
+/** Terminal outcome of one repo passing through the engine ingest pipeline.
+ *  The orchestrator reports these counts back to the user. */
+export type ImportResultKind =
+  | "imported"
+  | "already_existing"
+  | "no_commits"
+  | "failed";
+
+export interface ImportResult {
+  kind: ImportResultKind;
+  /** Commits attributed to the author — only meaningful when kind === "imported". */
+  commits: number;
 }

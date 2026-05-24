@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import * as daemonManager from "../daemon-manager";
 import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const API_BASE = "https://beheld.dev/api";
 const RELEASES_BASE = "https://github.com/eduardovrocha/beheld/releases/download";
 

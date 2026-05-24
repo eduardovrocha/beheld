@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { getBeheldDir } from "./daemon";
 
 const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
-const VERSION = "0.1.1";
+const VERSION = "0.3.2";
 
 interface NotificationState {
   [type: string]: string;

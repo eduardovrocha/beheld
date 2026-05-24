@@ -9,7 +9,7 @@ import { beheldTool } from "./tools/beheld-tool";
 import { statusTool } from "./tools/status-tool";
 import type { McpTool } from "./tools/types";
 
-const VERSION = "0.1.1";
+const VERSION = "0.3.2";
 const TOOLS: McpTool[] = [beheldTool, beheldCoachTool, statusTool];
 
 export async function startStdioServer(): Promise<void> {

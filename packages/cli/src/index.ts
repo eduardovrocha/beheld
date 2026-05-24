@@ -1,6 +1,6 @@
 import { Command } from "commander";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.3.2";
 
 const program = new Command();
 

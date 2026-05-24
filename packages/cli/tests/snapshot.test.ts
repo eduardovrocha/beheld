@@ -1,10 +1,40 @@
-import { test, expect, describe, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach, beforeAll, afterAll, mock } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { payloadHash, payloadToCanonical } from "../src/bundle/canonical";
 import { BUNDLE_VERSION, type Bundle, type BundlePayload } from "../src/bundle/types";
+import type { RekorSubmitResult } from "../src/lib/rekor";
+
+// ── Rekor mock seam ────────────────────────────────────────────────────────
+//
+// Pre-fix, snapshot tests intercepted POST /api/v1/log/entries on the mock
+// engine server. That stopped working when we moved to @sigstore/sign — the
+// library does signed-entry-timestamp verification against Rekor's public
+// key, so a fetch-level mock can't easily impersonate the real Rekor.
+//
+// Instead, mock the lib/rekor module entirely: tests inject a deterministic
+// RekorSubmitResult via `mockRekorResult`. The wire-format integration is
+// covered separately in rekor.test.ts (live behind REKOR_LIVE=1).
+
+let mockRekorResult: RekorSubmitResult = {
+  ok: false, reason: "rejected", detail: "default — tests override per-case",
+};
+let rekorCallCount = 0;
+
+// Re-export the real module's other functions so this mock stays compatible
+// with verify.ts / rekor.test.ts which also import from lib/rekor. Bun's
+// mock.module is global — only `submitToRekor` is overridden; everything
+// else falls through to the real implementation.
+const realRekor = await import("../src/lib/rekor");
+mock.module("../src/lib/rekor", () => ({
+  ...realRekor,
+  submitToRekor: async () => {
+    rekorCallCount += 1;
+    return mockRekorResult;
+  },
+}));
 
 // ── shared fixture payload (matches the contract test in bundle.test.ts) ────
 
@@ -160,6 +190,13 @@ beforeEach(() => {
   // Default: pretend Rekor is unreachable so snapshots emit rekor: null. Tests
   // that need a success path override this within the test body.
   rekorResponder = () => new Response("upstream down", { status: 500 });
+  // Module-level Rekor stub (see top of file). Default: failure; tests that
+  // need success set `mockRekorResult` to { ok: true, entry: ... } first.
+  mockRekorResult = {
+    ok: false, reason: "rejected",
+    detail: "default 500 — set mockRekorResult per-test",
+  };
+  rekorCallCount = 0;
 });
 
 afterEach(() => {
@@ -651,20 +688,15 @@ describe("snapshotCommand — Rekor inclusion", () => {
   });
 
   test("Rekor sucesso → bundle persiste logIndex + uuid + integratedTime", async () => {
-    rekorResponder = () =>
-      new Response(
-        JSON.stringify({
-          "rekor-uuid-77": {
-            integratedTime: 1748793600,
-            logIndex: 777,
-            verification: {
-              signedEntryTimestamp: "set==",
-              inclusionProof: { logIndex: 777, treeSize: 9, rootHash: "abc" },
-            },
-          },
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } },
-      );
+    mockRekorResult = {
+      ok: true,
+      entry: {
+        logIndex: 777,
+        uuid: "rekor-uuid-77",
+        integratedTime: "2025-06-01T16:00:00.000Z",
+        signedEntryTimestamp: "set==",
+      },
+    };
     const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-ok");
     await snapshotCommand();
     const snapDir = join(workDir, ".beheld", "snapshots");
@@ -677,13 +709,15 @@ describe("snapshotCommand — Rekor inclusion", () => {
   });
 
   test("--no-rekor pula a submissão e mantém rekor: null", async () => {
-    // If --no-rekor still hit the mock, the responder would log a hit — instead
-    // we toggle the responder to throw so any unexpected call fails the test.
-    rekorResponder = () => {
-      throw new Error("submitToRekor should not be called with --no-rekor");
+    // If snapshot still called submitToRekor with --no-rekor, mockRekorResult
+    // would have been read (rekorCallCount > 0). Assert it was NOT called.
+    mockRekorResult = {
+      ok: true,
+      entry: { logIndex: 1, uuid: "should-not-be-used", integratedTime: "x", signedEntryTimestamp: "y" },
     };
     const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-skip");
     await snapshotCommand({ noRekor: true });
+    expect(rekorCallCount).toBe(0);
     const snapDir = join(workDir, ".beheld", "snapshots");
     const file = readdirSync(snapDir).find((f) => f.endsWith(".beheld"))!;
     const bundle = JSON.parse(readFileSync(join(snapDir, file), "utf8")) as Bundle;
@@ -691,17 +725,14 @@ describe("snapshotCommand — Rekor inclusion", () => {
   });
 
   test("Rekor NÃO entra no payload assinado (vive no wrapper)", async () => {
-    rekorResponder = () =>
-      new Response(
-        JSON.stringify({
-          "u-22": {
-            integratedTime: 1700000000,
-            logIndex: 22,
-            verification: { signedEntryTimestamp: "x==", inclusionProof: { logIndex: 22, treeSize: 1, rootHash: "f" } },
-          },
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } },
-      );
+    mockRekorResult = {
+      ok: true,
+      entry: {
+        logIndex: 22, uuid: "u-22",
+        integratedTime: "2023-11-14T00:00:00.000Z",
+        signedEntryTimestamp: "x==",
+      },
+    };
     const { snapshotCommand } = await import("../src/commands/snapshot?v=rekor-payload-iso");
     await snapshotCommand();
     const snapDir = join(workDir, ".beheld", "snapshots");
@@ -717,7 +748,8 @@ describe("snapshotCommand — Rekor inclusion", () => {
   });
 
   test("--rekor-submit promove um bundle existente sem reescrever o payload", async () => {
-    // First: generate an offline bundle (rekor null).
+    // First: generate an offline bundle (rekor null) — default mockRekorResult
+    // is { ok: false, reason: rejected }.
     const { snapshotCommand: snap1 } = await import("../src/commands/snapshot?v=rekor-resub-1");
     await snap1();
     const snapDir = join(workDir, ".beheld", "snapshots");
@@ -726,18 +758,15 @@ describe("snapshotCommand — Rekor inclusion", () => {
     const before = JSON.parse(readFileSync(bundlePath, "utf8")) as Bundle;
     expect(before.rekor).toBeNull();
 
-    // Switch Rekor mock to success and re-submit.
-    rekorResponder = () =>
-      new Response(
-        JSON.stringify({
-          "u-promoted": {
-            integratedTime: 1748800000,
-            logIndex: 9001,
-            verification: { signedEntryTimestamp: "p==", inclusionProof: { logIndex: 9001, treeSize: 5, rootHash: "ab" } },
-          },
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } },
-      );
+    // Switch Rekor stub to success and re-submit.
+    mockRekorResult = {
+      ok: true,
+      entry: {
+        logIndex: 9001, uuid: "u-promoted",
+        integratedTime: "2025-06-01T18:13:20.000Z",
+        signedEntryTimestamp: "p==",
+      },
+    };
     const { snapshotCommand: snap2 } = await import("../src/commands/snapshot?v=rekor-resub-2");
     await snap2({ rekorSubmit: bundlePath });
 

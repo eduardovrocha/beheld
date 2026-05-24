@@ -1,30 +1,46 @@
 /**
- * Sigstore Rekor submission (Phase 5 / F5.8 — production fix May 2026).
+ * Sigstore Rekor submission via @sigstore/sign (Phase 5 / F5.8 — production
+ * fix May 2026).
  *
- * Submits a `hashedrekord` entry to the public append-only log at
- * https://rekor.sigstore.dev. Anyone can later resolve the returned UUID to
- * confirm that the bundle existed at a given timestamp.
+ * Beheld bundles are signed with Ed25519 raw keys (not Fulcio X.509 certs).
+ * Rekor's `hashedrekord` entry type is the obvious path for "here's a hash
+ * and a signature" but its Ed25519 verifier is undocumented/broken — every
+ * combination tested (sign(digest), sign(hex string), sign(data)) returns
+ * HTTP 400 "ed25519: invalid signature".
  *
- * Wire-format invariants Rekor's hashedrekord verifier enforces for Ed25519:
- *   - publicKey.content MUST be base64(PEM("BEGIN PUBLIC KEY")) — DER SPKI
- *     wrapped in the BEGIN/END envelope. Raw DER base64 returns HTTP 400
- *     "failure decoding PEM".
- *   - hash.algorithm MUST be "sha512" — Rekor rejects "sha256" for Ed25519.
- *   - signature.content MUST be base64(Ed25519.Sign(SHA-512(canonical))) —
- *     the signed bytes are the SHA-512 hash, not the original payload.
- *     This is DIFFERENT from the bundle's primary signature, which signs
- *     the canonical payload bytes directly. The caller produces this
- *     "secondary signature" specifically for Rekor.
+ * The working path is the canonical Sigstore one: submit a DSSE envelope as
+ * an `intoto` (or `dsse`) Rekor entry. The DSSE PAE framing prevents
+ * type-confusion attacks and Rekor's DSSE verifier handles Ed25519
+ * correctly. We delegate the wire-format details to @sigstore/sign so we
+ * inherit their bug fixes and don't have to track Rekor's API drift.
  *
- * Failure semantics: every error is reported through a discriminated union
- * so the CLI can surface an honest message ("encoding", "timeout", etc.)
- * instead of the previous catch-all "rede indisponível".
+ * What this module produces for the bundle:
+ *   - logIndex: numeric position in the public Rekor log
+ *   - uuid:     entry hash (sha256 of the canonicalized body), used by
+ *               verifier-facing tools
+ *   - integratedTime: ISO timestamp of inclusion
+ *   - signedEntryTimestamp: SET issued by Rekor (base64)
+ *
+ * Public URL pattern for humans:
+ *   https://search.sigstore.dev/?logIndex=<N>
+ * Pattern for API/auditing tools:
+ *   https://rekor.sigstore.dev/api/v1/log/entries/<uuid>
+ *
+ * Failure semantics: discriminated union so the CLI can surface an honest
+ * message ("encoding", "timeout", "network", "rejected") instead of the
+ * pre-fix catch-all "rede indisponível".
  */
+import * as cryptoNode from "node:crypto";
+
+import { DSSEBundleBuilder, RekorWitness } from "@sigstore/sign";
+import type { Signer, Signature } from "@sigstore/sign/dist/signer/signer";
+
 import type { RekorEntry } from "../bundle/types";
 
 export const REKOR_PUBLIC_BASE_URL = "https://rekor.sigstore.dev";
 const SUBMIT_PATH = "/api/v1/log/entries";
 const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 
 /** Resolve the Rekor base URL at call time so test env overrides take effect
  *  even after the module has been imported. */
@@ -32,82 +48,181 @@ function defaultBaseUrl(): string {
   return process.env.BEHELD_REKOR_URL ?? REKOR_PUBLIC_BASE_URL;
 }
 
-/** DER SubjectPublicKeyInfo prefix for Ed25519 (RFC 8410). 12 bytes,
- *  followed by the 32 raw key bytes → 44-byte DER blob. */
+/** Wraps an Ed25519 raw 32-byte public key (hex) in the PEM envelope
+ *  sigstore-js expects in the KeyMaterial.publicKey field. */
 const ED25519_SPKI_PREFIX_HEX = "302a300506032b6570032100";
 
-/** Public Rekor URL for a given entry UUID. Safe to print in CLI output. */
+export function ed25519HexToPem(hexPubKey: string): string {
+  if (hexPubKey.length !== 64) {
+    throw new Error(`Ed25519 public key must be 32 bytes (64 hex), got ${hexPubKey.length}`);
+  }
+  const der = Buffer.concat([
+    Buffer.from(ED25519_SPKI_PREFIX_HEX, "hex"),
+    Buffer.from(hexPubKey, "hex"),
+  ]);
+  const lines = der.toString("base64").match(/.{1,64}/g) ?? [der.toString("base64")];
+  return `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----\n`;
+}
+
+/** Public Rekor URL for a given entry UUID — auditor-facing JSON. */
 export function rekorEntryUrl(uuid: string, baseUrl: string = REKOR_PUBLIC_BASE_URL): string {
   return `${baseUrl}${SUBMIT_PATH}/${uuid}`;
 }
 
-function hexToBuffer(hex: string): Buffer {
-  const clean = hex.replace(/^0x/, "");
-  if (clean.length % 2 !== 0) throw new Error(`invalid hex length: ${clean.length}`);
-  return Buffer.from(clean, "hex");
+/** User-friendly Sigstore search UI URL for a given log index. Safe to put
+ *  in the public HTML retrato — anyone can open it and see the inclusion. */
+export function rekorSearchUrl(logIndex: number): string {
+  return `https://search.sigstore.dev/?logIndex=${logIndex}`;
 }
 
-/** Wraps an Ed25519 raw 32-byte public key (hex) in the **PEM** envelope
- *  Rekor's hashedrekord verifier requires, returning base64(PEM).
- *
- *  PEM format per RFC 7468:
- *    -----BEGIN PUBLIC KEY-----
- *    <base64 of DER SPKI, line-wrapped at 64 chars>
- *    -----END PUBLIC KEY-----
- *
- *  Rekor rejects raw DER base64 with HTTP 400 "failure decoding PEM" — this
- *  bug silently turned every submission into a noop before the fix. */
-export function ed25519HexToPemB64(hexPubKey: string): string {
-  const raw = hexToBuffer(hexPubKey);
-  if (raw.length !== 32) {
-    throw new Error(`Ed25519 public key must be 32 bytes, got ${raw.length}`);
-  }
-  const der = Buffer.concat([Buffer.from(ED25519_SPKI_PREFIX_HEX, "hex"), raw]);
-  const derB64 = der.toString("base64");
-  const lines = derB64.match(/.{1,64}/g) ?? [derB64];
-  const pem = `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----\n`;
-  return Buffer.from(pem).toString("base64");
+export interface SubmitOptions {
+  /** Override the Rekor base URL (test seam). */
+  baseUrl?: string;
+  /** Override the per-request timeout in ms (test seam). Default 8000. */
+  timeoutMs?: number;
 }
 
-/** Build the hashedrekord request body Rekor's POST endpoint accepts for
- *  Ed25519 signers. Notice the algorithm is **sha512** — Rekor's Ed25519
- *  verifier doesn't accept sha256. The `signatureHex` must be the
- *  Ed25519 signature over the 64-byte SHA-512 hash, not over the original
- *  payload (the caller is responsible for producing this signature). */
-export function buildHashedRekord(args: {
-  payloadHashHex: string;
-  signatureHex: string;
+/** Concrete failure reason — the CLI uses this to print an honest message. */
+export type RekorFailureReason =
+  | "encoding"
+  | "timeout"
+  | "network"
+  | "rejected"
+  | "malformed";
+
+export type RekorSubmitResult =
+  | { ok: true; entry: RekorEntry }
+  | { ok: false; reason: RekorFailureReason; detail: string };
+
+export interface SubmitArgs {
+  /** Bytes of the payload to be sealed in the DSSE envelope. Beheld uses
+   *  the canonical bundle.payload JSON as the payload. */
+  payloadBytes: Uint8Array;
+  /** Web Crypto Ed25519 private key (e.g. from loadPrivateKey()). */
+  privateKey: CryptoKey;
+  /** Raw 32-byte hex of the matching Ed25519 public key. */
   publicKeyHex: string;
-}): object {
-  const sigB64 = hexToBuffer(args.signatureHex).toString("base64");
-  const pubB64 = ed25519HexToPemB64(args.publicKeyHex);
+  /** Optional payloadType for the DSSE envelope. Defaults to
+   *  application/vnd.in-toto+json which Rekor's intoto type expects. */
+  payloadType?: string;
+}
+
+/** Build a Signer wrapping the Web Crypto Ed25519 key for @sigstore/sign.
+ *  Returns a Buffer signature + the PEM-wrapped public key as KeyMaterial. */
+function makeSigner(privateKey: CryptoKey, publicKeyHex: string): Signer {
+  const pubPem = ed25519HexToPem(publicKeyHex);
   return {
-    kind: "hashedrekord",
-    apiVersion: "0.0.1",
-    spec: {
-      data: {
-        hash: {
-          algorithm: "sha512",
-          value: args.payloadHashHex.toLowerCase(),
-        },
-      },
-      signature: {
-        content: sigB64,
-        publicKey: {
-          content: pubB64,
-        },
-      },
+    async sign(data: Buffer): Promise<Signature> {
+      const sigBuf = await crypto.subtle.sign({ name: "Ed25519" }, privateKey, data);
+      return {
+        signature: Buffer.from(sigBuf),
+        key: { $case: "publicKey", publicKey: pubPem, hint: "" },
+      };
     },
   };
 }
 
-/** Parse the Rekor response into the on-wire fields the bundle stores.
- *  Tolerates both `verification.inclusionProof.logIndex` and top-level
- *  `logIndex` since Rekor responses have shifted over versions. */
+/** Translate sigstore-js's bigint-string + Uint8Array fields into the
+ *  bundle's stable wire shape. The sha256 of canonicalizedBody is the
+ *  Rekor entry UUID (the path component in the public API URL). */
+function tlogToRekorEntry(tlog: {
+  logIndex: string;
+  integratedTime: string;
+  canonicalizedBody: Uint8Array | Buffer;
+  inclusionPromise?: { signedEntryTimestamp?: Uint8Array | Buffer };
+}): RekorEntry {
+  const body = Buffer.from(tlog.canonicalizedBody);
+  const uuid = cryptoNode.createHash("sha256").update(body).digest("hex");
+  const integratedTime = new Date(Number(tlog.integratedTime) * 1000).toISOString();
+  const set = tlog.inclusionPromise?.signedEntryTimestamp
+    ? Buffer.from(tlog.inclusionPromise.signedEntryTimestamp).toString("base64")
+    : "";
+  return {
+    logIndex: Number(tlog.logIndex),
+    uuid,
+    integratedTime,
+    signedEntryTimestamp: set,
+  };
+}
+
+/** Map @sigstore/sign exceptions into our discriminated result. The library
+ *  wraps HTTP and crypto errors in InternalError with a `code` field; we
+ *  use both the code and the message to classify. */
+function classifyError(err: unknown): { reason: RekorFailureReason; detail: string } {
+  const e = err as { name?: string; message?: string; code?: string; cause?: unknown };
+  const name = e.name ?? "";
+  const code = e.code ?? "";
+  const msg = e.message ?? String(err);
+
+  if (name === "AbortError" || name === "TimeoutError" || code === "ETIMEDOUT") {
+    return { reason: "timeout", detail: msg };
+  }
+  if (code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH") {
+    return { reason: "network", detail: msg };
+  }
+  // sigstore-js InternalError surfaces HTTP rejections under "TLOG_CREATE_ENTRY_ERROR"
+  if (code === "TLOG_CREATE_ENTRY_ERROR" || /HTTP \d{3}/.test(msg)) {
+    return { reason: "rejected", detail: msg };
+  }
+  if (/illegal base64|invalid hex|must be 32 bytes/i.test(msg)) {
+    return { reason: "encoding", detail: msg };
+  }
+  return { reason: "network", detail: msg };
+}
+
+/** Submit a DSSE-wrapped intoto entry to Sigstore Rekor.
+ *
+ *  By contract, never throws — every error path becomes a
+ *  `{ ok: false, reason, detail }` result so the CLI can render a
+ *  reason-specific message. */
+export async function submitToRekor(
+  args: SubmitArgs,
+  opts: SubmitOptions = {},
+): Promise<RekorSubmitResult> {
+  const baseUrl = opts.baseUrl ?? defaultBaseUrl();
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  let signer: Signer;
+  try {
+    signer = makeSigner(args.privateKey, args.publicKeyHex);
+  } catch (err) {
+    return { ok: false, reason: "encoding", detail: (err as Error).message };
+  }
+
+  const witness = new RekorWitness({
+    rekorBaseURL: baseUrl,
+    entryType: "dsse",
+    timeout: timeoutMs,
+    retry: { retries: 0 },  // single try — matches Beheld policy
+  });
+  const builder = new DSSEBundleBuilder({ signer, witnesses: [witness] });
+
+  try {
+    const bundle = await builder.create({
+      data: Buffer.from(args.payloadBytes),
+      type: args.payloadType ?? DEFAULT_PAYLOAD_TYPE,
+    });
+    const tlog = bundle.verificationMaterial?.tlogEntries?.[0];
+    if (!tlog) {
+      return {
+        ok: false,
+        reason: "malformed",
+        detail: "Rekor accepted the submission but returned no tlog entry",
+      };
+    }
+    return { ok: true, entry: tlogToRekorEntry(tlog) };
+  } catch (err) {
+    return { ok: false, ...classifyError(err) };
+  }
+}
+
+/** Parse the raw Rekor entry JSON (response of GET /api/v1/log/entries/{uuid})
+ *  into the wire shape used by the bundle. Used by `beheld verify --verify-rekor`
+ *  to cross-check a stored RekorEntry against the live log. The submission
+ *  path uses sigstore-js's own parser; this is only for read-back. */
 export function parseRekorResponse(json: unknown): RekorEntry | null {
   if (json == null || typeof json !== "object") return null;
   const obj = json as Record<string, unknown>;
-  // The response is keyed by uuid → entry body.
   const keys = Object.keys(obj);
   if (keys.length === 0) return null;
   const uuid = keys[0]!;
@@ -138,113 +253,11 @@ export function parseRekorResponse(json: unknown): RekorEntry | null {
   }
 
   const set =
-    (typeof verification?.signedEntryTimestamp === "string"
+    typeof verification?.signedEntryTimestamp === "string"
       ? (verification.signedEntryTimestamp as string)
-      : null) ?? "";
+      : "";
 
-  return {
-    logIndex,
-    uuid,
-    integratedTime,
-    signedEntryTimestamp: set,
-  };
-}
-
-export interface SubmitOptions {
-  /** Override the Rekor base URL (test seam). */
-  baseUrl?: string;
-  /** Custom fetch implementation (test seam). */
-  fetchImpl?: typeof fetch;
-  /** Override the per-request timeout in ms (test seam). Default 8000. */
-  timeoutMs?: number;
-}
-
-/** Concrete failure reason — the CLI uses this to print an honest message
- *  rather than catch-all "rede indisponível". */
-export type RekorFailureReason =
-  | "encoding"  // local: bad hex / wrong key length — never reached Rekor
-  | "timeout"   // request aborted at timeoutMs
-  | "network"   // fetch threw (DNS, connection refused, TLS, etc.)
-  | "rejected"  // Rekor responded but with a non-2xx status
-  | "malformed"; // Rekor returned 201 but the body didn't parse
-
-export type RekorSubmitResult =
-  | { ok: true; entry: RekorEntry }
-  | { ok: false; reason: RekorFailureReason; detail: string };
-
-export interface SubmitArgs {
-  /** SHA-512 hex of the canonical payload bytes (what Rekor will index). */
-  rekorHashHex: string;
-  /** Ed25519 signature (hex) over the SHA-512 hash bytes. This is the
-   *  "secondary signature" the caller produced specifically for Rekor —
-   *  it is NOT the bundle's primary signature. */
-  rekorSignatureHex: string;
-  /** Dev's Ed25519 public key, raw 32-byte hex. */
-  publicKeyHex: string;
-}
-
-/** Submit a hashedrekord entry to Sigstore Rekor. Returns a discriminated
- *  result so the caller can render an honest message on failure.
- *
- *  By contract this function does NOT throw — every error path becomes
- *  a `{ ok: false, reason, detail }` result. */
-export async function submitToRekor(
-  args: SubmitArgs,
-  opts: SubmitOptions = {},
-): Promise<RekorSubmitResult> {
-  const baseUrl = opts.baseUrl ?? defaultBaseUrl();
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-  let body: object;
-  try {
-    body = buildHashedRekord({
-      payloadHashHex: args.rekorHashHex,
-      signatureHex: args.rekorSignatureHex,
-      publicKeyHex: args.publicKeyHex,
-    });
-  } catch (err) {
-    return { ok: false, reason: "encoding", detail: (err as Error).message };
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetchImpl(`${baseUrl}${SUBMIT_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res) {
-      return { ok: false, reason: "network", detail: "fetch returned no response" };
-    }
-    if (res.status !== 201) {
-      const text = (await res.text().catch(() => "")) || "";
-      const snippet = text.length > 200 ? text.slice(0, 200) + "…" : text;
-      return {
-        ok: false,
-        reason: "rejected",
-        detail: `HTTP ${res.status} ${res.statusText}${snippet ? ` — ${snippet}` : ""}`,
-      };
-    }
-    const json = await res.json().catch(() => null);
-    const entry = parseRekorResponse(json);
-    if (!entry) {
-      return { ok: false, reason: "malformed", detail: "Rekor returned 201 but the response did not parse" };
-    }
-    return { ok: true, entry };
-  } catch (err) {
-    // AbortError on timeout vs other network errors.
-    const name = (err as { name?: string }).name ?? "";
-    if (name === "AbortError" || name === "TimeoutError") {
-      return { ok: false, reason: "timeout", detail: `aborted after ${timeoutMs}ms` };
-    }
-    return { ok: false, reason: "network", detail: (err as Error).message };
-  } finally {
-    clearTimeout(timeout);
-  }
+  return { logIndex, uuid, integratedTime, signedEntryTimestamp: set };
 }
 
 /** Re-fetch a Rekor entry to confirm the bundle hash matches what was logged.
@@ -255,13 +268,12 @@ export async function fetchRekorEntry(
   opts: SubmitOptions = {},
 ): Promise<unknown | null> {
   const baseUrl = opts.baseUrl ?? defaultBaseUrl();
-  const fetchImpl = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(`${baseUrl}${SUBMIT_PATH}/${uuid}`, {
+    const res = await fetch(`${baseUrl}${SUBMIT_PATH}/${uuid}`, {
       method: "GET",
       signal: controller.signal,
     });

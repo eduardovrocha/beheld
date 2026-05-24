@@ -125,14 +125,17 @@ describe("renderTrustDetails — GitHub identity block", () => {
 });
 
 describe("renderTrustDetails — Rekor block", () => {
-  test("includes public Rekor URL + logIndex when present", () => {
+  test("includes search.sigstore.dev (primary) + entry URL (secondary) when present", () => {
     const bundle = makeData({ rekor: REKOR }).bundle as any;
     const html = renderTrustDetails(bundle);
 
     expect(html).toContain("Sigstore Rekor");
     expect(html).toContain("log #287435982");
+    // Primary link: user-friendly Sigstore search UI by logIndex.
+    expect(html).toContain("search.sigstore.dev/?logIndex=287435982");
+    // Secondary link: raw API URL for auditors, with full UUID.
     expect(html).toContain("rekor.sigstore.dev/api/v1/log/entries/" + REKOR.uuid);
-    // UUID is truncated for display but full UUID present in URL only.
+    // UUID is truncated for display; full UUID is only in the API URL.
     expect(html).toContain("abcdef012345…6789");
     expect(html).toContain("24/05/2026");
   });

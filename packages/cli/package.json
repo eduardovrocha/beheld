@@ -8,6 +8,7 @@
     "build": "bun build src/index.ts --compile --outfile ../../dist/beheld"
   },
   "dependencies": {
+    "@sigstore/sign": "^4.1.1",
     "commander": "^12.1.0",
     "qrcode-terminal": "^0.12.0"
   },

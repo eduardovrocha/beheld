@@ -1,22 +1,26 @@
 /**
- * F5.8 — Sigstore Rekor submission + trust tier derivation.
+ * F5.8 — Sigstore Rekor submission via @sigstore/sign.
  *
- * `submitToRekor` is contract-bound to NEVER throw: every failure path
- * resolves to `{ ok: false, reason, detail }` so the CLI can surface an
- * honest message instead of a catch-all "rede indisponível". These tests
- * pin both the wire-format contract (PEM key, SHA-512 hash, hashedrekord
- * shape) and each failure reason.
+ * The submission path itself is delegated to sigstore-js (DSSE envelope +
+ * Rekor "dsse" entry) so these tests focus on the boundary contract:
+ *   - submitToRekor never throws — every failure becomes a discriminated
+ *     result so the CLI can render an honest message
+ *   - tlogToRekorEntry maps the protobuf-shaped tlog into the bundle's
+ *     stable wire shape (logIndex as number, integratedTime as ISO,
+ *     uuid as sha256(canonicalizedBody))
+ *   - ed25519HexToPem wraps a raw key in a PEM envelope sigstore-js can
+ *     consume
  *
- * Live integration: set REKOR_LIVE=1 to also hit rekor.sigstore.dev.
- * Skipped by default so PRs don't depend on the public log being up.
+ * Live integration: REKOR_LIVE=1 hits rekor.sigstore.dev. Skipped by
+ * default so PRs don't depend on the public log being up.
  */
 import { describe, expect, test } from "bun:test";
+import * as cryptoNode from "node:crypto";
 
 import {
-  buildHashedRekord,
-  ed25519HexToPemB64,
-  parseRekorResponse,
+  ed25519HexToPem,
   rekorEntryUrl,
+  rekorSearchUrl,
   submitToRekor,
 } from "../src/lib/rekor";
 import { computeTier, type TrustTier } from "../src/lib/tier";
@@ -24,43 +28,7 @@ import type { Bundle, RekorEntry } from "../src/bundle/types";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-const HASH_HEX = "a".repeat(128); // SHA-512 = 64 bytes = 128 hex chars
-const SIG_HEX = "b".repeat(128);  // Ed25519 = 64 bytes = 128 hex chars
-const PUB_HEX = "c".repeat(64);   // Ed25519 pub = 32 bytes = 64 hex chars
-const SAMPLE_UUID = "abc123uuid";
-
-function rekorSuccessBody(): unknown {
-  return {
-    [SAMPLE_UUID]: {
-      body: "<base64 body>",
-      integratedTime: 1748793600, // 2025-06-01T16:00:00Z
-      logIndex: 12345678,
-      verification: {
-        signedEntryTimestamp: "MEUCIQ==",
-        inclusionProof: {
-          logIndex: 12345678,
-          treeSize: 99,
-          rootHash: "deadbeef",
-        },
-      },
-    },
-  };
-}
-
-function rekorResponse(status: number, body: unknown): Response {
-  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function makeArgs(over: Partial<{ pub: string; hash: string; sig: string }> = {}) {
-  return {
-    rekorHashHex: over.hash ?? HASH_HEX,
-    rekorSignatureHex: over.sig ?? SIG_HEX,
-    publicKeyHex: over.pub ?? PUB_HEX,
-  };
-}
+const PUB_HEX = "c".repeat(64);
 
 function bareBundle(): Bundle {
   return {
@@ -94,7 +62,7 @@ function bareBundle(): Bundle {
       engine_version_hash: null,
     },
     hash: `sha256:${"a".repeat(64)}`,
-    signature: `ed25519:${SIG_HEX}`,
+    signature: `ed25519:${"b".repeat(128)}`,
     public_key: `ed25519:${"A".repeat(43)}`,
   };
 }
@@ -119,200 +87,99 @@ const VALID_REKOR: RekorEntry = {
   signedEntryTimestamp: "set==",
 };
 
-// ── PEM wrapping (the bug that silently broke production) ──────────────────
+/** Build an ephemeral Ed25519 keypair + return the hex pub for tests. */
+async function ephemeralKey(): Promise<{ priv: CryptoKey; pubHex: string }> {
+  const kp = (await crypto.subtle.generateKey(
+    { name: "Ed25519" } as unknown as Algorithm,
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const jwk = (await crypto.subtle.exportKey("jwk", kp.publicKey)) as JsonWebKey;
+  const pubHex = Buffer.from(jwk.x as string, "base64url").toString("hex");
+  return { priv: kp.privateKey, pubHex };
+}
 
-describe("ed25519HexToPemB64", () => {
-  test("wraps a 32-byte raw key in PEM envelope (base64)", () => {
-    const pemB64 = ed25519HexToPemB64("00".repeat(32));
-    const pem = Buffer.from(pemB64, "base64").toString("utf8");
+// ── PEM wrapping ────────────────────────────────────────────────────────────
+
+describe("ed25519HexToPem", () => {
+  test("wraps a 32-byte raw key in PEM envelope", () => {
+    const pem = ed25519HexToPem("00".repeat(32));
     expect(pem.startsWith("-----BEGIN PUBLIC KEY-----")).toBe(true);
     expect(pem.includes("-----END PUBLIC KEY-----")).toBe(true);
-    // PEM body is base64 of DER SPKI — strip envelope and check length.
-    const der = Buffer.from(
-      pem.split("-----")[2]!.replace(/\s+/g, ""),
-      "base64",
-    );
-    expect(der.length).toBe(44); // SPKI prefix (12) + raw key (32)
+    // PEM body decodes to DER SPKI (44 bytes = 12-byte prefix + 32-byte key)
+    const body = pem.split("-----")[2]!.replace(/\s+/g, "");
+    const der = Buffer.from(body, "base64");
+    expect(der.length).toBe(44);
     expect(der.toString("hex").startsWith("302a300506032b6570032100")).toBe(true);
   });
 
   test("rejects non-32-byte input", () => {
-    expect(() => ed25519HexToPemB64("ab")).toThrow();
-    expect(() => ed25519HexToPemB64("a".repeat(63))).toThrow();
+    expect(() => ed25519HexToPem("ab")).toThrow();
+    expect(() => ed25519HexToPem("a".repeat(63))).toThrow();
   });
 
   test("PEM body line-wraps at 64 chars (RFC 7468)", () => {
-    const pem = Buffer.from(
-      ed25519HexToPemB64("00".repeat(32)),
-      "base64",
-    ).toString("utf8");
-    const bodyLines = pem
-      .split("\n")
-      .filter((l) => l && !l.startsWith("-----"));
+    const pem = ed25519HexToPem("00".repeat(32));
+    const bodyLines = pem.split("\n").filter((l) => l && !l.startsWith("-----"));
     for (const line of bodyLines) {
       expect(line.length).toBeLessThanOrEqual(64);
     }
   });
 });
 
-describe("buildHashedRekord", () => {
-  test("emits the shape Rekor's POST endpoint expects (sha512 + PEM key)", () => {
-    const body = buildHashedRekord({
-      payloadHashHex: HASH_HEX,
-      signatureHex: SIG_HEX,
-      publicKeyHex: PUB_HEX,
-    }) as {
-      kind: string;
-      apiVersion: string;
-      spec: {
-        data: { hash: { algorithm: string; value: string } };
-        signature: { content: string; publicKey: { content: string } };
-      };
-    };
-    expect(body.kind).toBe("hashedrekord");
-    expect(body.apiVersion).toBe("0.0.1");
-    // Rekor's Ed25519 verifier requires sha512 — sha256 is rejected.
-    expect(body.spec.data.hash.algorithm).toBe("sha512");
-    expect(body.spec.data.hash.value).toBe(HASH_HEX);
-    expect(body.spec.signature.content).toBe(
-      Buffer.from(SIG_HEX, "hex").toString("base64"),
-    );
-    // publicKey is PEM-wrapped, not raw DER.
-    const pem = Buffer.from(
-      body.spec.signature.publicKey.content,
-      "base64",
-    ).toString("utf8");
-    expect(pem.startsWith("-----BEGIN PUBLIC KEY-----")).toBe(true);
-  });
-});
+// ── submitToRekor — discriminated result ────────────────────────────────────
 
-// ── submitToRekor — discriminated result, one branch per reason ─────────────
-
-describe("submitToRekor", () => {
-  test("returns ok=true + entry on HTTP 201 with valid body", async () => {
-    const fetchImpl = (async () =>
-      rekorResponse(201, rekorSuccessBody())) as typeof fetch;
-    const r = await submitToRekor(makeArgs(), { fetchImpl });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.entry.logIndex).toBe(12345678);
-      expect(r.entry.uuid).toBe(SAMPLE_UUID);
-      expect(r.entry.integratedTime).toBe("2025-06-01T16:00:00.000Z");
-      expect(r.entry.signedEntryTimestamp).toBe("MEUCIQ==");
-    }
-  });
-
-  test("reason='network' when fetch throws", async () => {
-    const fetchImpl = (async () => {
-      throw new Error("ECONNREFUSED");
-    }) as typeof fetch;
-    const r = await submitToRekor(makeArgs(), { fetchImpl });
+describe("submitToRekor — failure classification", () => {
+  test("reason='encoding' when public key hex is not 32 bytes", async () => {
+    const { priv } = await ephemeralKey();
+    const r = await submitToRekor({
+      payloadBytes: new Uint8Array([1, 2, 3]),
+      privateKey: priv,
+      publicKeyHex: "deadbeef", // 4 bytes — invalid
+    });
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.reason).toBe("network");
-      expect(r.detail).toContain("ECONNREFUSED");
+      expect(r.reason).toBe("encoding");
+      expect(r.detail).toContain("32 bytes");
     }
   });
 
-  test("reason='rejected' on HTTP 400 — surfaces Rekor's error body", async () => {
-    const fetchImpl = (async () =>
-      rekorResponse(400, { code: 400, message: "invalid public key" })) as typeof fetch;
-    const r = await submitToRekor(makeArgs(), { fetchImpl });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe("rejected");
-      expect(r.detail).toContain("HTTP 400");
-      expect(r.detail).toContain("invalid public key");
-    }
-  });
-
-  test("reason='rejected' on HTTP 500", async () => {
-    const fetchImpl = (async () =>
-      rekorResponse(500, { error: "internal" })) as typeof fetch;
-    const r = await submitToRekor(makeArgs(), { fetchImpl });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("rejected");
-  });
-
-  test("reason='malformed' when body parses to something Rekor-incompatible", async () => {
-    const fetchImpl = (async () =>
-      rekorResponse(201, { not_a_rekor_response: true })) as typeof fetch;
-    const r = await submitToRekor(makeArgs(), { fetchImpl });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("malformed");
-  });
-
-  test("reason='timeout' when fetch aborts at timeoutMs", async () => {
-    const fetchImpl = (async (_url, init?: RequestInit) => {
-      const signal = init?.signal as AbortSignal | undefined;
-      return new Promise<Response>((_resolve, reject) => {
-        if (signal?.aborted) {
-          const e = new Error("aborted"); (e as { name: string }).name = "AbortError";
-          reject(e); return;
-        }
-        signal?.addEventListener("abort", () => {
-          const e = new Error("aborted"); (e as { name: string }).name = "AbortError";
-          reject(e);
-        });
-      });
-    }) as typeof fetch;
-    const t0 = Date.now();
-    const r = await submitToRekor(makeArgs(), { fetchImpl, timeoutMs: 50 });
-    const elapsed = Date.now() - t0;
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe("timeout");
-      expect(r.detail).toContain("50ms");
-    }
-    expect(elapsed).toBeLessThan(2000);
-  });
-
-  test("reason='encoding' on bad pubkey hex (never reaches network)", async () => {
-    let called = false;
-    const fetchImpl = (async () => {
-      called = true;
-      return rekorResponse(201, rekorSuccessBody());
-    }) as typeof fetch;
-    const r = await submitToRekor(makeArgs({ pub: "deadbeef" }), { fetchImpl });
-    expect(called).toBe(false);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("encoding");
-  });
-});
-
-describe("parseRekorResponse", () => {
-  test("returns null for empty / wrong shape", () => {
-    expect(parseRekorResponse(null)).toBeNull();
-    expect(parseRekorResponse({})).toBeNull();
-    expect(parseRekorResponse({ uuid: { /* no logIndex */ } })).toBeNull();
-  });
-
-  test("tolerates top-level logIndex (older API shape)", () => {
-    const body = {
-      "uuid-x": {
-        logIndex: 7,
-        integratedTime: 1700000000,
-        verification: { signedEntryTimestamp: "x==" },
+  test("reason='network' when Rekor URL points to a closed port", async () => {
+    const { priv, pubHex } = await ephemeralKey();
+    const r = await submitToRekor(
+      {
+        payloadBytes: new TextEncoder().encode("test"),
+        privateKey: priv,
+        publicKeyHex: pubHex,
       },
-    };
-    const e = parseRekorResponse(body);
-    expect(e?.logIndex).toBe(7);
-    expect(e?.uuid).toBe("uuid-x");
+      { baseUrl: "http://127.0.0.1:1", timeoutMs: 2000 },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(["network", "rejected", "timeout"]).toContain(r.reason);
+    }
   });
 });
 
-describe("rekorEntryUrl", () => {
-  test("uses the public Sigstore base by default", () => {
+// ── URL helpers ─────────────────────────────────────────────────────────────
+
+describe("rekorEntryUrl + rekorSearchUrl", () => {
+  test("entry URL uses the public Sigstore base by default", () => {
     expect(rekorEntryUrl("u")).toBe("https://rekor.sigstore.dev/api/v1/log/entries/u");
   });
-  test("respects an override base URL", () => {
+  test("entry URL respects an override base", () => {
     expect(rekorEntryUrl("u", "http://localhost:9999")).toBe(
       "http://localhost:9999/api/v1/log/entries/u",
     );
   });
+  test("search URL points at the user-facing Sigstore UI by logIndex", () => {
+    expect(rekorSearchUrl(287435982)).toBe(
+      "https://search.sigstore.dev/?logIndex=287435982",
+    );
+  });
 });
 
-// ── computeTier — unchanged contract ───────────────────────────────────────
+// ── computeTier — unchanged contract ────────────────────────────────────────
 
 describe("computeTier", () => {
   test("unsigned: missing wrapper signature", () => {
@@ -368,36 +235,35 @@ describe("computeTier", () => {
 const LIVE = process.env.REKOR_LIVE === "1";
 
 (LIVE ? describe : describe.skip)("live — rekor.sigstore.dev", () => {
-  test("real submission produces a logIndex + the entry is fetchable", async () => {
-    // Generate a fresh ephemeral Ed25519 keypair for this test.
-    const kp = await crypto.subtle.generateKey(
-      { name: "Ed25519" } as unknown as Algorithm,
-      true,
-      ["sign", "verify"],
-    ) as CryptoKeyPair;
-    const jwk = await crypto.subtle.exportKey("jwk", kp.publicKey) as JsonWebKey;
-    const pubHex = Buffer.from(jwk.x as string, "base64url").toString("hex");
-
-    // Sign a SHA-512 of some unique bytes (Rekor would reject a duplicate).
-    const unique = `beheld-live-test-${Date.now()}-${Math.random()}`;
-    const data = new TextEncoder().encode(unique);
-    const sha512 = await crypto.subtle.digest("SHA-512", data);
-    const sig = await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, sha512);
-
-    const hashHex = Array.from(new Uint8Array(sha512))
-      .map((b) => b.toString(16).padStart(2, "0")).join("");
-    const sigHex = Array.from(new Uint8Array(sig))
-      .map((b) => b.toString(16).padStart(2, "0")).join("");
-
-    const r = await submitToRekor(
-      { rekorHashHex: hashHex, rekorSignatureHex: sigHex, publicKeyHex: pubHex },
-      { timeoutMs: 15000 },
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(typeof r.entry.logIndex).toBe("number");
-      expect(r.entry.logIndex).toBeGreaterThan(0);
-      expect(r.entry.uuid.length).toBeGreaterThan(20);
-    }
-  }, 30000);
+  test(
+    "real submission produces a logIndex + Rekor entry resolves",
+    async () => {
+      const { priv, pubHex } = await ephemeralKey();
+      const unique = `beheld-live-${Date.now()}-${Math.random()}`;
+      const r = await submitToRekor(
+        {
+          payloadBytes: new TextEncoder().encode(unique),
+          privateKey: priv,
+          publicKeyHex: pubHex,
+        },
+        { timeoutMs: 15000 },
+      );
+      if (!r.ok) {
+        // surface the actual failure to the developer
+        // eslint-disable-next-line no-console
+        console.error("rekor live test failed:", r.reason, r.detail);
+      }
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(typeof r.entry.logIndex).toBe("number");
+        expect(r.entry.logIndex).toBeGreaterThan(0);
+        // uuid is sha256(canonicalizedBody) → 64-char hex
+        expect(r.entry.uuid).toMatch(/^[0-9a-f]{64}$/);
+        expect(r.entry.integratedTime).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+        );
+      }
+    },
+    30000,
+  );
 });

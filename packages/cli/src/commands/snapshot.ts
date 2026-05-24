@@ -179,29 +179,19 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
   // still saved without rekor and the user can promote it later with
   // `beheld snapshot --rekor-submit <bundle>`.
   //
-  // Rekor's hashedrekord verifier requires that the *signed bytes* be the
-  // SHA-512 hash of the data, not the data itself. This is incompatible
-  // with the bundle's primary signature, which signs the canonical bytes
-  // directly. We solve this by producing a SECONDARY signature here —
-  // Ed25519 over SHA-512(canonical) — purely for Rekor. The bundle's
-  // primary signature stays as-is. Both bind to the same public key, so a
-  // verifier walking from `bundle.rekor.uuid` to the Rekor entry and back
+  // Wire format: DSSE envelope wrapping bundle.payload canonical bytes,
+  // posted as a Rekor `dsse` entry. This is the canonical Sigstore path
+  // for Ed25519 signers (hashedrekord doesn't work for Ed25519). The DSSE
+  // signature is computed by @sigstore/sign over PAE(payloadType, payload);
+  // it is INDEPENDENT of the bundle's primary signature (which signs the
+  // canonical bytes directly). Both bind to the same Ed25519 public key, so
+  // a verifier walking from bundle.rekor.uuid to the Rekor entry and back
   // to the bundle's pubkey establishes the chain.
   let rekorResult: RekorSubmitResult | null = null;
   if (opts.noRekor !== true) {
-    const canonicalBytes = new TextEncoder().encode(canonical);
-    const sha512Buf = await crypto.subtle.digest("SHA-512", canonicalBytes);
-    const rekorHashHex = toHex(sha512Buf);
-    const rekorSigBuf = await crypto.subtle.sign(
-      { name: "Ed25519" },
-      privKey,
-      sha512Buf,
-    );
-    const rekorSignatureHex = toHex(rekorSigBuf);
-
     rekorResult = await submitToRekor({
-      rekorHashHex,
-      rekorSignatureHex,
+      payloadBytes: new TextEncoder().encode(canonical),
+      privateKey: privKey,
       publicKeyHex,
     });
   }
@@ -404,21 +394,12 @@ async function rekorSubmitExisting(bundlePath: string): Promise<void> {
   }
 
   const canonical = payloadToCanonical(bundle.payload);
-  const canonicalBytes = new TextEncoder().encode(canonical);
-  const sha512Buf = await crypto.subtle.digest("SHA-512", canonicalBytes);
-  const rekorHashHex = toHex(sha512Buf);
   const privKey = await loadPrivateKey();
-  const rekorSigBuf = await crypto.subtle.sign(
-    { name: "Ed25519" },
-    privKey,
-    sha512Buf,
-  );
-  const rekorSignatureHex = toHex(rekorSigBuf);
 
   console.log(arrow("submetendo ao rekor.sigstore.dev"));
   const result = await submitToRekor({
-    rekorHashHex,
-    rekorSignatureHex,
+    payloadBytes: new TextEncoder().encode(canonical),
+    privateKey: privKey,
     publicKeyHex: pubHex,
   });
   if (!result.ok) {

@@ -440,15 +440,22 @@ function renderRekorSection(rekor: BundleRekorView | null | undefined): string {
         </div>`;
   }
   const uuid = rekor!.uuid as string;
-  const url = `https://rekor.sigstore.dev/api/v1/log/entries/${encodeURIComponent(uuid)}`;
+  // Primary link goes to the user-facing Sigstore search UI by logIndex —
+  // recruiters can click and see the inclusion without API knowledge.
+  // The raw API URL stays available as a secondary "auditor" link.
+  const searchUrl = `https://search.sigstore.dev/?logIndex=${rekor!.logIndex}`;
+  const apiUrl = `https://rekor.sigstore.dev/api/v1/log/entries/${encodeURIComponent(uuid)}`;
   const shortUuid = uuid.length > 16 ? `${uuid.slice(0, 12)}…${uuid.slice(-4)}` : uuid;
   const integratedLabel = formatIsoToPtBr(rekor!.integratedTime);
   return `
         <div class="trust-section">
           <p class="trust-section-title">Sigstore Rekor</p>
           <p class="trust-section-body">
-            <a class="trust-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">log #${rekor!.logIndex}</a>
-            <span class="trust-meta"> · uuid ${escapeHtml(shortUuid)} · integrado em ${escapeHtml(integratedLabel)}</span>
+            <a class="trust-link" href="${escapeHtml(searchUrl)}" target="_blank" rel="noopener">log #${rekor!.logIndex}</a>
+            <span class="trust-meta"> · integrado em ${escapeHtml(integratedLabel)}</span>
+          </p>
+          <p class="trust-section-body trust-meta" style="margin-top:4px;">
+            uuid <a class="trust-link" href="${escapeHtml(apiUrl)}" target="_blank" rel="noopener">${escapeHtml(shortUuid)}</a>
           </p>
         </div>`;
 }

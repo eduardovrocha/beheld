@@ -352,9 +352,19 @@ def snapshot_payload() -> dict:
 
     Returns the BundlePayload as-is (unsigned). The CLI canonicalizes, hashes,
     signs with Ed25519, and POSTs the result back to /snapshot/save.
+
+    F6.12 / schema v4: the payload now embeds `stack`, `signals`, `identity`,
+    `emergent` so the signed bytes carry everything the public HTML page
+    renders. The CLI no longer needs a second round-trip to /snapshot/html-data
+    (kept for backward compat — see below).
     """
     try:
-        payload = build_bundle_payload(db, VERSION, engine_version_hash=get_engine_hash())
+        payload = build_bundle_payload(
+            db,
+            VERSION,
+            engine_version_hash=get_engine_hash(),
+            identity_gen=identity_gen,
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return dataclasses.asdict(payload)
@@ -364,30 +374,28 @@ def snapshot_payload() -> dict:
 def snapshot_html_data() -> dict:
     """Bundle payload + identity phrase + emergent-pattern diff in one shot.
 
-    Consumed by `beheld snapshot --html` to render the public-facing
-    retrato técnico. The payload here is identical to /snapshot/payload —
-    we add identity (run through the IdentityGenerator) and emergent (30d vs
-    180d workflow shift) so the CLI doesn't need to reach into the engine
-    twice.
-
-    Identity goes through the generator's full LLM-or-fallback pipeline.
-    Emergent may be null when the data lacks a meaningful shift; the CLI
-    must hide that section if so.
+    Deprecated as the primary path since schema v4 (F6.12) — the same fields
+    are now embedded in the BundlePayload returned by /snapshot/payload.
+    Kept as a backward-compat alias: returns the same payload plus mirrors of
+    the embedded `signals/identity/emergent` at the top level for older CLI
+    builds. New CLI versions read everything from `payload.*` directly.
     """
     try:
-        payload = build_bundle_payload(db, VERSION, engine_version_hash=get_engine_hash())
+        payload = build_bundle_payload(
+            db,
+            VERSION,
+            engine_version_hash=get_engine_hash(),
+            identity_gen=identity_gen,
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    signals = build_signals_minimal(db)
-    identity = identity_gen.generate(signals, persist=False)
-    emergent = compute_emergent_diff(db)
-
+    payload_dict = dataclasses.asdict(payload)
     return {
-        "payload": dataclasses.asdict(payload),
-        "signals": signals,
-        "identity": identity.to_dict(),
-        "emergent": emergent,
+        "payload": payload_dict,
+        "signals": payload_dict.get("signals"),
+        "identity": payload_dict.get("identity"),
+        "emergent": payload_dict.get("emergent"),
     }
 
 

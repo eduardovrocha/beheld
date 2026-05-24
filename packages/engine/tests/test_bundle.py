@@ -68,15 +68,74 @@ def _fixture_payload() -> BundlePayload:
             period_days=30,
         ),
         engine_version_hash="0" * 64,
+        # Schema v4 (F6.12) — the four human-facing overlays embedded in
+        # signed bytes. Small, deterministic shapes so the canonical hash
+        # contract stays stable across regenerations.
+        stack={
+            "language_distribution": [
+                {
+                    "language": "Ruby",
+                    "commit_count": 100,
+                    "file_count": 200,
+                    "first_seen": "2024-01",
+                    "last_seen": "2026-05",
+                    "weight_pct": 60.0,
+                },
+                {
+                    "language": "Python",
+                    "commit_count": 50,
+                    "file_count": 80,
+                    "first_seen": "2025-01",
+                    "last_seen": "2025-12",
+                    "weight_pct": 40.0,
+                },
+            ],
+            "architecture_patterns": [
+                {"pattern": "mvc", "repo_count": 1, "confidence": "strong"},
+            ],
+            "total_commits_analyzed": 150,
+            "repos_analyzed": 2,
+        },
+        signals={
+            "schema_version": "1",
+            "ecosystems": {"dominant": ["rails"], "secondary": []},
+            "test_pattern": {"discipline": "moderate", "approach": "test-after"},
+            "timing": {"peak_period": "morning", "consistency": "regular"},
+            "tooling": {"platforms": ["docker", "github"]},
+        },
+        identity={
+            "identity_long": "Dev Ruby/Python com hábito test-after.",
+            "identity_short": "Dev Ruby/Python.",
+            "confidence": "medium",
+            "generation_path": "llm",
+            "model_used": "claude-haiku",
+            "generated_at": "2026-05-14T00:00:00+00:00",
+        },
+        emergent={
+            "pattern": "tdd",
+            "recent_share": 0.4,
+            "older_share": 0.2,
+            "delta_pp": 20,
+            "recent_window_days": 30,
+            "baseline_window_days": 180,
+        },
     )
 
 
 # Reference values — must match those asserted by the TypeScript twin test.
+# Bundle schema v4 (F6.12) — stack, signals, identity, emergent embedded.
 # If you change the fixture above or the canonical_json rules, regenerate by:
-#   PYTHONPATH=src python -c "..."  (see commit message of the change)
+#   PYTHONPATH=src python -c "from tests.test_bundle import _fixture_payload; \
+#     from bundle import payload_to_canonical, payload_hash; \
+#     p=_fixture_payload(); print(payload_to_canonical(p)); print(payload_hash(p))"
 EXPECTED_CANONICAL = (
     '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",'
+    '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,'
+    '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},'
     '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",'
+    '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",'
+    '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",'
+    '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},'
     '"l1":{"avg_test_ratio":0.42,'
     '"earliest_commit":"2023-01-01T00:00:00+00:00",'
     '"ecosystems":{"python":true,"rails":true},'
@@ -99,17 +158,29 @@ EXPECTED_CANONICAL = (
     '"previous_hash":null,'
     '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,'
     '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,'
-    '"test_maturity":20}}'
+    '"test_maturity":20},'
+    '"signals":{"ecosystems":{"dominant":["rails"],"secondary":[]},'
+    '"schema_version":"1",'
+    '"test_pattern":{"approach":"test-after","discipline":"moderate"},'
+    '"timing":{"consistency":"regular","peak_period":"morning"},'
+    '"tooling":{"platforms":["docker","github"]}},'
+    '"stack":{"architecture_patterns":[{"confidence":"strong","pattern":"mvc","repo_count":1}],'
+    '"language_distribution":['
+    '{"commit_count":100,"file_count":200,"first_seen":"2024-01","language":"Ruby",'
+    '"last_seen":"2026-05","weight_pct":60},'
+    '{"commit_count":50,"file_count":80,"first_seen":"2025-01","language":"Python",'
+    '"last_seen":"2025-12","weight_pct":40}],'
+    '"repos_analyzed":2,"total_commits_analyzed":150}}'
 )
 
-EXPECTED_HASH = "sha256:0521f98e1a40a6f0adbc605d20a4552f696c81a43a8fa21e11167c810423c4fe"
+EXPECTED_HASH = "sha256:6f58ff5a9e79a24cf6e788ab02096b83e2ae8f24a6ac52fd6860540d0ef98899"
 
 
 # ── canonical_json basics ────────────────────────────────────────────────────
 
 
-def test_bundle_version_is_three() -> None:
-    assert BUNDLE_VERSION == "3"
+def test_bundle_version_is_four() -> None:
+    assert BUNDLE_VERSION == "4"
 
 
 def test_canonical_sorts_keys_alphabetically() -> None:
@@ -164,7 +235,7 @@ def test_fixture_canonical_matches_expected() -> None:
     verify in the Rails verification page (Phase 5 G)."""
     actual = payload_to_canonical(_fixture_payload())
     assert actual == EXPECTED_CANONICAL
-    assert len(actual) == 1243
+    assert len(actual) == 2248
 
 
 def test_fixture_hash_matches_expected() -> None:
@@ -218,7 +289,7 @@ def test_bundle_wrapper_serializes_with_payload_inside() -> None:
         public_key="ed25519:beef",
     )
     out = json.loads(canonical_json(dataclasses.asdict(bundle)))
-    assert out["version"] == "3"
+    assert out["version"] == "4"
     assert out["hash"] == EXPECTED_HASH
     assert out["signature"] == "ed25519:dead"
     assert out["public_key"] == "ed25519:beef"

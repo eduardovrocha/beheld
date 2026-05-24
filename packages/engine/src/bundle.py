@@ -93,6 +93,7 @@ def build_bundle_payload(
     beheld_version: str,
     period_days: int = 30,
     engine_version_hash: Optional[str] = None,
+    identity_gen: Optional[object] = None,
 ) -> BundlePayload:
     """Assemble the signed half of a .beheld from current DB state.
 
@@ -102,6 +103,12 @@ def build_bundle_payload(
     `engine_version_hash` (F5.7.2) is the SHA-256 of the engine binary that
     produced the payload, or None when unfrozen / unavailable. It is recorded
     verbatim in the payload and ends up in the bundle's signed canonical bytes.
+
+    `identity_gen` (F6.12 / schema v4) — optional IdentityGenerator. When
+    provided, the builder produces a stable identity for this snapshot and
+    embeds it in the signed payload (so the HTML page renders the same text
+    a verifier reads from the bytes). When None, the identity field stays
+    None in the payload — used by tests that don't care about identity.
     """
     scores = db.get_current_scores()
     if scores is None:
@@ -152,6 +159,39 @@ def build_bundle_payload(
 
     l1 = _build_l1_section(db)
 
+    # ── F6.12 / schema v4 — embedded human-facing overlays ───────────────
+    # These four sections used to be fetched ad-hoc by the CLI when
+    # generating the HTML page. Embedding them in the signed bytes makes
+    # the shared HTML a faithful renderer of the bundle (no live engine
+    # required). Each is independently fail-soft so a single section's
+    # absence never blocks snapshotting.
+
+    stack: Optional[dict] = None
+    try:
+        stack = db.get_l1_stack()
+    except Exception:
+        stack = None
+
+    signals: Optional[dict] = None
+    identity: Optional[dict] = None
+    emergent: Optional[dict] = None
+    try:
+        from identity_adapter import build_signals_minimal, compute_emergent_diff
+        signals = build_signals_minimal(db)
+        emergent = compute_emergent_diff(db)
+        if identity_gen is not None:
+            # persist=True caches the identity in the identity_phrases table
+            # keyed by snapshot — keeps the same text stable for re-renders.
+            try:
+                id_obj = identity_gen.generate(signals, persist=False)
+                identity = id_obj.to_dict() if hasattr(id_obj, "to_dict") else dict(id_obj)
+            except Exception:
+                identity = None
+    except Exception:
+        # If identity_adapter is unavailable at import time (test envs that
+        # stub the engine), just leave signals/emergent as None.
+        pass
+
     return BundlePayload(
         created_at=datetime.now(timezone.utc).isoformat(),
         beheld_version=beheld_version,
@@ -160,6 +200,10 @@ def build_bundle_payload(
         l1=l1,
         l2=l2,
         engine_version_hash=engine_version_hash,
+        stack=stack,
+        signals=signals,
+        identity=identity,
+        emergent=emergent,
     )
 
 

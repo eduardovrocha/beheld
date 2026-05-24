@@ -144,6 +144,131 @@ function formatEmergent(e: EmergentDiff): string {
   return `${label} subiu de ${olderPct}% para ${recentPct}% das sessões nos últimos ${e.recent_window_days} dias.`;
 }
 
+// ── F6.12 — scores + stack rendered server-side from bundle.payload ──────────
+
+const SCORE_LABELS: Record<string, string> = {
+  prompt_quality: "Prompt quality",
+  test_maturity: "Test maturity",
+  tech_breadth: "Tech breadth",
+  growth_rate: "Growth rate",
+};
+
+const SCORE_DIMENSIONS = ["prompt_quality", "test_maturity", "tech_breadth", "growth_rate"] as const;
+
+function renderScoresSection(scores: BundlePayload["scores"] | undefined): string {
+  if (!scores || typeof scores.overall !== "number") return "";
+  const rows = SCORE_DIMENSIONS.map((dim) => {
+    const val = scores[dim] ?? 0;
+    const clamped = Math.max(0, Math.min(100, val));
+    return `
+      <div class="score-row">
+        <div class="score-name">${escapeHtml(SCORE_LABELS[dim])}</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width: ${clamped}%"></div></div>
+        <div class="score-val">${val}</div>
+      </div>`;
+  }).join("");
+  const overall = scores.overall ?? 0;
+  return `
+    <section class="scores" aria-label="Scores">
+      <div class="label">Scores</div>
+      <div class="score-overall">
+        <span class="score-overall-num">${overall}</span>
+        <span class="score-overall-of">/100</span>
+        <span class="score-overall-tag">geral</span>
+      </div>
+      <div class="scores-grid">${rows}
+      </div>
+    </section>`;
+}
+
+const STACK_PATTERN_LABELS: Record<string, string> = {
+  mvc: "MVC",
+  monorepo: "Monorepo",
+  microservices: "Microsserviços",
+  graphql: "GraphQL",
+  rest_api: "REST API",
+  serverless: "Serverless",
+  event_driven: "Event-driven",
+  iac: "IaC",
+  container_orchestration: "Orquestração",
+  ci_cd: "CI/CD",
+};
+const STACK_LANG_LIMIT = 8;
+
+interface BundleStackLanguage {
+  language: string; commit_count: number; file_count: number;
+  first_seen: string; last_seen: string; weight_pct: number;
+}
+interface BundleStackPattern {
+  pattern: string; repo_count: number; confidence: "strong" | "weak";
+}
+interface BundleStackSection {
+  language_distribution: BundleStackLanguage[];
+  architecture_patterns: BundleStackPattern[];
+  total_commits_analyzed: number;
+  repos_analyzed: number;
+}
+
+function renderStackSection(stack: BundleStackSection | null | undefined): string {
+  if (!stack || !Array.isArray(stack.language_distribution) || stack.language_distribution.length === 0
+      || (typeof stack.repos_analyzed === "number" && stack.repos_analyzed === 0)) {
+    return `
+    <section class="stack" aria-label="Stack">
+      <div class="label">Stack</div>
+      <p class="placeholder">Importe repositórios com /beheld import para ver seu stack.</p>
+    </section>`;
+  }
+
+  const topLangs = stack.language_distribution.slice(0, STACK_LANG_LIMIT);
+  const langsHtml = topLangs.map((lang, idx) => {
+    const pct = Math.max(0, Math.min(100, Number(lang.weight_pct ?? 0)));
+    // Rank-fade: first row fully opaque, last drops to ~0.35.
+    const fade = topLangs.length > 1
+      ? (1.0 - (idx / (topLangs.length - 1)) * 0.65).toFixed(2)
+      : "1.00";
+    const commits = Number(lang.commit_count ?? 0).toLocaleString("pt-BR");
+    const firstYear = (lang.first_seen || "").slice(0, 4);
+    const lastYear = (lang.last_seen || "").slice(0, 4);
+    const period = firstYear && lastYear ? `${firstYear} → ${lastYear}` : "";
+    return `
+        <div class="stack-lang">
+          <div class="name">${escapeHtml(lang.language)}</div>
+          <div class="bar"><div class="bar-fill" style="width: ${pct}%; opacity: ${fade};"></div></div>
+          <div class="meta">${Math.round(pct)}% · ${escapeHtml(commits)} commits${period ? " · " + escapeHtml(period) : ""}</div>
+        </div>`;
+  }).join("");
+
+  const patterns = Array.isArray(stack.architecture_patterns) ? stack.architecture_patterns : [];
+  let archHtml: string;
+  if (patterns.length === 0) {
+    archHtml = `<p class="placeholder">Padrões não identificados</p>`;
+  } else {
+    archHtml = `<div class="stack-arch">` + patterns.map((p) => {
+      const conf = p.confidence === "strong" ? "strong" : "weak";
+      const label = STACK_PATTERN_LABELS[p.pattern] ?? p.pattern;
+      return `<span class="stack-chip ${conf}">${escapeHtml(label)}</span>`;
+    }).join("") + `</div>`;
+  }
+
+  const years = topLangs
+    .map((l) => parseInt((l.first_seen || "").slice(0, 4), 10))
+    .filter((y) => !Number.isNaN(y));
+  const oldestYear = years.length > 0 ? Math.min(...years) : null;
+  const repos = Number(stack.repos_analyzed ?? 0);
+  const totalCommits = Number(stack.total_commits_analyzed ?? 0).toLocaleString("pt-BR");
+  const reposLabel = `${repos} repositório${repos === 1 ? "" : "s"} analisado${repos === 1 ? "" : "s"}`;
+  const ctx = `${reposLabel} · ${totalCommits} commits${oldestYear ? ` · desde ${oldestYear}` : ""}`;
+
+  return `
+    <section class="stack" aria-label="Stack">
+      <div class="label">Stack</div>
+      <div class="stack-langs">${langsHtml}
+      </div>
+      ${archHtml}
+      <p class="stack-context">${escapeHtml(ctx)}</p>
+    </section>`;
+}
+
 // ── main renderer ────────────────────────────────────────────────────────────
 
 export function renderSnapshotHtml(data: SnapshotHtmlData): string {
@@ -180,6 +305,13 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       <p class="body">${escapeHtml(formatEmergent(data.emergent))}</p>
     </section>`
     : "";
+
+  // F6.12 — scores + stack rendered server-side from the signed bundle.
+  // The HTML now needs zero runtime fetches to display these sections;
+  // a shared `.html` is fully portable.
+  const scoresBlock = renderScoresSection(data.bundle.payload.scores);
+  const stackPayload = (data.bundle.payload as { stack?: BundleStackSection | null }).stack ?? null;
+  const stackBlock = renderStackSection(stackPayload);
 
   const captureLine = repoCount > 0
     ? `Capturado a partir de ${repoCount} repositório${repoCount === 1 ? "" : "s"} e meses de uso real, não auto-declarado.`
@@ -275,7 +407,54 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 12px; word-break: break-all; color: var(--ink-soft);
     }
+    /* F6.12 — scores section: 4 dimension bars + overall number.
+       Rendered server-side from bundle.payload.scores. */
+    .scores { margin-top: 64px; }
+    .scores .label {
+      font-size: 13px; font-weight: 500; color: var(--ink-soft);
+      margin-bottom: 12px;
+    }
+    .score-overall {
+      display: flex; align-items: baseline; gap: 8px;
+      margin-bottom: 20px;
+      font-feature-settings: "tnum";
+    }
+    .score-overall-num {
+      font-family: var(--serif);
+      font-size: 48px; line-height: 1;
+      letter-spacing: -0.02em; color: var(--ink);
+    }
+    .score-overall-of { font-size: 18px; color: var(--ink-soft); }
+    .score-overall-tag {
+      margin-left: 8px;
+      font-size: 12px; color: var(--ink-soft);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .scores-grid {
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .score-row {
+      display: grid; grid-template-columns: 130px 1fr 36px;
+      align-items: center; gap: 12px;
+      font-size: 13px; color: var(--ink);
+    }
+    .score-name { color: var(--ink-soft); }
+    .score-bar {
+      position: relative; height: 6px;
+      background: var(--rule-soft); border-radius: 3px; overflow: hidden;
+    }
+    .score-bar-fill {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      background: var(--ink); border-radius: 3px;
+    }
+    .score-val {
+      text-align: right;
+      font-feature-settings: "tnum";
+      color: var(--ink);
+    }
+
     /* F6.12c — stack section: language bars + architecture chips.
+       Now rendered server-side from bundle.payload.stack — no live fetch.
        Tokens match the existing page palette (--ink, --ink-soft, --rule, --bg). */
     .stack { margin-top: 64px; }
     .stack .label {
@@ -335,6 +514,9 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       .emergent { margin-top: 48px; }
       .emergent .body { font-size: 17px; }
       .footer { margin-top: 64px; }
+      .scores { margin-top: 48px; }
+      .score-overall-num { font-size: 40px; }
+      .score-row { grid-template-columns: 110px 1fr 30px; gap: 10px; font-size: 12px; }
       .stack { margin-top: 48px; }
       .stack-lang { grid-template-columns: 90px 1fr auto; gap: 10px; font-size: 13px; }
     }
@@ -374,13 +556,8 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
         <div class="value">${escapeHtml(platformLabel)}</div>
       </div>
     </section>${emergentBlock}
-
-    <section class="stack" id="stack-section" aria-label="Stack">
-      <div class="label">Stack</div>
-      <div id="stack-body">
-        <p class="placeholder" id="stack-placeholder">Engine offline.</p>
-      </div>
-    </section>
+${scoresBlock}
+${stackBlock}
 
     <footer class="footer">
       <div class="verification" data-status="checking" id="verification">
@@ -449,134 +626,6 @@ ${bundleJson}
     })();
   </script>
 
-  <script>
-    // F6.12c — stack section. Live fetches GET /l1/stack from the local
-    // engine when the page is opened on the same machine. On any failure
-    // (engine offline, CORS denial, network error) the placeholder stays
-    // as "Engine offline." When repos_analyzed === 0 the placeholder
-    // becomes an import hint. No spinner — the section just appears.
-    (async function loadStack() {
-      const PATTERN_LABELS = {
-        mvc: 'MVC',
-        monorepo: 'Monorepo',
-        microservices: 'Microsserviços',
-        graphql: 'GraphQL',
-        rest_api: 'REST API',
-        serverless: 'Serverless',
-        event_driven: 'Event-driven',
-        iac: 'IaC',
-        container_orchestration: 'Orquestração',
-        ci_cd: 'CI/CD',
-      };
-      const ENGINE_URL = 'http://127.0.0.1:7338';
-      const MAX_LANGS = 8;
-
-      const body = document.getElementById('stack-body');
-      if (!body) return;
-
-      function setPlaceholder(text) {
-        body.innerHTML = '';
-        const p = document.createElement('p');
-        p.className = 'placeholder';
-        p.textContent = text;
-        body.appendChild(p);
-      }
-
-      let data;
-      try {
-        const res = await fetch(ENGINE_URL + '/l1/stack', { method: 'GET' });
-        if (!res.ok) throw new Error('non-2xx');
-        data = await res.json();
-      } catch (err) {
-        setPlaceholder('Engine offline.');
-        return;
-      }
-
-      const langs = Array.isArray(data.language_distribution)
-        ? data.language_distribution : [];
-      const patterns = Array.isArray(data.architecture_patterns)
-        ? data.architecture_patterns : [];
-      const reposAnalyzed = Number(data.repos_analyzed || 0);
-      const totalCommits = Number(data.total_commits_analyzed || 0);
-
-      if (reposAnalyzed === 0 || langs.length === 0) {
-        setPlaceholder('Importe repositórios com /beheld import para ver seu stack.');
-        return;
-      }
-
-      body.innerHTML = '';
-      const topLangs = langs.slice(0, MAX_LANGS);
-
-      const langsBlock = document.createElement('div');
-      langsBlock.className = 'stack-langs';
-      topLangs.forEach((lang, idx) => {
-        const row = document.createElement('div');
-        row.className = 'stack-lang';
-
-        const name = document.createElement('div');
-        name.className = 'name';
-        name.textContent = String(lang.language || '');
-
-        const bar = document.createElement('div');
-        bar.className = 'bar';
-        const fill = document.createElement('div');
-        fill.className = 'bar-fill';
-        const pct = Math.max(0, Math.min(100, Number(lang.weight_pct || 0)));
-        // Opacity proportional to rank: first 1.0, last ~0.35.
-        const fade = topLangs.length > 1
-          ? 1.0 - (idx / (topLangs.length - 1)) * 0.65
-          : 1.0;
-        fill.style.opacity = String(fade.toFixed(2));
-        fill.style.width = '0%';
-        requestAnimationFrame(() => { fill.style.width = pct + '%'; });
-        bar.appendChild(fill);
-
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        const commits = Number(lang.commit_count || 0).toLocaleString('pt-BR');
-        const period = (lang.first_seen || '').slice(0, 4) + ' → ' + (lang.last_seen || '').slice(0, 4);
-        meta.textContent = Math.round(pct) + '% · ' + commits + ' commits · ' + period;
-
-        row.appendChild(name);
-        row.appendChild(bar);
-        row.appendChild(meta);
-        langsBlock.appendChild(row);
-      });
-      body.appendChild(langsBlock);
-
-      const archBlock = document.createElement('div');
-      archBlock.className = 'stack-arch';
-      if (patterns.length === 0) {
-        const p = document.createElement('p');
-        p.className = 'placeholder';
-        p.textContent = 'Padrões não identificados';
-        archBlock.appendChild(p);
-      } else {
-        patterns.forEach((pat) => {
-          const chip = document.createElement('span');
-          const conf = pat.confidence === 'strong' ? 'strong' : 'weak';
-          chip.className = 'stack-chip ' + conf;
-          chip.textContent = PATTERN_LABELS[pat.pattern] || pat.pattern;
-          archBlock.appendChild(chip);
-        });
-      }
-      body.appendChild(archBlock);
-
-      const years = topLangs
-        .map((l) => parseInt((l.first_seen || '').slice(0, 4), 10))
-        .filter((y) => !Number.isNaN(y));
-      const oldestYear = years.length > 0 ? Math.min.apply(null, years) : null;
-      const ctx = document.createElement('p');
-      ctx.className = 'stack-context';
-      const totalCommitsLabel = totalCommits.toLocaleString('pt-BR');
-      ctx.textContent =
-        reposAnalyzed + ' repositório' + (reposAnalyzed === 1 ? '' : 's') +
-        ' analisado' + (reposAnalyzed === 1 ? '' : 's') +
-        ' · ' + totalCommitsLabel + ' commits' +
-        (oldestYear ? ' · desde ' + oldestYear : '');
-      body.appendChild(ctx);
-    })();
-  </script>
 </body>
 </html>
 `;

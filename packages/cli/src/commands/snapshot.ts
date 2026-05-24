@@ -261,32 +261,36 @@ async function writeHtmlRetrato(
   bundlePath: string,
   authorName: string | undefined,
 ): Promise<void> {
-  // Pull identity + emergent + signals from the engine. The bundle we have is
-  // the canonical signed artifact; the engine just hands us the human-facing
-  // overlays (identity phrase, temporal diff) in one extra round-trip.
-  let extras: { identity: SnapshotHtmlData["identity"]; emergent: SnapshotHtmlData["emergent"]; signals: SnapshotHtmlData["signals"] } | null = null;
-  try {
-    const r = await fetch(`${ENGINE_URL}/snapshot/html-data`, { method: "POST" });
-    if (r.ok) {
-      const body = (await r.json()) as { identity: SnapshotHtmlData["identity"]; emergent: SnapshotHtmlData["emergent"]; signals: SnapshotHtmlData["signals"] };
-      extras = { identity: body.identity, emergent: body.emergent, signals: body.signals };
-    }
-  } catch {
-    // engine offline — fall through
-  }
+  // F6.12 / schema v4 — the bundle now embeds signals/identity/emergent in
+  // its signed payload. Read them directly so the HTML faithfully renders
+  // the same bytes that were signed (no live engine required to view a
+  // shared snapshot). When a field is null (engine failed to produce it at
+  // build time), render with a graceful fallback rather than refusing.
+  const p = bundle.payload as unknown as {
+    signals?: SnapshotHtmlData["signals"] | null;
+    identity?: SnapshotHtmlData["identity"] | null;
+    emergent?: SnapshotHtmlData["emergent"] | null;
+  };
 
-  if (!extras) {
-    console.log("");
-    console.log(warn("Engine offline — HTML não gerado"));
-    console.log(`     ${DIM}O .beheld local continua válido. Tente novamente quando o engine subir.${RESET}`);
-    return;
-  }
+  const signals: SnapshotHtmlData["signals"] = p.signals ?? {};
+
+  const identity: SnapshotHtmlData["identity"] = p.identity ?? {
+    // Defensive fallback for bundles that lack the v4 identity field
+    // (e.g. a v3 bundle re-rendered, or engine identity gen failure).
+    identity_long: "Perfil em construção.",
+    identity_short: "Perfil em construção.",
+    confidence: "low",
+    generation_path: "fallback",
+    model_used: null,
+  };
+
+  const emergent: SnapshotHtmlData["emergent"] = p.emergent ?? null;
 
   const html = renderSnapshotHtml({
     bundle,
-    signals: extras.signals,
-    identity: extras.identity,
-    emergent: extras.emergent,
+    signals,
+    identity,
+    emergent,
     authorName,
   });
 
@@ -297,8 +301,8 @@ async function writeHtmlRetrato(
   console.log("");
   console.log(ok("Retrato HTML gerado"));
   console.log(`     ${DIM}arquivo:${RESET}    ${htmlPath}`);
-  console.log(`     ${DIM}identity:${RESET}   ${extras.identity.identity_long}`);
-  console.log(`     ${DIM}confidence:${RESET} ${extras.identity.confidence} ${meta(`(via ${extras.identity.generation_path})`)}`);
+  console.log(`     ${DIM}identity:${RESET}   ${identity.identity_long}`);
+  console.log(`     ${DIM}confidence:${RESET} ${identity.confidence} ${meta(`(via ${identity.generation_path})`)}`);
 }
 
 /** F5.8.3 — Re-submit an existing bundle to Rekor and rewrite the file in

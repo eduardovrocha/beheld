@@ -69,12 +69,69 @@ function fixturePayload(): BundlePayload {
       period_days: 30,
     },
     engine_version_hash: "0".repeat(64),
+    // Schema v4 (F6.12) — public retrato overlays embedded in signed bytes.
+    // Shapes mirror the Python fixture exactly; any drift fails this test.
+    stack: {
+      language_distribution: [
+        {
+          language: "Ruby",
+          commit_count: 100,
+          file_count: 200,
+          first_seen: "2024-01",
+          last_seen: "2026-05",
+          weight_pct: 60.0,
+        },
+        {
+          language: "Python",
+          commit_count: 50,
+          file_count: 80,
+          first_seen: "2025-01",
+          last_seen: "2025-12",
+          weight_pct: 40.0,
+        },
+      ],
+      architecture_patterns: [
+        { pattern: "mvc", repo_count: 1, confidence: "strong" },
+      ],
+      total_commits_analyzed: 150,
+      repos_analyzed: 2,
+    },
+    signals: {
+      schema_version: "1",
+      ecosystems: { dominant: ["rails"], secondary: [] },
+      test_pattern: { discipline: "moderate", approach: "test-after" },
+      timing: { peak_period: "morning", consistency: "regular" },
+      tooling: { platforms: ["docker", "github"] },
+    },
+    identity: {
+      identity_long: "Dev Ruby/Python com hábito test-after.",
+      identity_short: "Dev Ruby/Python.",
+      confidence: "medium",
+      generation_path: "llm",
+      model_used: "claude-haiku",
+      generated_at: "2026-05-14T00:00:00+00:00",
+    },
+    emergent: {
+      pattern: "tdd",
+      recent_share: 0.4,
+      older_share: 0.2,
+      delta_pp: 20,
+      recent_window_days: 30,
+      baseline_window_days: 180,
+    },
   };
 }
 
+// Bundle schema v4 — see comment in models.py / types.ts. Regenerate via the
+// engine's payload_to_canonical + payload_hash if the fixture changes.
 const EXPECTED_CANONICAL =
   '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",' +
+  '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,' +
+  '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},' +
   '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",' +
+  '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",' +
+  '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",' +
+  '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},' +
   '"l1":{"avg_test_ratio":0.42,' +
   '"earliest_commit":"2023-01-01T00:00:00+00:00",' +
   '"ecosystems":{"python":true,"rails":true},' +
@@ -97,16 +154,28 @@ const EXPECTED_CANONICAL =
   '"previous_hash":null,' +
   '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,' +
   '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,' +
-  '"test_maturity":20}}';
+  '"test_maturity":20},' +
+  '"signals":{"ecosystems":{"dominant":["rails"],"secondary":[]},' +
+  '"schema_version":"1",' +
+  '"test_pattern":{"approach":"test-after","discipline":"moderate"},' +
+  '"timing":{"consistency":"regular","peak_period":"morning"},' +
+  '"tooling":{"platforms":["docker","github"]}},' +
+  '"stack":{"architecture_patterns":[{"confidence":"strong","pattern":"mvc","repo_count":1}],' +
+  '"language_distribution":[' +
+  '{"commit_count":100,"file_count":200,"first_seen":"2024-01","language":"Ruby",' +
+  '"last_seen":"2026-05","weight_pct":60},' +
+  '{"commit_count":50,"file_count":80,"first_seen":"2025-01","language":"Python",' +
+  '"last_seen":"2025-12","weight_pct":40}],' +
+  '"repos_analyzed":2,"total_commits_analyzed":150}}';
 
 const EXPECTED_HASH =
-  "sha256:0521f98e1a40a6f0adbc605d20a4552f696c81a43a8fa21e11167c810423c4fe";
+  "sha256:6f58ff5a9e79a24cf6e788ab02096b83e2ae8f24a6ac52fd6860540d0ef98899";
 
 // ── canonical_json basics ────────────────────────────────────────────────────
 
 describe("canonicalJson — primitives", () => {
-  test("BUNDLE_VERSION is '3'", () => {
-    expect(BUNDLE_VERSION).toBe("3");
+  test("BUNDLE_VERSION is '4'", () => {
+    expect(BUNDLE_VERSION).toBe("4");
   });
 
   test("sorts keys alphabetically", () => {
@@ -152,7 +221,7 @@ describe("bundle contract", () => {
   test("fixture serializes to the same canonical bytes as Python", () => {
     const actual = payloadToCanonical(fixturePayload());
     expect(actual).toBe(EXPECTED_CANONICAL);
-    expect(actual.length).toBe(1243);
+    expect(actual.length).toBe(2248);
   });
 
   test("fixture hash matches Python's hash byte-for-byte", async () => {
@@ -176,13 +245,19 @@ describe("bundle contract", () => {
   });
 
   test("fixture key order in source does NOT affect hash", async () => {
-    // Build the same fixture with deliberately shuffled key order
+    // Build the same fixture with deliberately shuffled key order — must
+    // include ALL v4 fields (stack, signals, identity, emergent) or the
+    // payloads diverge and the assertion becomes meaningless.
     const base = fixturePayload();
     const shuffled: BundlePayload = {
+      emergent: base.emergent,
       l2: base.l2,
+      identity: base.identity,
       engine_version_hash: base.engine_version_hash,
       l1: base.l1,
+      stack: base.stack,
       scores: base.scores,
+      signals: base.signals,
       previous_hash: base.previous_hash,
       beheld_version: base.beheld_version,
       created_at: base.created_at,

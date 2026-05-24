@@ -5,7 +5,7 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-export const BUNDLE_VERSION = "3";
+export const BUNDLE_VERSION = "4";
 
 export interface BundleScores {
   date: string;
@@ -65,6 +65,34 @@ export interface BundleL2Section {
 /** Back-compat alias. New code should use BundleL2Section. */
 export type BundleSignals = BundleL2Section;
 
+/** F6.12 / schema v4 — language-weight + architecture-pattern aggregation
+ *  embedded in the signed payload. Shape mirrors the engine's
+ *  GET /l1/stack response. Inner items are loosely typed because they're
+ *  consumed structurally by the HTML renderer (not by the verifier). */
+export interface BundleStackLanguage {
+  language: string;
+  commit_count: number;
+  file_count: number;
+  first_seen: string;
+  last_seen: string;
+  weight_pct: number;
+}
+export interface BundleStackPattern {
+  pattern: string;
+  repo_count: number;
+  confidence: "strong" | "weak";
+}
+export interface BundleStackSection {
+  language_distribution: BundleStackLanguage[];
+  architecture_patterns: BundleStackPattern[];
+  total_commits_analyzed: number;
+  repos_analyzed: number;
+}
+
+/** F6.12 — human-facing overlays that used to be fetched ad-hoc by the CLI
+ *  when generating the HTML page. Embedded in v4 so the signed bytes carry
+ *  what the HTML renders, making the shared `.html` portable. All four are
+ *  optional/nullable — older bundles or fail-soft paths leave them null. */
 export interface BundlePayload {
   created_at: string;
   beheld_version: string;
@@ -75,6 +103,17 @@ export interface BundlePayload {
   /** F5.7.2 — SHA-256 hex of the engine binary that produced the payload.
    *  Null when the engine ran unfrozen or the hash lookup failed. */
   engine_version_hash: string | null;
+  /** F6.12 — stack analytics rolled up across imported repos. */
+  stack?: BundleStackSection | null;
+  /** F6.12 — public-facing signals overlay (ecosystems, test pattern,
+   *  timing, tooling). Distinct from the L2 session counts above. */
+  signals?: Record<string, unknown> | null;
+  /** F6.12 — identity phrase produced by the IdentityGenerator at snapshot
+   *  time. Stable for this snapshot — the HTML renders identity_long. */
+  identity?: Record<string, unknown> | null;
+  /** F6.12 — emergent-pattern diff (recent vs baseline). Null when no
+   *  meaningful shift was detected. */
+  emergent?: Record<string, unknown> | null;
 }
 
 /** Legacy v1 payload shape — only used by `verifyBundle` to detect bundles

@@ -194,7 +194,22 @@ def test_payload_l1_and_l2_are_separate_keys(db_with_scores: BeheldDB) -> None:
 # ── legacy key is removed ────────────────────────────────────────────────────
 
 
-def test_payload_no_legacy_signals_key(db_with_scores: BeheldDB) -> None:
-    """`signals` was the Phase 5 name. v2 payloads must use `l2` instead."""
+def test_payload_signals_is_v4_overlay_not_legacy_l2(db_with_scores: BeheldDB) -> None:
+    """In v1, `signals` held what is now `l2` (session-level counts). v2 moved
+    that under `l2` and removed `signals` entirely. v4 (F6.12) reintroduces
+    `signals` with completely different semantics — it's the human-facing
+    overlay used by the HTML page (ecosystems.dominant, test_pattern, timing,
+    tooling). This test pins both invariants: `l2` still exists, and if
+    `signals` is present it carries the v4 overlay shape, not the legacy one."""
     p = _payload_dict(db_with_scores)
-    assert "signals" not in p
+    # The L2 session block must always exist (shape preserved across v2→v4).
+    assert "l2" in p
+    assert isinstance(p["l2"], dict) and "sessions_analyzed" in p["l2"]
+    # The v4 `signals` overlay is allowed to be None (e.g. identity_adapter
+    # unavailable) but if present, must be the overlay shape, never the
+    # legacy v1 L2-shape.
+    if p.get("signals") is not None:
+        assert "ecosystems" in p["signals"]
+        # Legacy v1 had `platforms` as Counter-shaped dict; the v4 overlay
+        # never carries that key — it's under `tooling.platforms` instead.
+        assert "platforms" not in p["signals"]

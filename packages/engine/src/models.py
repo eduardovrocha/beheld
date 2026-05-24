@@ -215,7 +215,7 @@ class CoachPayload:
 # commit — the cross-language canonical hash test (test_bundle_contract) catches
 # drift.
 
-BUNDLE_VERSION = "3"
+BUNDLE_VERSION = "4"
 
 
 @dataclass(frozen=True)
@@ -270,7 +270,21 @@ class BundlePayload:
     sections so verifiers can inspect each layer independently.
 
     F5.7.2 added `engine_version_hash` (SHA-256 of the engine binary that
-    produced the payload). Null when running unfrozen or when hashing fails."""
+    produced the payload). Null when running unfrozen or when hashing fails.
+
+    Schema v4 (F6.12 — public retrato fidelity): four new fields embed the
+    human-facing overlays that were previously fetched ad-hoc by the CLI
+    when generating the HTML page. With these included in the signed bytes,
+    the shared HTML becomes a faithful renderer of the bundle — no live
+    engine required to view what's on the page.
+
+    The new fields are typed as Optional[dict] rather than dedicated
+    dataclasses for two reasons: (1) they're produced by modules
+    (identity_adapter, identity, l1.stack_aggregator) that already return
+    JSON-shaped dicts, and forcing them through frozen dataclasses adds
+    plumbing without verifier benefit; (2) the inner shape can evolve
+    independently of the wrapper schema — only the wrapper-level field
+    names are part of the cross-language contract."""
     created_at: str
     beheld_version: str
     previous_hash: Optional[str]
@@ -278,6 +292,10 @@ class BundlePayload:
     l1: BundleL1Section
     l2: BundleL2Section
     engine_version_hash: Optional[str] = None
+    stack: Optional[dict] = None
+    signals: Optional[dict] = None
+    identity: Optional[dict] = None
+    emergent: Optional[dict] = None
 
 
 @dataclass(frozen=True)

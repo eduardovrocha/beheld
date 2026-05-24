@@ -15,17 +15,20 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             name: beheld-darwin-arm64
-            engine_platform: darwin
+            python_arch: arm64
+            cross_compile: false
 
-          - os: macos-13
+          - os: macos-latest
             target: bun-darwin-x64
             name: beheld-darwin-x64
-            engine_platform: darwin
+            python_arch: x64
+            cross_compile: true
 
           - os: ubuntu-latest
             target: bun-linux-x64
             name: beheld-linux-x64
-            engine_platform: linux
+            python_arch: x64
+            cross_compile: false
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -38,6 +41,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          architecture: ${{ matrix.python_arch }}
           cache: "pip"
 
       - name: Install Python dependencies and PyInstaller
@@ -85,7 +89,7 @@ jobs:
             --detach-sign dist/${{ matrix.name }}
 
       - name: Smoke test (native target only)
-        if: matrix.os != 'macos-13' || runner.arch == 'X64'
+        if: matrix.cross_compile != true
         run: |
           chmod +x dist/${{ matrix.name }}
           dist/${{ matrix.name }} --version

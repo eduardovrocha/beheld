@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from bundle import build_bundle_payload
@@ -117,7 +117,11 @@ app = FastAPI(title="Beheld Engine", version=VERSION, lifespan=lifespan)
 
 
 @app.get("/health")
-def health() -> dict:
+def health(response: Response) -> dict:
+    # F6.12c — CORS opened on /health and /l1/stack so the snapshot HTML
+    # page can probe / fetch the engine when viewed from any local origin
+    # (file://, http://localhost:*). Other endpoints stay closed.
+    response.headers["Access-Control-Allow-Origin"] = "*"
     return {"ok": True, "version": VERSION}
 
 
@@ -449,10 +453,14 @@ def l1_repositories() -> list[dict]:
 
 
 @app.get("/l1/stack")
-def l1_stack() -> dict:
+def l1_stack(response: Response) -> dict:
     """F6.12a — language distribution + architecture patterns across all
     imported repos. Languages weighted by commit count (not file count) to
-    avoid distortion by refactors. Empty payload when no repos imported."""
+    avoid distortion by refactors. Empty payload when no repos imported.
+
+    F6.12c — CORS opened so the snapshot HTML page (which may be served
+    from file:// or any local origin) can consume the endpoint directly."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
     return db.get_l1_stack()
 
 

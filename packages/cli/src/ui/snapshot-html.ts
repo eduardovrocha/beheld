@@ -275,6 +275,57 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 12px; word-break: break-all; color: var(--ink-soft);
     }
+    /* F6.12c — stack section: language bars + architecture chips.
+       Tokens match the existing page palette (--ink, --ink-soft, --rule, --bg). */
+    .stack { margin-top: 64px; }
+    .stack .label {
+      font-size: 13px; font-weight: 500; color: var(--ink-soft);
+      margin-bottom: 16px;
+    }
+    .stack .placeholder { font-size: 14px; color: var(--ink-soft); }
+    .stack-langs {
+      display: flex; flex-direction: column; gap: 12px;
+      margin-bottom: 32px;
+    }
+    .stack-lang {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      align-items: center; gap: 12px;
+      font-size: 14px; color: var(--ink);
+    }
+    .stack-lang .name { font-weight: 500; }
+    .stack-lang .bar {
+      position: relative; height: 6px;
+      background: var(--rule-soft); border-radius: 3px; overflow: hidden;
+    }
+    .stack-lang .bar-fill {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      background: var(--ink);
+      transition: width 0.4s ease;
+      border-radius: 3px;
+    }
+    .stack-lang .meta {
+      font-size: 12px; color: var(--ink-soft);
+      white-space: nowrap;
+      font-feature-settings: "tnum";
+    }
+    .stack-arch { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stack-chip {
+      display: inline-block;
+      padding: 4px 10px;
+      font-size: 12px; font-weight: 500;
+      border-radius: 999px;
+      line-height: 1.4;
+    }
+    .stack-chip.strong { background: var(--ink); color: var(--bg); }
+    .stack-chip.weak {
+      background: transparent; color: var(--ink);
+      border: 1px solid var(--ink);
+    }
+    .stack-context {
+      margin-top: 16px;
+      font-size: 12px; color: var(--ink-soft);
+    }
     @media (max-width: 540px) {
       .page { padding: 56px 24px 48px; }
       .header { margin-bottom: 48px; }
@@ -284,6 +335,8 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       .emergent { margin-top: 48px; }
       .emergent .body { font-size: 17px; }
       .footer { margin-top: 64px; }
+      .stack { margin-top: 48px; }
+      .stack-lang { grid-template-columns: 90px 1fr auto; gap: 10px; font-size: 13px; }
     }
     @media print {
       body { background: white; }
@@ -321,6 +374,13 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
         <div class="value">${escapeHtml(platformLabel)}</div>
       </div>
     </section>${emergentBlock}
+
+    <section class="stack" id="stack-section" aria-label="Stack">
+      <div class="label">Stack</div>
+      <div id="stack-body">
+        <p class="placeholder" id="stack-placeholder">Engine offline.</p>
+      </div>
+    </section>
 
     <footer class="footer">
       <div class="verification" data-status="checking" id="verification">
@@ -386,6 +446,135 @@ ${bundleJson}
         details.hidden = !open;
         toggle.setAttribute('aria-expanded', String(open));
       });
+    })();
+  </script>
+
+  <script>
+    // F6.12c — stack section. Live fetches GET /l1/stack from the local
+    // engine when the page is opened on the same machine. On any failure
+    // (engine offline, CORS denial, network error) the placeholder stays
+    // as "Engine offline." When repos_analyzed === 0 the placeholder
+    // becomes an import hint. No spinner — the section just appears.
+    (async function loadStack() {
+      const PATTERN_LABELS = {
+        mvc: 'MVC',
+        monorepo: 'Monorepo',
+        microservices: 'Microsserviços',
+        graphql: 'GraphQL',
+        rest_api: 'REST API',
+        serverless: 'Serverless',
+        event_driven: 'Event-driven',
+        iac: 'IaC',
+        container_orchestration: 'Orquestração',
+        ci_cd: 'CI/CD',
+      };
+      const ENGINE_URL = 'http://127.0.0.1:7338';
+      const MAX_LANGS = 8;
+
+      const body = document.getElementById('stack-body');
+      if (!body) return;
+
+      function setPlaceholder(text) {
+        body.innerHTML = '';
+        const p = document.createElement('p');
+        p.className = 'placeholder';
+        p.textContent = text;
+        body.appendChild(p);
+      }
+
+      let data;
+      try {
+        const res = await fetch(ENGINE_URL + '/l1/stack', { method: 'GET' });
+        if (!res.ok) throw new Error('non-2xx');
+        data = await res.json();
+      } catch (err) {
+        setPlaceholder('Engine offline.');
+        return;
+      }
+
+      const langs = Array.isArray(data.language_distribution)
+        ? data.language_distribution : [];
+      const patterns = Array.isArray(data.architecture_patterns)
+        ? data.architecture_patterns : [];
+      const reposAnalyzed = Number(data.repos_analyzed || 0);
+      const totalCommits = Number(data.total_commits_analyzed || 0);
+
+      if (reposAnalyzed === 0 || langs.length === 0) {
+        setPlaceholder('Importe repositórios com /beheld import para ver seu stack.');
+        return;
+      }
+
+      body.innerHTML = '';
+      const topLangs = langs.slice(0, MAX_LANGS);
+
+      const langsBlock = document.createElement('div');
+      langsBlock.className = 'stack-langs';
+      topLangs.forEach((lang, idx) => {
+        const row = document.createElement('div');
+        row.className = 'stack-lang';
+
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = String(lang.language || '');
+
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        const fill = document.createElement('div');
+        fill.className = 'bar-fill';
+        const pct = Math.max(0, Math.min(100, Number(lang.weight_pct || 0)));
+        // Opacity proportional to rank: first 1.0, last ~0.35.
+        const fade = topLangs.length > 1
+          ? 1.0 - (idx / (topLangs.length - 1)) * 0.65
+          : 1.0;
+        fill.style.opacity = String(fade.toFixed(2));
+        fill.style.width = '0%';
+        requestAnimationFrame(() => { fill.style.width = pct + '%'; });
+        bar.appendChild(fill);
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const commits = Number(lang.commit_count || 0).toLocaleString('pt-BR');
+        const period = (lang.first_seen || '').slice(0, 4) + ' → ' + (lang.last_seen || '').slice(0, 4);
+        meta.textContent = Math.round(pct) + '% · ' + commits + ' commits · ' + period;
+
+        row.appendChild(name);
+        row.appendChild(bar);
+        row.appendChild(meta);
+        langsBlock.appendChild(row);
+      });
+      body.appendChild(langsBlock);
+
+      const archBlock = document.createElement('div');
+      archBlock.className = 'stack-arch';
+      if (patterns.length === 0) {
+        const p = document.createElement('p');
+        p.className = 'placeholder';
+        p.textContent = 'Padrões não identificados';
+        archBlock.appendChild(p);
+      } else {
+        patterns.forEach((pat) => {
+          const chip = document.createElement('span');
+          const conf = pat.confidence === 'strong' ? 'strong' : 'weak';
+          chip.className = 'stack-chip ' + conf;
+          chip.textContent = PATTERN_LABELS[pat.pattern] || pat.pattern;
+          archBlock.appendChild(chip);
+        });
+      }
+      body.appendChild(archBlock);
+
+      const years = topLangs
+        .map((l) => parseInt((l.first_seen || '').slice(0, 4), 10))
+        .filter((y) => !Number.isNaN(y));
+      const oldestYear = years.length > 0 ? Math.min.apply(null, years) : null;
+      const ctx = document.createElement('p');
+      ctx.className = 'stack-context';
+      const totalCommitsLabel = totalCommits.toLocaleString('pt-BR');
+      ctx.textContent =
+        reposAnalyzed + ' repositório' + (reposAnalyzed === 1 ? '' : 's') +
+        ' analisado' + (reposAnalyzed === 1 ? '' : 's') +
+        ' · ' + totalCommitsLabel + ' commits' +
+        (oldestYear ? ' · desde ' + oldestYear : '');
+      body.appendChild(ctx);
     })();
   </script>
 </body>

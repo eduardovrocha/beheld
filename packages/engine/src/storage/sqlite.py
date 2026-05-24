@@ -322,6 +322,14 @@ class BeheldDB:
             path = ":memory:" if self._in_memory else str(self.db_path)
             self._conn = sqlite3.connect(path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
+            if not self._in_memory:
+                # WAL lets the periodic processor and on-demand readers/writers
+                # (L1 import, MCP tool queries) coexist without "database is
+                # locked"; busy_timeout gives any contender 5s to wait out a
+                # concurrent transaction instead of failing immediately.
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA busy_timeout=5000")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
         return self._conn
 
     def init_schema(self) -> None:

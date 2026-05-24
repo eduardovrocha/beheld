@@ -7,11 +7,30 @@
 // All identity strings come from the engine (IdentityGenerator with the
 // minimal signals adapter); this file is pure templating.
 
+import { computeTier, type TrustTier } from "../lib/tier";
+
 interface BundlePayload {
   scores?: { prompt_quality?: number; test_maturity?: number; tech_breadth?: number; growth_rate?: number; overall?: number };
   l1?: { total_repos?: number; total_commits?: number; ecosystems?: Record<string, number>; platforms?: Record<string, number> };
   l2?: { total_sessions?: number; workflow_distribution?: Record<string, number> };
   created_at?: string;
+}
+
+interface BundleAttestationGithub {
+  login: string;
+  user_id: number;
+  verified_at: string;
+}
+
+interface BundleAttestationView {
+  payload?: { github?: BundleAttestationGithub };
+  signature?: string;
+}
+
+interface BundleRekorView {
+  logIndex?: number;
+  uuid?: string;
+  integratedTime?: string;
 }
 
 interface Bundle {
@@ -20,6 +39,11 @@ interface Bundle {
   hash: string;
   signature: string;
   public_key: string;
+  // F5.6 + F5.8 — wrapper-level evidence. The trust-tier badge + details
+  // panel read these directly. Adding them does NOT change the bundle hash
+  // (the hash covers `payload` only).
+  attestation?: BundleAttestationView | null;
+  rekor?: BundleRekorView | null;
 }
 
 interface IdentityResult {
@@ -322,6 +346,127 @@ function renderInsightsSection(insights: { insights?: string[] } | null | undefi
     </section>`;
 }
 
+// ── F6.12 / nível 1 — trust-tier badge (visible chip in header) ──────────────
+//
+// The badge derives from computeTier(bundle), which is recomputed on every
+// read of the wrapper — bundles are immutable but the tier can climb as
+// evidence is added (attestation lands, rekor inclusion completes, etc.).
+
+interface TierBadgeSpec {
+  label: string;
+  variant: "trusted" | "strong" | "good" | "neutral";
+  /** Short legend shown in the badge title tooltip — what the tier means. */
+  hint: string;
+}
+
+const TIER_BADGE: Record<TrustTier, TierBadgeSpec> = {
+  fully_verifiable: {
+    label: "Verificado · Sigstore Rekor",
+    variant: "trusted",
+    hint: "Bundle assinado + identidade GitHub + inclusão pública no log Sigstore Rekor.",
+  },
+  engine_verified: {
+    label: "Identidade GitHub + engine verificados",
+    variant: "strong",
+    hint: "Bundle assinado + identidade GitHub + hash do engine que produziu o perfil.",
+  },
+  identity_verified: {
+    label: "Identidade GitHub verificada",
+    variant: "good",
+    hint: "Bundle assinado + identidade GitHub bound à chave do dev.",
+  },
+  chain_intact: {
+    label: "Assinado · chain íntegra",
+    variant: "neutral",
+    hint: "Bundle assinado + linkado à cadeia de snapshots anteriores.",
+  },
+  signature_only: {
+    label: "Assinado localmente",
+    variant: "neutral",
+    hint: "Bundle assinado com a chave do dev. Sem prova externa adicional.",
+  },
+  unsigned: {
+    label: "Não assinado",
+    variant: "neutral",
+    hint: "Bundle sem assinatura — não é possível verificar autoria.",
+  },
+};
+
+function renderTierBadge(bundle: Bundle): string {
+  const tier = computeTier(bundle as Parameters<typeof computeTier>[0]);
+  const spec = TIER_BADGE[tier];
+  return `<span class="tier-badge tier-${spec.variant}" title="${escapeHtml(spec.hint)}" data-tier="${tier}">${escapeHtml(spec.label)}</span>`;
+}
+
+// ── F6.12 / nível 3 — full trust details panel (inside the expandable) ──────
+
+function formatIsoToPtBr(iso: string | undefined): string {
+  if (!iso || iso.length < 10) return "—";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function renderGithubIdentitySection(att: BundleAttestationView | null | undefined): string {
+  const gh = att?.payload?.github;
+  const hasSig = typeof att?.signature === "string" && att.signature.length > 0;
+  if (!gh || !hasSig) {
+    return `
+        <div class="trust-section trust-section-muted">
+          <p class="trust-section-title">Identidade GitHub</p>
+          <p class="trust-section-body">Não vinculada. <code>beheld attest</code> liga a chave do dev a uma identidade pública do GitHub.</p>
+        </div>`;
+  }
+  const ghUrl = `https://github.com/${encodeURIComponent(gh.login)}`;
+  return `
+        <div class="trust-section">
+          <p class="trust-section-title">Identidade GitHub</p>
+          <p class="trust-section-body">
+            <a class="trust-link" href="${escapeHtml(ghUrl)}" target="_blank" rel="noopener">@${escapeHtml(gh.login)}</a>
+            <span class="trust-meta"> · user id ${gh.user_id} · verificada em ${escapeHtml(formatIsoToPtBr(gh.verified_at))}</span>
+          </p>
+        </div>`;
+}
+
+function renderRekorSection(rekor: BundleRekorView | null | undefined): string {
+  const hasRekor =
+    !!rekor && typeof rekor.logIndex === "number" && typeof rekor.uuid === "string" && rekor.uuid.length > 0;
+  if (!hasRekor) {
+    return `
+        <div class="trust-section trust-section-muted">
+          <p class="trust-section-title">Sigstore Rekor</p>
+          <p class="trust-section-body">Não submetido (rede indisponível no momento da geração).
+          Re-submeter: <code>beheld snapshot --rekor-submit &lt;bundle&gt;</code></p>
+        </div>`;
+  }
+  const uuid = rekor!.uuid as string;
+  const url = `https://rekor.sigstore.dev/api/v1/log/entries/${encodeURIComponent(uuid)}`;
+  const shortUuid = uuid.length > 16 ? `${uuid.slice(0, 12)}…${uuid.slice(-4)}` : uuid;
+  const integratedLabel = formatIsoToPtBr(rekor!.integratedTime);
+  return `
+        <div class="trust-section">
+          <p class="trust-section-title">Sigstore Rekor</p>
+          <p class="trust-section-body">
+            <a class="trust-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">log #${rekor!.logIndex}</a>
+            <span class="trust-meta"> · uuid ${escapeHtml(shortUuid)} · integrado em ${escapeHtml(integratedLabel)}</span>
+          </p>
+        </div>`;
+}
+
+export function renderTrustDetails(bundle: Bundle): string {
+  return `
+        <p style="margin-bottom: 12px;">
+          Este retrato é assinado com Ed25519 a partir da chave do dev.
+          A verificação acontece neste navegador, sem chamada ao servidor.
+        </p>
+        <p style="margin-bottom: 6px;"><strong>Hash do payload</strong></p>
+        <code id="payload-hash">${escapeHtml(bundle.hash)}</code>
+        <p style="margin: 12px 0 6px;"><strong>Chave pública</strong></p>
+        <code id="public-key">${escapeHtml(bundle.public_key)}</code>
+${renderGithubIdentitySection(bundle.attestation)}
+${renderRekorSection(bundle.rekor)}`;
+}
+
 // ── main renderer ────────────────────────────────────────────────────────────
 
 export function renderSnapshotHtml(data: SnapshotHtmlData): string {
@@ -363,6 +508,12 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
   // from the signed bundle. The HTML now needs zero runtime fetches to
   // display these sections; a shared `.html` is fully portable.
   const scoresBlock = renderScoresSection(data.bundle.payload.scores);
+
+  // F6.12 — trust evidence: visible tier chip in the header + full attestation
+  // + Rekor details in the existing expandable. Both derive from the wrapper
+  // (attestation, rekor, signature) — no bundle change, no version bump.
+  const tierBadge = renderTierBadge(data.bundle);
+  const trustDetailsBlock = renderTrustDetails(data.bundle);
   const perfilTecnicoBlock = renderPerfilTecnicoSection(
     (data.bundle.payload as { l2?: BundleL2 }).l2,
   );
@@ -466,6 +617,59 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 12px; word-break: break-all; color: var(--ink-soft);
     }
+    /* F6.12 / nível 1 — tier badge in header (small chip next to date).
+       4 variants: trusted (Rekor), strong (engine+id), good (id only),
+       neutral (signature-only / chain / unsigned). */
+    .header-right {
+      display: inline-flex; align-items: center; gap: 12px;
+      flex-wrap: wrap; justify-content: flex-end;
+    }
+    .header-date { color: var(--ink-soft); }
+    .tier-badge {
+      display: inline-block;
+      padding: 3px 9px;
+      font-size: 11px; font-weight: 500;
+      border-radius: 999px;
+      letter-spacing: 0.01em;
+      line-height: 1.5;
+      cursor: help;
+    }
+    .tier-badge.tier-trusted {
+      background: #E8F1EB; color: #2E7D5F;
+      border: 1px solid #B7D5C2;
+    }
+    .tier-badge.tier-strong {
+      background: var(--ink); color: var(--bg);
+    }
+    .tier-badge.tier-good {
+      background: transparent; color: var(--ink);
+      border: 1px solid var(--ink);
+    }
+    .tier-badge.tier-neutral {
+      background: var(--rule-soft); color: var(--ink-soft);
+      border: 1px solid var(--rule);
+    }
+
+    /* F6.12 / nível 3 — trust details inside the verification expandable. */
+    .trust-section {
+      margin-top: 16px; padding-top: 12px;
+      border-top: 1px solid var(--rule-soft);
+    }
+    .trust-section-muted .trust-section-body { color: var(--ink-soft); }
+    .trust-section-title {
+      font-weight: 500; color: var(--ink);
+      margin-bottom: 4px;
+    }
+    .trust-section-body {
+      font-size: 13px; line-height: 1.6; color: var(--ink);
+    }
+    .trust-link {
+      color: var(--ink); text-decoration: underline;
+      text-decoration-color: var(--rule); text-underline-offset: 3px;
+    }
+    .trust-link:hover { text-decoration-color: var(--ink); }
+    .trust-meta { color: var(--ink-soft); font-size: 12px; }
+
     /* F6.12 — scores section: 4 dimension bars + overall number.
        Rendered server-side from bundle.payload.scores. */
     .scores { margin-top: 64px; }
@@ -601,7 +805,9 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
     }
     @media (max-width: 540px) {
       .page { padding: 56px 24px 48px; }
-      .header { margin-bottom: 48px; }
+      .header { margin-bottom: 48px; flex-wrap: wrap; gap: 12px; }
+      .header-right { width: 100%; justify-content: flex-start; gap: 8px; }
+      .tier-badge { font-size: 10px; padding: 3px 8px; }
       .identity { font-size: 24px; }
       .divider { margin: 48px 0; }
       .facts { gap: 24px; }
@@ -629,7 +835,7 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
   <main class="page" itemscope itemtype="https://schema.org/Person">
     <header class="header">
       <span class="name" itemprop="name">${name}</span>
-      <span>${escapeHtml(dateLabel)}</span>
+      <span class="header-right">${tierBadge}<span class="header-date">${escapeHtml(dateLabel)}</span></span>
     </header>
 
     <p class="identity" itemprop="description">${identityLong}</p>
@@ -667,15 +873,7 @@ ${insightsBlock}
         </button>
       </div>
 
-      <div class="verification-details" id="verification-details" hidden>
-        <p style="margin-bottom: 12px;">
-          Este retrato é assinado com Ed25519 a partir da chave do dev.
-          A verificação acontece neste navegador, sem chamada ao servidor.
-        </p>
-        <p style="margin-bottom: 6px;"><strong>Hash do payload</strong></p>
-        <code id="payload-hash">${escapeHtml(data.bundle.hash)}</code>
-        <p style="margin: 12px 0 6px;"><strong>Chave pública</strong></p>
-        <code id="public-key">${escapeHtml(data.bundle.public_key)}</code>
+      <div class="verification-details" id="verification-details" hidden>${trustDetailsBlock}
       </div>
 
       <p class="meta">${escapeHtml(captureLine)}</p>

@@ -469,8 +469,28 @@ ${renderRekorSection(bundle.rekor)}`;
 
 // ── main renderer ────────────────────────────────────────────────────────────
 
+/** Display name shown in the header. Resolution order:
+ *   1. `data.authorName` — explicit `--author-name` from the CLI
+ *   2. `@<github_login>` — from the GitHub attestation when bound
+ *   3. `"dev"` — generic placeholder
+ *
+ * The attestation-derived form prefixes with `@` so a reader immediately
+ * recognises it as a verified GitHub handle (and not an arbitrary display
+ * string). The Identidade GitHub block inside the verification expandable
+ * carries the full attribution detail.
+ */
+function resolveDisplayName(data: SnapshotHtmlData): string {
+  const explicit = (data.authorName ?? "").trim();
+  if (explicit.length > 0) return explicit;
+  const login = data.bundle.attestation?.payload?.github?.login;
+  if (typeof login === "string" && login.length > 0) {
+    return `@${login}`;
+  }
+  return "dev";
+}
+
 export function renderSnapshotHtml(data: SnapshotHtmlData): string {
-  const name = escapeHtml(data.authorName ?? "dev");
+  const name = escapeHtml(resolveDisplayName(data));
   const dateStr = data.bundle.payload.created_at ?? new Date().toISOString();
   const dateLabel = formatPtBrDate(dateStr);
 

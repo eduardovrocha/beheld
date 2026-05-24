@@ -167,3 +167,36 @@ describe("renderTrustDetails — preserves existing hash + key block", () => {
     expect(html).toContain(bundle.public_key);
   });
 });
+
+// ── header display name — cascade ───────────────────────────────────────────
+
+describe("renderSnapshotHtml — header display name", () => {
+  test("explicit authorName wins over attestation", () => {
+    const data = makeData({ attestation: ATTESTATION });
+    data.authorName = "Maria Silva";
+    const html = renderSnapshotHtml(data);
+    expect(html).toContain('<span class="name" itemprop="name">Maria Silva</span>');
+    expect(html).not.toContain("@eduardovrocha</span>");
+  });
+
+  test("falls back to @<github_login> when authorName is empty + attestation present", () => {
+    const data = makeData({ attestation: ATTESTATION });
+    data.authorName = undefined;
+    const html = renderSnapshotHtml(data);
+    expect(html).toContain('<span class="name" itemprop="name">@eduardovrocha</span>');
+  });
+
+  test("falls back to 'dev' when neither authorName nor attestation present", () => {
+    const data = makeData({ attestation: null });
+    data.authorName = undefined;
+    const html = renderSnapshotHtml(data);
+    expect(html).toContain('<span class="name" itemprop="name">dev</span>');
+  });
+
+  test("blank authorName is treated as not provided", () => {
+    const data = makeData({ attestation: ATTESTATION });
+    data.authorName = "   ";
+    const html = renderSnapshotHtml(data);
+    expect(html).toContain('<span class="name" itemprop="name">@eduardovrocha</span>');
+  });
+});

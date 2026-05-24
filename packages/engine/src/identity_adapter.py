@@ -83,9 +83,19 @@ def _aggregate_l1_platforms(db: BeheldDB) -> Counter:
 
 
 def _ecosystems_from_extensions(ext_counts: Counter) -> Counter:
+    """Roll up per-extension counts into per-ecosystem counts.
+
+    `_EXT_TO_ECOSYSTEM` keys are written with the canonical leading dot
+    (`.py`, `.ts`), but the L1 extractor stores bare extensions without
+    one (`py`, `ts`) — see git_extractor._ext_of. Normalize the input so
+    both shapes lookup correctly; otherwise every dev shows up with an
+    empty `dominant` (silent miss). Regression test:
+    tests/identity/test_signals_minimal.py::test_extensions_with_or_without_dot.
+    """
     eco: Counter = Counter()
     for ext, count in ext_counts.items():
-        key = ext.lower()
+        bare = ext.lower().lstrip(".")
+        key = "." + bare
         if key in _EXT_TO_ECOSYSTEM:
             eco[_EXT_TO_ECOSYSTEM[key]] += count
     return eco

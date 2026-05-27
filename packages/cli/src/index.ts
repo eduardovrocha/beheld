@@ -1,5 +1,7 @@
 import { Command } from "commander";
 
+import { maybeShowBundleNudge } from "./lib/nudge";
+
 export const VERSION = "0.3.2";
 
 const program = new Command();
@@ -8,6 +10,12 @@ program
   .name("beheld")
   .description("Privacy-first developer profiling for Claude Code and Continue.dev")
   .version(VERSION, "-v, --version");
+
+// P22.1: nudge no terminal — exibido uma vez por sessão de shell quando
+// o bundle local tem 5+ dias. Roda antes de cada comando via preAction;
+// `nudge.ts` faz o gate de TTY/session/idade internamente, então este
+// hook é seguro pra todas as ações (init, view, share, etc.).
+program.hook("preAction", () => { try { maybeShowBundleNudge(); } catch { /* never fail a command for a nudge */ } });
 
 program
   .command("init")

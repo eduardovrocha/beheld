@@ -132,8 +132,13 @@ const PEAK_LABEL: Record<string, string> = {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function escapeHtml(s: string): string {
-  return s
+// Tolerant of `undefined`/`null` — older bundles in the wild may not carry
+// every wrapper field (e.g. `hash`, `public_key` got lost on some legacy
+// rows). Coerce to "" so a missing field renders an empty `<code>` rather
+// than crashing the renderer.
+function escapeHtml(s: string | null | undefined): string {
+  if (s == null) return "";
+  return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

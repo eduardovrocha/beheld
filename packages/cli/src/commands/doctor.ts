@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mcpHealth, mcpStatus } from "../client/mcp-client";
-import { engineHealth, engineStatus } from "../client/engine-client";
+import { engineHealth } from "../client/engine-client";
 import { GREEN, RED, YELLOW, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 type Severity = "ok" | "warn" | "crit";
@@ -336,29 +336,238 @@ async function checkClaudeIntegration(): Promise<CheckResult> {
   };
 }
 
-async function checkOrphans(): Promise<CheckResult> {
-  const status = await engineStatus();
-  if (!status) {
+// ── processing probes (disco — independem do engine vivo) ───────────────────
+
+interface SessionEntry {
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+interface ProcessingSnapshot {
+  cursor: { offsets: Record<string, number>; mtime: number } | null;
+  sessions: SessionEntry[];
+  profileDb: { mtime: number } | null;
+  profileDbWal: { size: number } | null;
+}
+
+const CURSOR_STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
+const DB_WRITE_STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
+const WAL_WARN_THRESHOLD_BYTES = 4 * 1024 * 1024;
+
+function cursorPath(): string {
+  return join(beheldDir(), ".cursor");
+}
+
+function profileDbPath(): string {
+  return join(beheldDir(), "profile.db");
+}
+
+function profileDbWalPath(): string {
+  return join(beheldDir(), "profile.db-wal");
+}
+
+async function takeProcessingSnapshot(): Promise<ProcessingSnapshot> {
+  // Cursor — JSON com { offsets: { <session-filename>: <byte offset>, ... } }
+  // (formato confirmado no engine: packages/engine/src/reader/jsonl_reader.py)
+  let cursor: ProcessingSnapshot["cursor"] = null;
+  const cp = cursorPath();
+  if (existsSync(cp)) {
+    try {
+      const raw = JSON.parse(readFileSync(cp, "utf8")) as { offsets?: unknown };
+      const offsets: Record<string, number> = {};
+      if (raw && typeof raw === "object" && raw.offsets && typeof raw.offsets === "object") {
+        for (const [k, v] of Object.entries(raw.offsets as Record<string, unknown>)) {
+          if (typeof v === "number" && Number.isFinite(v)) offsets[k] = v;
+        }
+      }
+      const mtime = statSync(cp).mtimeMs;
+      cursor = { offsets, mtime };
+    } catch {
+      cursor = null;
+    }
+  }
+
+  // Sessions — fs.stat de cada *.jsonl, ordem lexical = cronológica.
+  const sessions: SessionEntry[] = [];
+  const dir = sessionsDir();
+  if (existsSync(dir)) {
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      entries = [];
+    }
+    for (const name of entries) {
+      if (!name.endsWith(".jsonl")) continue;
+      try {
+        const st = statSync(join(dir, name));
+        sessions.push({ name, size: st.size, mtime: st.mtimeMs });
+      } catch {
+        /* skip unreadable */
+      }
+    }
+    sessions.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  // profile.db + WAL
+  let profileDb: ProcessingSnapshot["profileDb"] = null;
+  const dbp = profileDbPath();
+  if (existsSync(dbp)) {
+    try {
+      profileDb = { mtime: statSync(dbp).mtimeMs };
+    } catch {
+      profileDb = null;
+    }
+  }
+
+  let profileDbWal: ProcessingSnapshot["profileDbWal"] = null;
+  const walp = profileDbWalPath();
+  if (existsSync(walp)) {
+    try {
+      profileDbWal = { size: statSync(walp).size };
+    } catch {
+      profileDbWal = null;
+    }
+  }
+
+  return { cursor, sessions, profileDb, profileDbWal };
+}
+
+// ── pure formatters ─────────────────────────────────────────────────────────
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(ms: number): string {
+  const clamped = Math.max(0, ms);
+  const s = Math.floor(clamped / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+// ── pure evaluators ─────────────────────────────────────────────────────────
+
+function evaluateCursorStaleness(
+  snap: ProcessingSnapshot,
+  _now: number,
+  thresholdMs: number,
+): CheckResult {
+  const label = "Cursor do reader";
+  if (snap.sessions.length === 0) {
+    return { severity: "ok", label, lines: [`${DIM}Nada para processar ainda${RESET}`] };
+  }
+  if (snap.cursor === null) {
     return {
       severity: "warn",
-      label: "Eventos órfãos",
-      lines: [`${YELLOW}⚠${RESET} Engine offline — não foi possível verificar`],
+      label,
+      lines: [`${YELLOW}⚠${RESET} Sem ~/.beheld/.cursor — engine nunca processou`],
+      hint: "Tentar: beheld start",
     };
   }
-  const unprocessed = status.unprocessed_events;
-  if (unprocessed === 0) {
+  const newest = Math.max(...snap.sessions.map((s) => s.mtime));
+  const delta = Math.max(0, newest - snap.cursor.mtime);
+  if (delta <= thresholdMs) {
+    return { severity: "ok", label, lines: [`${GREEN}✓${RESET} Cursor avançou recentemente`] };
+  }
+  return {
+    severity: "warn",
+    label,
+    lines: [`${YELLOW}⚠${RESET} Cursor parado há ${formatDuration(delta)} vs sessão mais nova`],
+    hint: "Engine pode ter travado — checar /health",
+  };
+}
+
+function evaluateDbWrite(
+  snap: ProcessingSnapshot,
+  _now: number,
+  thresholdMs: number,
+): CheckResult {
+  const label = "Escrita do profile.db";
+  if (snap.profileDb === null) {
+    return {
+      severity: "warn",
+      label,
+      lines: [`${YELLOW}⚠${RESET} ~/.beheld/profile.db não existe`],
+      hint: "Tentar: beheld start",
+    };
+  }
+  if (snap.sessions.length === 0) {
+    return { severity: "ok", label, lines: [`${DIM}Sem sessões para processar${RESET}`] };
+  }
+  const newest = Math.max(...snap.sessions.map((s) => s.mtime));
+  const delta = Math.max(0, newest - snap.profileDb.mtime);
+  if (delta <= thresholdMs) {
+    return { severity: "ok", label, lines: [`${GREEN}✓${RESET} Escrita recente em profile.db`] };
+  }
+  return {
+    severity: "warn",
+    label,
+    lines: [`${YELLOW}⚠${RESET} Sem escrita há ${formatDuration(delta)} vs sessão mais nova`],
+    hint: "Engine pode ter parado de persistir scores",
+  };
+}
+
+function evaluateWal(snap: ProcessingSnapshot, thresholdBytes: number): CheckResult {
+  const label = "WAL do SQLite";
+  if (snap.profileDbWal === null || snap.profileDbWal.size === 0) {
+    return { severity: "ok", label, lines: [`${DIM}WAL ausente ou vazio${RESET}`] };
+  }
+  const size = snap.profileDbWal.size;
+  if (size <= thresholdBytes) {
+    return { severity: "ok", label, lines: [`${GREEN}✓${RESET} WAL com ${formatBytes(size)}`] };
+  }
+  return {
+    severity: "warn",
+    label,
+    lines: [
+      `${YELLOW}⚠${RESET} WAL inchado (${formatBytes(size)}) — checkpoint não está rodando`,
+    ],
+    hint: 'sqlite3 ~/.beheld/profile.db "PRAGMA wal_checkpoint(TRUNCATE);"',
+  };
+}
+
+function evaluateBacklog(snap: ProcessingSnapshot): CheckResult {
+  const label = "Backlog de eventos";
+  if (snap.sessions.length === 0) {
     return {
       severity: "ok",
-      label: "Eventos órfãos",
-      lines: [`${GREEN}✓${RESET} Nenhum evento pendente de processamento`],
+      label,
+      lines: [`${GREEN}✓${RESET} Nenhuma sessão registrada`],
+    };
+  }
+  const offsets = snap.cursor?.offsets ?? {};
+  let unread = 0;
+  for (const s of snap.sessions) {
+    const off = offsets[s.name] ?? 0;
+    unread += Math.max(0, s.size - off);
+  }
+  if (unread === 0) {
+    return {
+      severity: "ok",
+      label,
+      lines: [`${GREEN}✓${RESET} Cursor cobriu todas as sessões`],
     };
   }
   return {
     severity: "warn",
-    label: "Eventos órfãos",
-    lines: [`${YELLOW}⚠${RESET} ${unprocessed} bytes de eventos pendentes no JSONL`],
-    hint: "Execute: beheld view --refresh",
+    label,
+    lines: [`${YELLOW}⚠${RESET} ${formatBytes(unread)} (${unread} bytes) pendentes no JSONL após o cursor`],
+    hint: "Checar reader.cursor / db.write — engine pode ter parado de processar",
   };
+}
+
+function computeExitCode(all: CheckResult[]): 0 | 1 | 2 {
+  if (all.some((r) => r.severity === "crit")) return 2;
+  if (all.some((r) => r.severity === "warn")) return 1;
+  return 0;
 }
 
 interface JsonlSample {
@@ -489,14 +698,34 @@ export async function doctorCommand(): Promise<void> {
   const integration = await checkClaudeIntegration();
   printResult(integration);
 
-  const orphans = await checkOrphans();
+  // Processing probes — leem do disco, independem do engine vivo.
+  const snap = await takeProcessingSnapshot();
+  const now = Date.now();
+  const cursor = evaluateCursorStaleness(snap, now, CURSOR_STALENESS_THRESHOLD_MS);
+  printResult(cursor);
+  const dbWrite = evaluateDbWrite(snap, now, DB_WRITE_STALENESS_THRESHOLD_MS);
+  printResult(dbWrite);
+  const dbWal = evaluateWal(snap, WAL_WARN_THRESHOLD_BYTES);
+  printResult(dbWal);
+  const orphans = evaluateBacklog(snap);
   printResult(orphans);
 
   const jsonl = await checkJsonlToday();
   printResult(jsonl);
 
   // ── summary ────────────────────────────────────────────────────────────────
-  const all: CheckResult[] = [mcp, engine, pid, ...(codesign ? [codesign] : []), integration, orphans, jsonl];
+  const all: CheckResult[] = [
+    mcp,
+    engine,
+    pid,
+    ...(codesign ? [codesign] : []),
+    integration,
+    cursor,
+    dbWrite,
+    dbWal,
+    orphans,
+    jsonl,
+  ];
   const crits = all.filter((c) => c.severity === "crit");
   const warns = all.filter((c) => c.severity === "warn");
 
@@ -511,7 +740,7 @@ export async function doctorCommand(): Promise<void> {
       n++;
     }
     console.log("");
-    process.exit(1);
+    process.exit(computeExitCode(all));
   }
 
   if (warns.length > 0) {
@@ -519,7 +748,7 @@ export async function doctorCommand(): Promise<void> {
     const firstHint = warns.find((w) => w.hint)?.hint;
     if (firstHint) console.log(`   ${DIM}${firstHint}${RESET}`);
     console.log("");
-    process.exit(1);
+    process.exit(computeExitCode(all));
   }
 
   console.log(`Resultado: ${GREEN}✓ Tudo verde${RESET}`);
@@ -534,4 +763,12 @@ export const _internal = {
   checkCodesignMacOS,
   parseProcOutput,
   checkEngine,
+  takeProcessingSnapshot,
+  evaluateCursorStaleness,
+  evaluateDbWrite,
+  evaluateWal,
+  evaluateBacklog,
+  formatBytes,
+  formatDuration,
+  computeExitCode,
 };

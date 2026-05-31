@@ -122,9 +122,10 @@ SUITE("Long-running scenario — produto sobrevive a uso prolongado e restarts",
     const released = await waitForPortClosed(ENGINE_URL, 3_000);
     expect(released).toBe(true);
 
-    // ── 6. Doctor reporta engine offline (exit 1) ────────────────────────────
+    // ── 6. Doctor reporta engine offline (exit 2 = ao menos um crit) ─────────
+    // (D1.a mudou exit codes: crit→2, warn→1, ok→0. Engine offline é crit.)
     const doctorOffline = runCli(["doctor"], env);
-    expect(doctorOffline.exitCode).toBe(1);
+    expect(doctorOffline.exitCode).toBe(2);
     expect(doctorOffline.stdout.toLowerCase()).toContain("offline");
 
     // ── 7. View mostra alerta destacado ──────────────────────────────────────

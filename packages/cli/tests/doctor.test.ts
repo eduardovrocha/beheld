@@ -272,3 +272,340 @@ describe("checkEngine", () => {
     expect(joined).toContain("70859");
   });
 });
+
+// ── pure formatters ──────────────────────────────────────────────────────────
+
+describe("formatBytes", () => {
+  test("bytes range", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatBytes(0)).toBe("0 B");
+    expect(_internal.formatBytes(836)).toBe("836 B");
+    expect(_internal.formatBytes(1023)).toBe("1023 B");
+  });
+
+  test("KB range", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatBytes(1024)).toBe("1.0 KB");
+    expect(_internal.formatBytes(Math.round(12.3 * 1024))).toBe("12.3 KB");
+  });
+
+  test("MB range", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatBytes(4 * 1024 * 1024)).toBe("4.0 MB");
+    expect(_internal.formatBytes(10 * 1024 * 1024)).toBe("10.0 MB");
+  });
+});
+
+describe("formatDuration", () => {
+  test("seconds", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatDuration(0)).toBe("0s");
+    expect(_internal.formatDuration(45_000)).toBe("45s");
+    expect(_internal.formatDuration(-500)).toBe("0s");
+  });
+
+  test("minutes", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatDuration(12 * 60 * 1000)).toBe("12min");
+    expect(_internal.formatDuration(10 * 60 * 1000)).toBe("10min");
+  });
+
+  test("hours and days", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.formatDuration(6 * 60 * 60 * 1000)).toBe("6h");
+    expect(_internal.formatDuration(5 * 24 * 60 * 60 * 1000)).toBe("5d");
+  });
+});
+
+// ── computeExitCode ──────────────────────────────────────────────────────────
+
+describe("computeExitCode", () => {
+  test("empty → 0", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.computeExitCode([])).toBe(0);
+  });
+
+  test("all ok → 0", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.computeExitCode([
+        { severity: "ok", label: "a", lines: [] },
+        { severity: "ok", label: "b", lines: [] },
+      ]),
+    ).toBe(0);
+  });
+
+  test("at least one warn, no crit → 1", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.computeExitCode([
+        { severity: "ok", label: "a", lines: [] },
+        { severity: "warn", label: "b", lines: [] },
+      ]),
+    ).toBe(1);
+  });
+
+  test("at least one crit → 2", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.computeExitCode([
+        { severity: "ok", label: "a", lines: [] },
+        { severity: "crit", label: "b", lines: [] },
+      ]),
+    ).toBe(2);
+  });
+
+  test("mix crit + warn → 2", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.computeExitCode([
+        { severity: "warn", label: "a", lines: [] },
+        { severity: "crit", label: "b", lines: [] },
+        { severity: "warn", label: "c", lines: [] },
+      ]),
+    ).toBe(2);
+  });
+});
+
+// ── evaluateBacklog (per-file cursor model) ──────────────────────────────────
+
+describe("evaluateBacklog", () => {
+  const snap = (
+    cursor: { offsets: Record<string, number>; mtime: number } | null,
+    sessions: Array<{ name: string; size: number; mtime: number }>,
+  ) => ({ cursor, sessions, profileDb: null, profileDbWal: null });
+
+  test("sem sessões → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateBacklog(snap(null, []));
+    expect(r.severity).toBe("ok");
+  });
+
+  test("cursor null + 2 sessões totalizando 1000 B → warn 1000 bytes", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateBacklog(
+      snap(null, [
+        { name: "s1.jsonl", size: 400, mtime: 1 },
+        { name: "s2.jsonl", size: 600, mtime: 2 },
+      ]),
+    );
+    expect(r.severity).toBe("warn");
+    expect(r.lines.join(" ")).toContain("1000 bytes");
+  });
+
+  test("cursor por-arquivo no meio de s2 → soma sessões não cobertas", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    // sessions: s1=500, s2=1000, s3=200; cursor cobre s2 até offset 300.
+    // s1 sem offset → 500 unread. s2 → 1000-300 = 700. s3 sem offset → 200.
+    // Total = 1400.
+    const r = _internal.evaluateBacklog(
+      snap({ offsets: { "s2.jsonl": 300 }, mtime: 1 }, [
+        { name: "s1.jsonl", size: 500, mtime: 1 },
+        { name: "s2.jsonl", size: 1000, mtime: 2 },
+        { name: "s3.jsonl", size: 200, mtime: 3 },
+      ]),
+    );
+    expect(r.severity).toBe("warn");
+    expect(r.lines.join(" ")).toContain("1400 bytes");
+  });
+
+  test("cursor cobre todas as sessões → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateBacklog(
+      snap(
+        { offsets: { "s1.jsonl": 500, "s2.jsonl": 1000, "s3.jsonl": 200 }, mtime: 1 },
+        [
+          { name: "s1.jsonl", size: 500, mtime: 1 },
+          { name: "s2.jsonl", size: 1000, mtime: 2 },
+          { name: "s3.jsonl", size: 200, mtime: 3 },
+        ],
+      ),
+    );
+    expect(r.severity).toBe("ok");
+  });
+
+  test("offsets stale para arquivos removidos não viram negativos", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    // ghost.jsonl está no cursor mas não em sessions[] → ignorado.
+    // s1 com offset > size também não vira backlog negativo.
+    const r = _internal.evaluateBacklog(
+      snap(
+        { offsets: { "ghost.jsonl": 999, "s1.jsonl": 700 }, mtime: 1 },
+        [{ name: "s1.jsonl", size: 500, mtime: 1 }],
+      ),
+    );
+    expect(r.severity).toBe("ok");
+  });
+});
+
+// ── evaluateCursorStaleness ─────────────────────────────────────────────────
+
+describe("evaluateCursorStaleness", () => {
+  const FIVE_MIN = 5 * 60 * 1000;
+  const snapWith = (
+    cursor: { offsets: Record<string, number>; mtime: number } | null,
+    sessions: Array<{ name: string; size: number; mtime: number }>,
+  ) => ({ cursor, sessions, profileDb: null, profileDbWal: null });
+
+  test("sem sessões → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateCursorStaleness(snapWith(null, []), 0, FIVE_MIN);
+    expect(r.severity).toBe("ok");
+  });
+
+  test("cursor null + sessões → warn, hint beheld start", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateCursorStaleness(
+      snapWith(null, [{ name: "s.jsonl", size: 100, mtime: 1 }]),
+      0,
+      FIVE_MIN,
+    );
+    expect(r.severity).toBe("warn");
+    expect(r.hint).toContain("beheld start");
+  });
+
+  test("cursor recente → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    const r = _internal.evaluateCursorStaleness(
+      snapWith({ offsets: {}, mtime: newest - 60_000 }, [
+        { name: "s.jsonl", size: 100, mtime: newest },
+      ]),
+      newest,
+      FIVE_MIN,
+    );
+    expect(r.severity).toBe("ok");
+  });
+
+  test("cursor parado há 10min → warn", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    const r = _internal.evaluateCursorStaleness(
+      snapWith({ offsets: {}, mtime: newest - 10 * 60 * 1000 }, [
+        { name: "s.jsonl", size: 100, mtime: newest },
+      ]),
+      newest,
+      FIVE_MIN,
+    );
+    expect(r.severity).toBe("warn");
+    expect(r.lines.join(" ")).toContain("Cursor parado há 10min");
+  });
+});
+
+// ── evaluateDbWrite ─────────────────────────────────────────────────────────
+
+describe("evaluateDbWrite", () => {
+  const FIVE_MIN = 5 * 60 * 1000;
+  const snapWith = (
+    profileDb: { mtime: number } | null,
+    sessions: Array<{ name: string; size: number; mtime: number }>,
+  ) => ({ cursor: null, sessions, profileDb, profileDbWal: null });
+
+  test("profile.db ausente → warn", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateDbWrite(snapWith(null, []), 0, FIVE_MIN);
+    expect(r.severity).toBe("warn");
+  });
+
+  test("sem sessões → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateDbWrite(snapWith({ mtime: 1 }, []), 0, FIVE_MIN);
+    expect(r.severity).toBe("ok");
+  });
+
+  test("db recente → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    const r = _internal.evaluateDbWrite(
+      snapWith({ mtime: newest - 60_000 }, [{ name: "s.jsonl", size: 1, mtime: newest }]),
+      newest,
+      FIVE_MIN,
+    );
+    expect(r.severity).toBe("ok");
+  });
+
+  test("db estagnado → warn", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    const r = _internal.evaluateDbWrite(
+      snapWith({ mtime: newest - 60 * 60 * 1000 }, [
+        { name: "s.jsonl", size: 1, mtime: newest },
+      ]),
+      newest,
+      FIVE_MIN,
+    );
+    expect(r.severity).toBe("warn");
+  });
+});
+
+// ── evaluateWal ─────────────────────────────────────────────────────────────
+
+describe("evaluateWal", () => {
+  const FOUR_MIB = 4 * 1024 * 1024;
+  const snapWith = (profileDbWal: { size: number } | null) => ({
+    cursor: null,
+    sessions: [],
+    profileDb: null,
+    profileDbWal,
+  });
+
+  test("sem WAL → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateWal(snapWith(null), FOUR_MIB).severity).toBe("ok");
+  });
+
+  test("WAL vazio → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateWal(snapWith({ size: 0 }), FOUR_MIB).severity).toBe("ok");
+  });
+
+  test("WAL pequeno → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateWal(snapWith({ size: 1 * 1024 * 1024 }), FOUR_MIB).severity).toBe(
+      "ok",
+    );
+  });
+
+  test("WAL inchado → warn, label contém '10.0 MB'", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.evaluateWal(snapWith({ size: 10 * 1024 * 1024 }), FOUR_MIB);
+    expect(r.severity).toBe("warn");
+    expect(r.lines.join(" ")).toContain("10.0 MB");
+  });
+});
+
+// ── takeProcessingSnapshot (integração, com BEHELD_DATA_DIR) ─────────────────
+
+describe("takeProcessingSnapshot", () => {
+  test("monta snapshot do tmpdir com cursor, sessões, profile.db e WAL", async () => {
+    const base = path.join(tmpDir, ".beheld");
+    fs.writeFileSync(
+      path.join(base, ".cursor"),
+      JSON.stringify({ offsets: { "a.jsonl": 100, "b.jsonl": 200 } }),
+    );
+    fs.writeFileSync(path.join(base, "sessions", "a.jsonl"), "x".repeat(150));
+    fs.writeFileSync(path.join(base, "sessions", "b.jsonl"), "y".repeat(300));
+    // arquivo não-.jsonl deve ser ignorado
+    fs.writeFileSync(path.join(base, "sessions", "index.json"), "{}");
+    fs.writeFileSync(path.join(base, "profile.db"), "sqlite-stub");
+    fs.writeFileSync(path.join(base, "profile.db-wal"), Buffer.alloc(2048));
+
+    const { _internal } = await import("../src/commands/doctor");
+    const s = await _internal.takeProcessingSnapshot();
+    expect(s.cursor).not.toBeNull();
+    expect(s.cursor!.offsets).toEqual({ "a.jsonl": 100, "b.jsonl": 200 });
+    expect(s.sessions.map((e: { name: string }) => e.name)).toEqual(["a.jsonl", "b.jsonl"]);
+    expect(s.sessions.map((e: { size: number }) => e.size)).toEqual([150, 300]);
+    expect(s.profileDb).not.toBeNull();
+    expect(s.profileDbWal).toEqual({ size: 2048 });
+  });
+
+  test("ausência de .cursor / profile.db / WAL não lança", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const s = await _internal.takeProcessingSnapshot();
+    expect(s.cursor).toBeNull();
+    expect(s.sessions).toEqual([]);
+    expect(s.profileDb).toBeNull();
+    expect(s.profileDbWal).toBeNull();
+  });
+});

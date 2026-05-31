@@ -167,7 +167,7 @@ describe("runInstall — closer", () => {
 // ── TTY mode — cursor magic ─────────────────────────────────────────────────
 
 describe("runInstall — TTY mode", () => {
-  test("emite ANSI clear-screen entre redraws", async () => {
+  test("emite full-screen clear + cursor home entre redraws", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
     const steps = [
@@ -175,8 +175,25 @@ describe("runInstall — TTY mode", () => {
       mkStep("install", "install.install.engine", true, true),
     ];
     await runInstall(steps, envFor("en", true), w);
-    // Esperamos ao menos uma sequência "cursor up + clear" (\x1b[NA\x1b[J)
-    expect(w.out()).toMatch(/\x1b\[\d+A\x1b\[J/);
+    // \x1b[2J = clear screen, \x1b[0;0H = cursor home. Aparece N+1 vezes
+    // (initial draw + 1 por step). Garante reinício do viewport a cada redraw.
+    const matches = w.out().match(/\x1b\[2J\x1b\[0;0H/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(steps.length + 1);
+  });
+
+  test("opener é reprintado a cada redraw (vive no clear-screen loop)", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true),
+      mkStep("install", "install.install.engine", true, true),
+    ];
+    await runInstall(steps, envFor("en", true), w);
+    const openerMatches = w.out().match(/My name is B3H31D/g);
+    // Initial draw + 2 redraws (1 por step) = 3
+    expect(openerMatches).not.toBeNull();
+    expect(openerMatches!.length).toBe(steps.length + 1);
   });
 
   test("TTY com lang pt-br ainda usa voz B3 PT-BR", async () => {

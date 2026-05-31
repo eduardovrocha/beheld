@@ -20,10 +20,17 @@ const DEFAULT_WRITER: Writer = {
   write: (s) => process.stdout.write(s),
 };
 
-/** ANSI: move cursor up N lines + clear from cursor to end-of-screen. */
-function clearLines(writer: Writer, n: number): void {
-  if (n <= 0) return;
-  writer.write(`\x1b[${n}A\x1b[J`);
+/** ANSI: clear full screen + home cursor (linha 1, coluna 1).
+ *
+ * Por que tela inteira em vez de cursor-up + clear-to-end? Em terminais que
+ * não fazem auto-scroll para acompanhar o cursor (alguns emuladores em
+ * janelas pequenas, panes do tmux/iTerm), o redesenho local fica fora do
+ * viewport visível e a barra parece travada. `\x1b[2J\x1b[0;0H` garante
+ * que cada redraw começa na linha 1 do viewport — posição estável,
+ * sem depender do estado do scroll.
+ */
+function clearScreen(writer: Writer): void {
+  writer.write("\x1b[2J\x1b[0;0H");
 }
 
 function initialStates(steps: Step[]): StepState[] {
@@ -48,12 +55,12 @@ export async function runInstall(
 ): Promise<InstallReport> {
   const states = initialStates(steps);
 
-  // Opener — TTY e não-TTY ambos imprimem.
-  writer.write(`${renderOpener(env)}\n`);
-
   if (env.tty) {
+    // TTY: opener é parte do redraw — vai dentro do runTty.
     await runTty(states, env, writer);
   } else {
+    // Não-TTY: opener + header logo de cara, depois uma linha por step.
+    writer.write(`${renderOpener(env)}\n`);
     writer.write(`${t("install.nontty.header", env.lang)}\n`);
     await runNonTty(states, env, writer);
   }
@@ -67,7 +74,10 @@ export async function runInstall(
 
   // Closer
   if (env.tty) {
-    writer.write(`${renderCloser(report, env)}\n`);
+    // Em TTY o closer aparece abaixo do layout final (que já foi reprinted
+    // no último step). Não limpa tela aqui — usuário precisa ver o estado
+    // final + closer simultaneamente.
+    writer.write(`\n${renderCloser(report, env)}\n`);
   } else {
     writer.write(
       `${
@@ -86,9 +96,18 @@ async function runTty(
   env: RenderEnv,
   writer: Writer,
 ): Promise<void> {
+  // Helper: cada redraw é "tela limpa + opener + layout".
+  // Garante que tudo cabe no viewport visível, sem depender do scroll.
+  const draw = (): void => {
+    clearScreen(writer);
+    writer.write(`${renderOpener(env)}\n`);
+    const layout = renderTtyLayout(states, env);
+    writer.write(layout.join("\n") + "\n");
+  };
+
   // Render inicial — barra a 0/N + todos os steps em pending.
-  let layout = renderTtyLayout(states, env);
-  writer.write(layout.join("\n") + "\n");
+  draw();
+
   let abortRemainingBlocking = false;
 
   for (let i = 0; i < states.length; i++) {
@@ -123,10 +142,8 @@ async function runTty(
       }
     }
 
-    // Cursor magic: voltar pro topo do layout anterior, limpar, redesenhar.
-    clearLines(writer, layout.length);
-    layout = renderTtyLayout(states, env);
-    writer.write(layout.join("\n") + "\n");
+    // Tela limpa + opener + layout atualizado. Posição visual sempre estável.
+    draw();
   }
 }
 

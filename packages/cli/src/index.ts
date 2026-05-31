@@ -21,7 +21,8 @@ program
   .command("init")
   .description("Configure Beheld for Claude Code and Continue.dev")
   .option("--force", "skip reinit prompt and run all setup steps")
-  .action(async (opts: { force?: boolean }) => {
+  .option("--lang <en|pt-br>", "output language for the install screen (default: en)", "en")
+  .action(async (opts: { force?: boolean; lang?: string }) => {
     const { initCommand } = await import("./commands/init");
     await initCommand(opts);
   });
@@ -165,6 +166,14 @@ snapshotCmd
   .action(async () => {
     const { snapshotListCommand } = await import("./commands/snapshot");
     await snapshotListCommand();
+  });
+
+program
+  .command("share")
+  .description("Publish the most recent local .beheld to the portal")
+  .action(async () => {
+    const { shareCommand } = await import("./commands/share");
+    await shareCommand();
   });
 
 program

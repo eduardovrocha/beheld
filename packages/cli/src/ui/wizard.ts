@@ -217,49 +217,18 @@ async function screen4(
   rl: ReturnType<typeof createInterface>,
   environments: WizardEnvironments,
   actions: SetupActions,
+  lang: import("../i18n/install").Lang,
 ): Promise<void> {
   process.stdout.write("\x1b[2J\x1b[0;0H");
-  console.log(bold("\nTela 4 — Configurando Beheld\n"));
 
-  async function step(label: string, fn: () => Promise<unknown>): Promise<void> {
-    process.stdout.write(`  ${dim("…")}  ${label}`);
-    try {
-      const result = await fn();
-      const finalLabel = typeof result === "string" ? result : label;
-      process.stdout.write(`\r  ${green("✓")}  ${finalLabel}\n`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stdout.write(`\r  ${RED}✗${RESET}  ${label}  ${dim(msg)}\n`);
-    }
-  }
+  const { buildInstallSteps } = await import("../install/steps");
+  const { runInstall } = await import("../install/runner");
+  const { detectRenderEnv } = await import("../install/render");
 
-  if (actions.migrateProjectScoped) {
-    await step("Verificando registros de projetos", async () => {
-      const n = await actions.migrateProjectScoped!();
-      return n > 0
-        ? `${n} registro(s) de projeto migrado(s)`
-        : "Nenhum registro residual de projeto";
-    });
-  }
-  if (environments.claudeCode && actions.installClaudeHooks) {
-    await step("Instalando hooks no Claude Code", actions.installClaudeHooks);
-  }
-  if (environments.continueDev && actions.installContinueMcp) {
-    await step("Registrando MCP server no Continue.dev", actions.installContinueMcp);
-  }
-  if (actions.extractEngine) {
-    await step("Extraindo engine (~/.beheld/bin/engine)", actions.extractEngine);
-  }
-  if (actions.startDaemons) {
-    await step("Iniciando daemons", actions.startDaemons);
-  }
-  if (actions.installAutostart) {
-    await step("Instalando autostart", actions.installAutostart);
-  }
+  const steps = buildInstallSteps(environments, actions);
+  const env = detectRenderEnv({ lang });
+  await runInstall(steps, env);
 
-  console.log(
-    `\n${bold("Pronto.")} Digite ${bold("/beheld")} no Claude Code para ver seu perfil.\n`,
-  );
   rl.close();
 }
 
@@ -283,6 +252,7 @@ export interface WizardActions extends SetupActions {
 export async function runWizard(
   actions: WizardActions = {},
   homeBase = homedir(),
+  lang: import("../i18n/install").Lang = "en",
 ): Promise<WizardResult> {
   const rl = createInterface({
     input: process.stdin,
@@ -305,7 +275,7 @@ export async function runWizard(
   }
 
   const environments = await screen3(rl, homeBase);
-  await screen4(rl, environments, actions);
+  await screen4(rl, environments, actions, lang);
 
   return {
     dimensions,

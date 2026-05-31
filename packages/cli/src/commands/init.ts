@@ -34,7 +34,12 @@ async function askReinit(): Promise<boolean> {
   });
 }
 
-export async function initCommand(opts: { force?: boolean } = {}): Promise<void> {
+export async function initCommand(
+  opts: { force?: boolean; lang?: string } = {},
+): Promise<void> {
+  const { isLang } = await import("../i18n/install");
+  const lang = opts.lang && isLang(opts.lang) ? opts.lang : "en";
+
   ensureSecurePermissions();
   // Generate Ed25519 signing keys on first run (silent if already present).
   // Required for `beheld snapshot` (Phase 5 — signed .beheld).
@@ -83,6 +88,8 @@ export async function initCommand(opts: { force?: boolean } = {}): Promise<void>
         await runImport({});
       },
     },
+    undefined,
+    lang,
   );
 
   const config: BeheldConfig = {

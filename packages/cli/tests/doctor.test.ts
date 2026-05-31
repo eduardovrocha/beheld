@@ -167,3 +167,108 @@ describe("renderAlertBox", () => {
     expect(unique.size).toBe(1);
   });
 });
+
+// ── parseProcOutput (pure) ───────────────────────────────────────────────────
+
+describe("parseProcOutput", () => {
+  test("macOS typical R+ format", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseProcOutput("R+ 493.8 6-14:44:32")).toEqual({
+      stat: "R+",
+      cpuPct: 493.8,
+      etime: "6-14:44:32",
+    });
+  });
+
+  test("Linux with multiple spaces", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseProcOutput("S    1.2   00:15")).toEqual({
+      stat: "S",
+      cpuPct: 1.2,
+      etime: "00:15",
+    });
+  });
+
+  test("returns undefined for empty / too short / non-numeric cpu", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseProcOutput("")).toBeUndefined();
+    expect(_internal.parseProcOutput("S")).toBeUndefined();
+    expect(_internal.parseProcOutput("S abc def")).toBeUndefined();
+  });
+});
+
+// ── checkEngine ──────────────────────────────────────────────────────────────
+
+describe("checkEngine", () => {
+  test("healthy → ok with runtimePid", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const result = await _internal.checkEngine({
+      fetchEnginePid: async () => 12345,
+      engineHealth: async () => ({ ok: true, version: "x.y.z" }),
+      inspectProcess: () => undefined,
+    });
+    expect(result.severity).toBe("ok");
+    expect(result.runtimePid).toBe(12345);
+  });
+
+  test("no listener → critical 'engine offline'", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const result = await _internal.checkEngine({
+      fetchEnginePid: async () => undefined,
+      engineHealth: async () => null,
+      inspectProcess: () => undefined,
+    });
+    expect(result.severity).toBe("crit");
+    expect(result.lines.join(" ")).toContain("sem listener");
+    expect(result.hint).toContain("beheld start");
+    expect(result.runtimePid).toBeUndefined();
+  });
+
+  test("listener + /health timeout + STAT=R + high CPU → 'Provável busy-loop'", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const result = await _internal.checkEngine({
+      fetchEnginePid: async () => 70859,
+      engineHealth: async () => null,
+      inspectProcess: () => ({ stat: "R+", cpuPct: 493.8, etime: "6-14:44:32" }),
+    });
+    expect(result.severity).toBe("crit");
+    const joined = result.lines.join(" ");
+    expect(joined).toContain("LISTEN no PID 70859");
+    expect(joined).toContain("Provável busy-loop");
+    expect(result.hint).toContain("kill -9 70859");
+    expect(result.runtimePid).toBe(70859);
+  });
+
+  test("listener + /health timeout + ps fails → 'vivo, HTTP travado'", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const result = await _internal.checkEngine({
+      fetchEnginePid: async () => 70859,
+      engineHealth: async () => null,
+      inspectProcess: () => undefined,
+    });
+    expect(result.severity).toBe("crit");
+    expect(result.lines.join(" ")).toContain("Processo vivo, HTTP travado");
+    expect(result.hint).toContain("restart");
+    expect(result.runtimePid).toBe(70859);
+  });
+
+  test("checkPidFile detecta divergência via runtimePid de checkEngine zumbi", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, ".beheld", "daemon.pid"),
+      JSON.stringify({ mcp: 100, engine: 18518 }),
+    );
+    const { _internal } = await import("../src/commands/doctor");
+    const engine = await _internal.checkEngine({
+      fetchEnginePid: async () => 70859,
+      engineHealth: async () => null,
+      inspectProcess: () => ({ stat: "R+", cpuPct: 493.8, etime: "6-14:44:32" }),
+    });
+    expect(engine.runtimePid).toBe(70859);
+
+    const pidCheck = _internal.checkPidFile(engine.runtimePid);
+    expect(pidCheck.severity).toBe("warn");
+    const joined = pidCheck.lines.join(" ");
+    expect(joined).toContain("18518");
+    expect(joined).toContain("70859");
+  });
+});

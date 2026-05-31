@@ -83,19 +83,83 @@ async function checkMcp(): Promise<CheckResult> {
   };
 }
 
-async function checkEngine(): Promise<CheckResult & { runtimePid?: number }> {
+interface ProcInfo {
+  stat: string;
+  cpuPct: number;
+  etime: string;
+}
+
+// Pura: testável sem spawnar processo.
+// Espera a linha "STAT %CPU ETIME" (separadores variáveis de whitespace).
+function parseProcOutput(line: string): ProcInfo | undefined {
+  const parts = line.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return undefined;
+  const stat = parts[0]!;
+  const cpuPct = parseFloat(parts[1]!);
+  const etime = parts[2]!;
+  if (!Number.isFinite(cpuPct)) return undefined;
+  return { stat, cpuPct, etime };
+}
+
+function inspectProcess(pid: number): ProcInfo | undefined {
+  // `ps -o stat=,%cpu=,etime=` funciona em macOS e Linux; os `=` ao final
+  // de cada campo suprimem o cabeçalho.
+  const res = spawnSync("ps", ["-o", "stat=,%cpu=,etime=", "-p", String(pid)], {
+    stdio: "pipe",
+  });
+  if (res.status !== 0) return undefined;
+  return parseProcOutput(res.stdout?.toString() ?? "");
+}
+
+interface EngineProbes {
+  fetchEnginePid?: () => Promise<number | undefined>;
+  engineHealth?: () => Promise<{ ok: boolean; version?: string } | null>;
+  inspectProcess?: (pid: number) => ProcInfo | undefined;
+}
+
+async function checkEngine(
+  probes: EngineProbes = {},
+): Promise<CheckResult & { runtimePid?: number }> {
   const port = enginePort();
-  const health = await engineHealth();
+  const getPid = probes.fetchEnginePid ?? fetchEnginePid;
+  const getHealth = probes.engineHealth ?? engineHealth;
+  const inspect = probes.inspectProcess ?? inspectProcess;
+
+  // Resolver o PID por porta SEMPRE — não só no caminho de sucesso.
+  const runtimePid = await getPid();
+  const health = await getHealth();
   if (!health?.ok) {
+    if (runtimePid !== undefined) {
+      // Porta LISTEN + /health não responde → vivo mas HTTP travado.
+      const proc = inspect(runtimePid);
+      const looksBusyLoop =
+        proc !== undefined && proc.stat.includes("R") && proc.cpuPct > 50;
+      return {
+        severity: "crit",
+        label: `Scoring engine (porta ${port})`,
+        lines: [
+          `${RED}✗${RESET} Porta ${port} LISTEN no PID ${runtimePid} mas /health não responde`,
+          looksBusyLoop
+            ? `${RED}✗${RESET} Provável busy-loop (STAT=${proc!.stat}, CPU=${proc!.cpuPct}%, etime=${proc!.etime})`
+            : `${YELLOW}⚠${RESET} Processo vivo, HTTP travado${
+                proc ? ` (STAT=${proc.stat}, CPU=${proc.cpuPct}%)` : ""
+              }`,
+        ],
+        hint: looksBusyLoop
+          ? `Correção sugerida: kill -9 ${runtimePid} && beheld start`
+          : "Tentar: beheld restart",
+        runtimePid,
+      };
+    }
+    // Sem listener: engine realmente offline.
     return {
       severity: "crit",
       label: `Scoring engine (porta ${port})`,
-      lines: [`${RED}✗${RESET} Não responde em /health — está offline`],
+      lines: [`${RED}✗${RESET} Porta ${port} sem listener — engine offline`],
       hint: "Tentar: beheld start",
     };
   }
   const version = (health as { version?: string }).version ?? "?";
-  const runtimePid = await fetchEnginePid();
   return {
     severity: "ok",
     label: `Scoring engine (porta ${port})`,
@@ -468,4 +532,6 @@ export const _internal = {
   scanTodayJsonl,
   checkPidFile,
   checkCodesignMacOS,
+  parseProcOutput,
+  checkEngine,
 };

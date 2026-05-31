@@ -20,17 +20,28 @@ const DEFAULT_WRITER: Writer = {
   write: (s) => process.stdout.write(s),
 };
 
-/** ANSI: clear full screen + home cursor (linha 1, coluna 1).
- *
- * Por que tela inteira em vez de cursor-up + clear-to-end? Em terminais que
- * não fazem auto-scroll para acompanhar o cursor (alguns emuladores em
- * janelas pequenas, panes do tmux/iTerm), o redesenho local fica fora do
- * viewport visível e a barra parece travada. `\x1b[2J\x1b[0;0H` garante
- * que cada redraw começa na linha 1 do viewport — posição estável,
- * sem depender do estado do scroll.
- */
+/** ANSI: clear full screen + home cursor (linha 1, coluna 1). */
 function clearScreen(writer: Writer): void {
   writer.write("\x1b[2J\x1b[0;0H");
+}
+
+/**
+ * Entra no alternate screen buffer (mesmo padrão de vim/less/htop).
+ * Tudo escrito enquanto estamos no alt buffer NÃO entra no scrollback do
+ * usuário. Quando saímos, o terminal restaura o conteúdo que estava antes.
+ *
+ * Sem isso, cada `\x1b[2J` deixa o frame anterior empurrado pro scrollback,
+ * e ao fim do install o scrollback tem N cópias da mesma tela empilhadas.
+ *
+ * Também esconde o cursor (\x1b[?25l) — animação fica mais limpa, e o
+ * showCursor() restaura quando saímos.
+ */
+function enterAltScreen(writer: Writer): void {
+  writer.write("\x1b[?1049h\x1b[?25l");
+}
+
+function leaveAltScreen(writer: Writer): void {
+  writer.write("\x1b[?25h\x1b[?1049l");
 }
 
 function initialStates(steps: Step[]): StepState[] {
@@ -56,7 +67,8 @@ export async function runInstall(
   const states = initialStates(steps);
 
   if (env.tty) {
-    // TTY: opener é parte do redraw — vai dentro do runTty.
+    // TTY: animação roda no alternate screen buffer dentro do runTty.
+    // Ao sair, o terminal volta pro estado anterior ao install.
     await runTty(states, env, writer);
   } else {
     // Não-TTY: opener + header logo de cara, depois uma linha por step.
@@ -74,9 +86,9 @@ export async function runInstall(
 
   // Closer
   if (env.tty) {
-    // Em TTY o closer aparece abaixo do layout final (que já foi reprinted
-    // no último step). Não limpa tela aqui — usuário precisa ver o estado
-    // final + closer simultaneamente.
+    // De volta ao buffer normal. Imprimimos o snapshot final UMA vez aqui
+    // + closer. Isso é tudo que sobra no scrollback do usuário.
+    writer.write(`${renderFinalSummary(states, env)}\n`);
     writer.write(`\n${renderCloser(report, env)}\n`);
   } else {
     writer.write(
@@ -97,7 +109,6 @@ async function runTty(
   writer: Writer,
 ): Promise<void> {
   // Helper: cada redraw é "tela limpa + opener + layout".
-  // Garante que tudo cabe no viewport visível, sem depender do scroll.
   const draw = (): void => {
     clearScreen(writer);
     writer.write(`${renderOpener(env)}\n`);
@@ -105,46 +116,76 @@ async function runTty(
     writer.write(layout.join("\n") + "\n");
   };
 
-  // Render inicial — barra a 0/N + todos os steps em pending.
-  draw();
+  // Entra no alternate screen buffer ANTES do primeiro draw — animação roda
+  // num buffer separado que não polui o scrollback do usuário.
+  enterAltScreen(writer);
 
-  let abortRemainingBlocking = false;
+  // SIGINT / falha inesperada: garantir que voltamos pro buffer normal.
+  // Sem isso, Ctrl-C deixa o terminal no alt buffer (efeitos visuais ruins).
+  const cleanup = () => {
+    leaveAltScreen(writer);
+  };
+  const sigintHandler = () => {
+    cleanup();
+    process.exit(130);
+  };
+  process.on("SIGINT", sigintHandler);
 
-  for (let i = 0; i < states.length; i++) {
-    const state = states[i]!;
-
-    if (abortRemainingBlocking && isSectionBlocking(state.step.section)) {
-      // Pula short-circuited steps — mantém status pending.
-      continue;
-    }
-
-    state.status = "running";
-    // Re-render durante execução só faz sentido se step demorar muito;
-    // mantemos simples: pending → ok/error sem estado intermediário visível,
-    // mas a fase "running" é registrada caso o caller queira observar.
-
-    const t0 = Date.now();
-    try {
-      const result = await state.step.run();
-      state.durationMs = Date.now() - t0;
-      state.result = result;
-      state.status = result.ok ? "ok" : "error";
-      if (!result.ok && isSectionBlocking(state.step.section)) {
-        abortRemainingBlocking = true;
-      }
-    } catch (err) {
-      state.durationMs = Date.now() - t0;
-      const message = err instanceof Error ? err.message : String(err);
-      state.result = { ok: false, errorReason: message };
-      state.status = "error";
-      if (isSectionBlocking(state.step.section)) {
-        abortRemainingBlocking = true;
-      }
-    }
-
-    // Tela limpa + opener + layout atualizado. Posição visual sempre estável.
+  try {
+    // Render inicial — barra a 0/N + todos os steps em pending.
     draw();
+
+    let abortRemainingBlocking = false;
+
+    for (let i = 0; i < states.length; i++) {
+      const state = states[i]!;
+
+      if (abortRemainingBlocking && isSectionBlocking(state.step.section)) {
+        // Pula short-circuited steps — mantém status pending.
+        continue;
+      }
+
+      state.status = "running";
+
+      const t0 = Date.now();
+      try {
+        const result = await state.step.run();
+        state.durationMs = Date.now() - t0;
+        state.result = result;
+        state.status = result.ok ? "ok" : "error";
+        if (!result.ok && isSectionBlocking(state.step.section)) {
+          abortRemainingBlocking = true;
+        }
+      } catch (err) {
+        state.durationMs = Date.now() - t0;
+        const message = err instanceof Error ? err.message : String(err);
+        state.result = { ok: false, errorReason: message };
+        state.status = "error";
+        if (isSectionBlocking(state.step.section)) {
+          abortRemainingBlocking = true;
+        }
+      }
+
+      draw();
+    }
+  } finally {
+    process.off("SIGINT", sigintHandler);
+    cleanup();
   }
+}
+
+/**
+ * Render compacto pós-execução, impresso no buffer NORMAL (não alt).
+ * É o que sobra no scrollback do usuário depois que o install termina:
+ * uma única ocorrência do estado final + closer. Sem 13 frames empilhados.
+ */
+function renderFinalSummary(states: StepState[], env: RenderEnv): string {
+  const lines: string[] = [];
+  lines.push(renderOpener(env));
+  for (const line of renderTtyLayout(states, env)) {
+    lines.push(line);
+  }
+  return lines.join("\n");
 }
 
 async function runNonTty(

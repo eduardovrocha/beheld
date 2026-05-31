@@ -159,7 +159,8 @@ export function renderTtyLayout(
     if (sectionSteps.length === 0) continue;
     lines.push(renderSectionHeader(t(`install.section.${section}`, env.lang), env.color));
     for (const st of sectionSteps) {
-      const label = t(st.step.labelKey, env.lang);
+      // overrideLabel (vindo do StepResult) tem prioridade sobre o labelKey.
+      const label = st.result?.overrideLabel ?? t(st.step.labelKey, env.lang);
       if (st.step.isAction) {
         const okState =
           st.status === "ok" ? true : st.status === "error" ? false : null;
@@ -232,7 +233,7 @@ export function renderNonTtyStepLine(
   const total_w = String(total).length;
   const prefix = `[${String(index).padStart(total_w, " ")}/${total}]`;
   const section = t(`install.section.${state.step.section}`, env.lang);
-  const label = t(state.step.labelKey, env.lang);
+  const label = state.result?.overrideLabel ?? t(state.step.labelKey, env.lang);
   const status =
     state.status === "ok"
       ? "ok"

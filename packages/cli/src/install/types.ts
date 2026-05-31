@@ -5,6 +5,12 @@ export type Section = "preflight" | "install" | "verify";
 export interface StepResult {
   ok: boolean;
   detail?: string;
+  /**
+   * Sobrescreve o label vindo do labelKey. Útil quando a ação tem um
+   * resultado descritivo ("Daemons já em execução" vs "daemons iniciados")
+   * que deve substituir o label padrão em vez de aparecer como detail.
+   */
+  overrideLabel?: string;
   errorReason?: string;
   errorSeeAlso?: string;
 }

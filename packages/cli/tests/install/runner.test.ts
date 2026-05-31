@@ -167,22 +167,44 @@ describe("runInstall — closer", () => {
 // ── TTY mode — cursor magic ─────────────────────────────────────────────────
 
 describe("runInstall — TTY mode", () => {
-  test("emite full-screen clear + cursor home entre redraws", async () => {
+  test("entra e sai do alternate screen buffer no caminho TTY", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
-    const steps = [
-      mkStep("preflight", "install.preflight.platform", true, true),
-      mkStep("install", "install.install.engine", true, true),
-    ];
+    const steps = [mkStep("preflight", "install.preflight.platform", true, true)];
     await runInstall(steps, envFor("en", true), w);
-    // \x1b[2J = clear screen, \x1b[0;0H = cursor home. Aparece N+1 vezes
-    // (initial draw + 1 por step). Garante reinício do viewport a cada redraw.
-    const matches = w.out().match(/\x1b\[2J\x1b\[0;0H/g);
-    expect(matches).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(steps.length + 1);
+    const out = w.out();
+    // Enter alt: \x1b[?1049h, esconde cursor: \x1b[?25l
+    expect(out).toContain("\x1b[?1049h");
+    expect(out).toContain("\x1b[?25l");
+    // Sai do alt: \x1b[?1049l, mostra cursor: \x1b[?25h
+    expect(out).toContain("\x1b[?1049l");
+    expect(out).toContain("\x1b[?25h");
+    // Ordem: enter precede leave
+    expect(out.indexOf("\x1b[?1049h")).toBeLessThan(out.indexOf("\x1b[?1049l"));
   });
 
-  test("opener é reprintado a cada redraw (vive no clear-screen loop)", async () => {
+  test("scrollback fica com UMA ocorrência do snapshot final, não N", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true),
+      mkStep("install", "install.install.engine", true, true),
+      mkStep("verify", "install.verify.mcp", false, true),
+    ];
+    await runInstall(steps, envFor("en", true), w);
+    const out = w.out();
+    // O snapshot final + closer são escritos APÓS o leave-alt-buffer.
+    // Pegamos só o que vem depois do leave — isso é o que vai pro scrollback.
+    const leaveIdx = out.indexOf("\x1b[?1049l");
+    expect(leaveIdx).toBeGreaterThan(-1);
+    const postLeave = out.slice(leaveIdx);
+    // Opener aparece UMA vez no scrollback (o final summary).
+    const openerMatches = postLeave.match(/My name is B3H31D/g);
+    expect(openerMatches).not.toBeNull();
+    expect(openerMatches!.length).toBe(1);
+  });
+
+  test("dentro do alt buffer, opener é reprintado a cada redraw", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
     const steps = [
@@ -190,10 +212,11 @@ describe("runInstall — TTY mode", () => {
       mkStep("install", "install.install.engine", true, true),
     ];
     await runInstall(steps, envFor("en", true), w);
-    const openerMatches = w.out().match(/My name is B3H31D/g);
-    // Initial draw + 2 redraws (1 por step) = 3
-    expect(openerMatches).not.toBeNull();
-    expect(openerMatches!.length).toBe(steps.length + 1);
+    const out = w.out();
+    // Total ocorrências do opener: initial draw + N steps redraws + final
+    // summary no buffer normal = N + 2.
+    const matches = out.match(/My name is B3H31D/g);
+    expect(matches!.length).toBe(steps.length + 2);
   });
 
   test("TTY com lang pt-br ainda usa voz B3 PT-BR", async () => {
@@ -206,6 +229,27 @@ describe("runInstall — TTY mode", () => {
     );
     expect(w.out()).toContain("Meu nome é B3H31D");
     expect(w.out()).toContain("Pronto. Estou de olho.");
+  });
+});
+
+// ── overrideLabel ────────────────────────────────────────────────────────────
+
+describe("overrideLabel", () => {
+  test("substitui o label padrão do step quando o run retorna overrideLabel", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps: Step[] = [
+      {
+        section: "install",
+        labelKey: "install.install.start",
+        isAction: true,
+        run: async () => ({ ok: true, overrideLabel: "Daemons já em execução" }),
+      },
+    ];
+    await runInstall(steps, envFor("pt-br", false), w);
+    expect(w.out()).toContain("Daemons já em execução");
+    // O label padrão NÃO deve aparecer junto.
+    expect(w.out()).not.toContain("daemons iniciados Daemons já em execução");
   });
 });
 

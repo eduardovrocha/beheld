@@ -225,9 +225,14 @@ export function buildInstallSteps(
       run: async () => {
         try {
           const result = await actions.startDaemons!();
-          // startDaemons retorna string (label dinâmico) ou void.
-          const detail = typeof result === "string" ? result : undefined;
-          return { ok: true, detail };
+          // startDaemons retorna string descritiva (label dinâmico) ou void.
+          // Usamos como overrideLabel pra substituir "daemons iniciados" pelo
+          // estado real ("Daemons já em execução" / "Daemons iniciados"),
+          // evitando o output redundante.
+          if (typeof result === "string") {
+            return { ok: true, overrideLabel: result };
+          }
+          return { ok: true };
         } catch (e) {
           return { ok: false, errorReason: e instanceof Error ? e.message : String(e) };
         }

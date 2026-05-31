@@ -791,3 +791,185 @@ describe("checkLogSignatures", () => {
     expect(r.hint).toContain("Socket preso");
   });
 });
+
+// ── isInequivocalBusyLoop (pure, table-driven) ───────────────────────────────
+
+describe("isInequivocalBusyLoop", () => {
+  const FIVE_MIN = 5 * 60 * 1000;
+
+  // Helpers para montar inputs sintéticos sem repetição.
+  const proc = (overrides: Partial<{ stat: string; cpuPct: number; etime: string }> = {}) => ({
+    stat: "R+",
+    cpuPct: 541.4,
+    etime: "06-16:42:35",
+    ...overrides,
+  });
+  const engine = (overrides: {
+    runtimePid?: number;
+    severity?: "ok" | "warn" | "crit";
+    proc?: { stat: string; cpuPct: number; etime: string };
+  } = {}) => ({
+    severity: "crit" as const,
+    label: "Scoring engine",
+    lines: [] as string[],
+    runtimePid: 70859 as number | undefined,
+    proc: proc() as { stat: string; cpuPct: number; etime: string } | undefined,
+    ...overrides, // spread por último → undefined explícito sobrescreve.
+  });
+  const snap = (
+    cursorMtime: number | null,
+    newest: number,
+    hasSessions = true,
+  ) => ({
+    cursor: cursorMtime === null ? null : { offsets: {}, mtime: cursorMtime },
+    sessions: hasSessions ? [{ name: "s.jsonl", size: 1, mtime: newest }] : [],
+    profileDb: null,
+    profileDbWal: null,
+  });
+
+  test("4 condições satisfeitas → true", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine(),
+        snap(newest - 10 * 60 * 1000, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(true);
+  });
+
+  test("sem listener → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine({ runtimePid: undefined }),
+        snap(newest - 10 * 60 * 1000, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(false);
+  });
+
+  test("severity ok → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine({ severity: "ok" }),
+        snap(newest - 10 * 60 * 1000, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(false);
+  });
+
+  test("sem proc (ps falhou) → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    const e = engine();
+    delete (e as { proc?: unknown }).proc;
+    expect(_internal.isInequivocalBusyLoop(e, snap(newest - 10 * 60 * 1000, newest), FIVE_MIN)).toBe(false);
+  });
+
+  test("STAT sem R → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine({ proc: proc({ stat: "S" }) }),
+        snap(newest - 10 * 60 * 1000, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(false);
+  });
+
+  test("CPU = 50 (não estritamente >) → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine({ proc: proc({ cpuPct: 50 }) }),
+        snap(newest - 10 * 60 * 1000, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(false);
+  });
+
+  test("cursor null → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(_internal.isInequivocalBusyLoop(engine(), snap(null, newest), FIVE_MIN)).toBe(false);
+  });
+
+  test("sem sessões → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.isInequivocalBusyLoop(engine(), snap(0, 0, false), FIVE_MIN),
+    ).toBe(false);
+  });
+
+  test("lag = threshold (não estritamente >) → false", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine(),
+        snap(newest - FIVE_MIN, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(false);
+  });
+
+  test("lag = threshold + 1ms → true", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const newest = 10_000_000;
+    expect(
+      _internal.isInequivocalBusyLoop(
+        engine(),
+        snap(newest - FIVE_MIN - 1, newest),
+        FIVE_MIN,
+      ),
+    ).toBe(true);
+  });
+});
+
+// ── humanStepLabel / firstFailedStepHint (pure) ──────────────────────────────
+
+describe("humanStepLabel + firstFailedStepHint", () => {
+  test("humanStepLabel maps known step names", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.humanStepLabel({ name: "kill-engine", ok: true, detail: "PID 70859" })).toContain("PID 70859");
+    expect(_internal.humanStepLabel({ name: "wal-checkpoint", ok: true })).toContain("WAL checkpoint");
+    expect(_internal.humanStepLabel({ name: "restart-daemon", ok: false, detail: "x" })).toContain("não religou");
+    expect(_internal.humanStepLabel({ name: "capture-stack", ok: true, detail: "/tmp/x" })).toContain("/tmp/x");
+  });
+
+  test("firstFailedStepHint returns step-specific guidance for kill failure", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const report = {
+      triggered: true as const,
+      evidence: { runtimePid: 70859, stat: "R+", cpuPct: 541.4, etime: "1d", cursorLagMs: 1 },
+      steps: [
+        { name: "prepare-diagnostics-dir", ok: true },
+        { name: "capture-stack", ok: true },
+        { name: "kill-engine", ok: false, detail: "EPERM" },
+      ],
+      succeeded: false,
+    };
+    expect(_internal.firstFailedStepHint(report)).toContain("kill -9 70859");
+  });
+
+  test("firstFailedStepHint returns restart guidance when only restart fails", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const report = {
+      triggered: true as const,
+      evidence: { runtimePid: 1, stat: "R", cpuPct: 99, etime: "1d", cursorLagMs: 1 },
+      steps: [
+        { name: "kill-engine", ok: true },
+        { name: "restart-daemon", ok: false },
+      ],
+      succeeded: false,
+    };
+    expect(_internal.firstFailedStepHint(report)).toContain("beheld start");
+  });
+});

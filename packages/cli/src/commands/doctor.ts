@@ -10,6 +10,8 @@ import {
   launchAgentPlistPath,
   systemdUnitPath,
 } from "../daemon-manager";
+import { selfHealEngine } from "./heal-engine";
+import type { HealReport, HealStep } from "./heal-engine";
 import { GREEN, RED, YELLOW, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 type Severity = "ok" | "warn" | "crit";
@@ -89,7 +91,7 @@ async function checkMcp(): Promise<CheckResult> {
   };
 }
 
-interface ProcInfo {
+export interface ProcInfo {
   stat: string;
   cpuPct: number;
   etime: string;
@@ -117,15 +119,18 @@ function inspectProcess(pid: number): ProcInfo | undefined {
   return parseProcOutput(res.stdout?.toString() ?? "");
 }
 
-interface EngineProbes {
+export interface EngineProbes {
   fetchEnginePid?: () => Promise<number | undefined>;
   engineHealth?: () => Promise<{ ok: boolean; version?: string } | null>;
   inspectProcess?: (pid: number) => ProcInfo | undefined;
 }
 
-async function checkEngine(
-  probes: EngineProbes = {},
-): Promise<CheckResult & { runtimePid?: number }> {
+export type EngineCheck = CheckResult & {
+  runtimePid?: number;
+  proc?: ProcInfo;
+};
+
+async function checkEngine(probes: EngineProbes = {}): Promise<EngineCheck> {
   const port = enginePort();
   const getPid = probes.fetchEnginePid ?? fetchEnginePid;
   const getHealth = probes.engineHealth ?? engineHealth;
@@ -155,6 +160,7 @@ async function checkEngine(
           ? `Correção sugerida: kill -9 ${runtimePid} && beheld start`
           : "Tentar: beheld restart",
         runtimePid,
+        proc,
       };
     }
     // Sem listener: engine realmente offline.
@@ -196,7 +202,7 @@ function enginePort(): number {
   return portFromUrl(process.env.BEHELD_ENGINE_URL, 7338);
 }
 
-function pidListeningOn(port: number): number | undefined {
+export function pidListeningOn(port: number): number | undefined {
   // lsof is available on macOS and most Linux distros
   const res = spawnSync("lsof", ["-i", `:${port}`, "-P", "-n", "-sTCP:LISTEN", "-t"], {
     stdio: "pipe",
@@ -350,14 +356,14 @@ interface SessionEntry {
   mtime: number;
 }
 
-interface ProcessingSnapshot {
+export interface ProcessingSnapshot {
   cursor: { offsets: Record<string, number>; mtime: number } | null;
   sessions: SessionEntry[];
   profileDb: { mtime: number } | null;
   profileDbWal: { size: number } | null;
 }
 
-const CURSOR_STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
+export const CURSOR_STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
 const DB_WRITE_STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
 const WAL_WARN_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
@@ -831,6 +837,35 @@ function computeExitCode(all: CheckResult[]): 0 | 1 | 2 {
   return 0;
 }
 
+/**
+ * Decisão pura: as 4 condições coincidentes do busy-loop confirmado.
+ * Devolve true sse:
+ *   1. há listener na porta do engine (runtimePid !== undefined);
+ *   2. /health falhou (severity === "crit");
+ *   3. ps confirma STAT contém R e CPU > 50%;
+ *   4. cursor existe, há sessões, e o lag (newest - cursor.mtime) é
+ *      ESTRITAMENTE maior que o threshold de staleness do D1.a.
+ *
+ * Fora disso → false. O doctor segue só apontando, sem agir.
+ */
+function isInequivocalBusyLoop(
+  engine: EngineCheck,
+  snap: ProcessingSnapshot,
+  cursorStalenessThresholdMs: number,
+): boolean {
+  if (engine.runtimePid === undefined) return false;
+  if (engine.severity !== "crit") return false;
+  const proc = engine.proc;
+  if (proc === undefined) return false;
+  if (!proc.stat.includes("R")) return false;
+  if (proc.cpuPct <= 50) return false;
+  if (snap.cursor === null) return false;
+  if (snap.sessions.length === 0) return false;
+  const newest = Math.max(...snap.sessions.map((s) => s.mtime));
+  const lagMs = newest - snap.cursor.mtime;
+  return lagMs > cursorStalenessThresholdMs;
+}
+
 interface JsonlSample {
   filesScanned: number;
   events: number;
@@ -942,6 +977,68 @@ function printResult(r: CheckResult): void {
   console.log("");
 }
 
+// ── heal report rendering ────────────────────────────────────────────────────
+
+function humanStepLabel(step: HealStep): string {
+  switch (step.name) {
+    case "prepare-diagnostics-dir":
+      return step.ok ? "diretório de diagnóstico preparado" : `diretório de diagnóstico: ${step.detail ?? "falhou"}`;
+    case "capture-stack":
+      return step.ok
+        ? `stack capturado em ${(step.detail ?? "").replace(homedir(), "~")}`
+        : `stack não capturado (${step.detail ?? "indisponível"})`;
+    case "kill-engine":
+      return step.ok ? `engine matado (${step.detail ?? ""})` : `kill falhou (${step.detail ?? ""})`;
+    case "wait-socket-release":
+      return step.ok ? `socket :7338 ${step.detail ?? "liberado"}` : `socket :7338 ${step.detail ?? "não liberou"}`;
+    case "wal-checkpoint":
+      return step.ok ? "WAL checkpoint executado" : `WAL checkpoint falhou: ${step.detail ?? "?"}`;
+    case "clear-stale-engine-pid":
+      return step.ok ? "daemon.pid limpo (engine removido)" : "daemon.pid não pôde ser limpo";
+    case "restart-daemon":
+      return step.ok ? "daemon religado" : `daemon não religou: ${step.detail ?? "?"}`;
+    default:
+      return step.name + (step.detail ? `: ${step.detail}` : "");
+  }
+}
+
+function firstFailedStepHint(report: HealReport): string {
+  const failed = report.steps.find((s) => !s.ok);
+  if (!failed) return "estado inconsistente — investigar ~/.beheld/daemon.log";
+  switch (failed.name) {
+    case "kill-engine":
+      return `executar manualmente: kill -9 ${report.evidence.runtimePid}`;
+    case "wait-socket-release":
+      return `socket :7338 ainda preso — verificar lsof -iTCP:7338`;
+    case "restart-daemon":
+      return "executar manualmente: beheld start";
+    default:
+      return `passo ${failed.name} falhou — checar ~/.beheld/daemon.log`;
+  }
+}
+
+function printHealReport(report: HealReport): void {
+  console.log(`${BOLD}🔧 Auto-heal disparado: engine em busy-loop confirmado${RESET}`);
+  console.log("   Evidências:");
+  console.log(`     • PID ${report.evidence.runtimePid} LISTEN em :${enginePort()}`);
+  console.log(`     • /health timeout`);
+  console.log(
+    `     • STAT=${report.evidence.stat}, CPU=${report.evidence.cpuPct}%, etime=${report.evidence.etime}`,
+  );
+  console.log(`     • Cursor parado há ${formatDuration(report.evidence.cursorLagMs)} vs sessão mais nova`);
+  console.log("   Passos:");
+  for (const step of report.steps) {
+    const mark = step.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
+    console.log(`     ${mark} ${humanStepLabel(step)}`);
+  }
+  if (report.succeeded) {
+    console.log(`   ${DIM}Rode \`beheld doctor\` para confirmar o estado pós-heal.${RESET}`);
+  } else {
+    console.log(`   ${RED}Heal falhou${RESET} — escalar manualmente: ${DIM}${firstFailedStepHint(report)}${RESET}`);
+  }
+  console.log("");
+}
+
 export async function doctorCommand(): Promise<void> {
   console.log(brand("checando minha saúde"));
   const mcp = await checkMcp();
@@ -1009,6 +1106,15 @@ export async function doctorCommand(): Promise<void> {
       n++;
     }
     console.log("");
+
+    // D2 — auto-heal apenas quando as 4 condições do busy-loop coincidem.
+    // Exit code reflete o snapshot pré-heal (computeExitCode(all)) independente
+    // do sucesso do heal; usuário roda doctor novamente para verificar.
+    if (isInequivocalBusyLoop(engine, snap, CURSOR_STALENESS_THRESHOLD_MS)) {
+      const report = await selfHealEngine(engine, snap);
+      printHealReport(report);
+    }
+
     process.exit(computeExitCode(all));
   }
 
@@ -1047,4 +1153,8 @@ export const _internal = {
   readLogTail,
   checkLogSignatures,
   LOG_SIGNATURES,
+  isInequivocalBusyLoop,
+  printHealReport,
+  humanStepLabel,
+  firstFailedStepHint,
 };

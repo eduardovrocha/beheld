@@ -23,6 +23,9 @@ export interface Step {
   run: () => Promise<StepResult>;
 }
 
+// running existe só como estado transitório durante state.step.run(); o
+// renderer não mostra essa fase no modo append-only (uma linha só aparece
+// quando o step completa).
 export type StepUiStatus = "pending" | "running" | "ok" | "error";
 
 export interface StepState {

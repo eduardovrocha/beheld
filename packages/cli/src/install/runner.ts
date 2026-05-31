@@ -1,13 +1,14 @@
 import { t } from "../i18n/install";
 import {
   renderCloser,
-  renderNonTtyStepLine,
   renderOpener,
-  renderTtyLayout,
+  renderSectionHeader,
+  renderStepCompletion,
 } from "./render";
 import type {
   InstallReport,
   RenderEnv,
+  Section,
   Step,
   StepState,
 } from "./types";
@@ -20,35 +21,11 @@ const DEFAULT_WRITER: Writer = {
   write: (s) => process.stdout.write(s),
 };
 
-/** ANSI: clear full screen + home cursor (linha 1, coluna 1). */
-function clearScreen(writer: Writer): void {
-  writer.write("\x1b[2J\x1b[0;0H");
-}
-
-/**
- * Entra no alternate screen buffer (mesmo padrão de vim/less/htop).
- * Tudo escrito enquanto estamos no alt buffer NÃO entra no scrollback do
- * usuário. Quando saímos, o terminal restaura o conteúdo que estava antes.
- *
- * Sem isso, cada `\x1b[2J` deixa o frame anterior empurrado pro scrollback,
- * e ao fim do install o scrollback tem N cópias da mesma tela empilhadas.
- *
- * Também esconde o cursor (\x1b[?25l) — animação fica mais limpa, e o
- * showCursor() restaura quando saímos.
- */
-function enterAltScreen(writer: Writer): void {
-  writer.write("\x1b[?1049h\x1b[?25l");
-}
-
-function leaveAltScreen(writer: Writer): void {
-  writer.write("\x1b[?25h\x1b[?1049l");
-}
-
 function initialStates(steps: Step[]): StepState[] {
   return steps.map((s) => ({ step: s, status: "pending" }));
 }
 
-function isSectionBlocking(section: Step["section"]): boolean {
+function isSectionBlocking(section: Section): boolean {
   // Short-circuit rule: pre-flight e install abortam steps subsequentes da
   // mesma seção + das seguintes na primeira falha. Verify é resiliente:
   // cada item independente, todos rodam até o fim.
@@ -56,8 +33,14 @@ function isSectionBlocking(section: Step["section"]): boolean {
 }
 
 /**
- * Execução serial de steps, com redraw TTY entre cada um.
- * Retorna report completo (succeeded sse nenhum step terminou com error).
+ * Execução serial de steps, em modo APPEND-ONLY.
+ *
+ * Cada step que completa imprime UMA (ou 2-3, se houver erro) linhas no stdout.
+ * Sem redraw, sem alt screen buffer, sem cursor magic. Funciona em qualquer
+ * terminal: Warp, iTerm2, Terminal.app, tmux, ssh, ci.log, pipe.
+ *
+ * O ato de ver as linhas aparecerem é o feedback de progresso. Em ~3 segundos
+ * de install, isso é mais legível que uma barra animada.
  */
 export async function runInstall(
   steps: Step[],
@@ -66,139 +49,15 @@ export async function runInstall(
 ): Promise<InstallReport> {
   const states = initialStates(steps);
 
-  if (env.tty) {
-    // TTY: animação roda no alternate screen buffer dentro do runTty.
-    // Ao sair, o terminal volta pro estado anterior ao install.
-    await runTty(states, env, writer);
-  } else {
-    // Não-TTY: opener + header logo de cara, depois uma linha por step.
-    writer.write(`${renderOpener(env)}\n`);
-    writer.write(`${t("install.nontty.header", env.lang)}\n`);
-    await runNonTty(states, env, writer);
-  }
+  // Opener — mesmo formato em TTY e não-TTY.
+  writer.write(`${renderOpener(env)}\n\n`);
 
-  const errors = states.filter((s) => s.status === "error");
-  const report: InstallReport = {
-    steps: states,
-    errors,
-    succeeded: errors.length === 0,
-  };
-
-  // Closer
-  if (env.tty) {
-    // De volta ao buffer normal. Imprimimos o snapshot final UMA vez aqui
-    // + closer. Isso é tudo que sobra no scrollback do usuário.
-    writer.write(`${renderFinalSummary(states, env)}\n`);
-    writer.write(`\n${renderCloser(report, env)}\n`);
-  } else {
-    writer.write(
-      `${
-        report.succeeded
-          ? t("install.nontty.done.ok", env.lang)
-          : t("install.nontty.done.partial", env.lang)
-      }\n`,
-    );
-  }
-
-  return report;
-}
-
-async function runTty(
-  states: StepState[],
-  env: RenderEnv,
-  writer: Writer,
-): Promise<void> {
-  // Helper: cada redraw é "tela limpa + opener + layout".
-  const draw = (): void => {
-    clearScreen(writer);
-    writer.write(`${renderOpener(env)}\n`);
-    const layout = renderTtyLayout(states, env);
-    writer.write(layout.join("\n") + "\n");
-  };
-
-  // Entra no alternate screen buffer ANTES do primeiro draw — animação roda
-  // num buffer separado que não polui o scrollback do usuário.
-  enterAltScreen(writer);
-
-  // SIGINT / falha inesperada: garantir que voltamos pro buffer normal.
-  // Sem isso, Ctrl-C deixa o terminal no alt buffer (efeitos visuais ruins).
-  const cleanup = () => {
-    leaveAltScreen(writer);
-  };
-  const sigintHandler = () => {
-    cleanup();
-    process.exit(130);
-  };
-  process.on("SIGINT", sigintHandler);
-
-  try {
-    // Render inicial — barra a 0/N + todos os steps em pending.
-    draw();
-
-    let abortRemainingBlocking = false;
-
-    for (let i = 0; i < states.length; i++) {
-      const state = states[i]!;
-
-      if (abortRemainingBlocking && isSectionBlocking(state.step.section)) {
-        // Pula short-circuited steps — mantém status pending.
-        continue;
-      }
-
-      state.status = "running";
-
-      const t0 = Date.now();
-      try {
-        const result = await state.step.run();
-        state.durationMs = Date.now() - t0;
-        state.result = result;
-        state.status = result.ok ? "ok" : "error";
-        if (!result.ok && isSectionBlocking(state.step.section)) {
-          abortRemainingBlocking = true;
-        }
-      } catch (err) {
-        state.durationMs = Date.now() - t0;
-        const message = err instanceof Error ? err.message : String(err);
-        state.result = { ok: false, errorReason: message };
-        state.status = "error";
-        if (isSectionBlocking(state.step.section)) {
-          abortRemainingBlocking = true;
-        }
-      }
-
-      draw();
-    }
-  } finally {
-    process.off("SIGINT", sigintHandler);
-    cleanup();
-  }
-}
-
-/**
- * Render compacto pós-execução, impresso no buffer NORMAL (não alt).
- * É o que sobra no scrollback do usuário depois que o install termina:
- * uma única ocorrência do estado final + closer. Sem 13 frames empilhados.
- */
-function renderFinalSummary(states: StepState[], env: RenderEnv): string {
-  const lines: string[] = [];
-  lines.push(renderOpener(env));
-  for (const line of renderTtyLayout(states, env)) {
-    lines.push(line);
-  }
-  return lines.join("\n");
-}
-
-async function runNonTty(
-  states: StepState[],
-  env: RenderEnv,
-  writer: Writer,
-): Promise<void> {
+  const printedSections = new Set<Section>();
   let abortRemainingBlocking = false;
 
-  for (let i = 0; i < states.length; i++) {
-    const state = states[i]!;
-
+  for (const state of states) {
     if (abortRemainingBlocking && isSectionBlocking(state.step.section)) {
+      // Pula short-circuited steps — mantém status pending; não imprime nada.
       continue;
     }
 
@@ -222,6 +81,28 @@ async function runNonTty(
       }
     }
 
-    writer.write(`${renderNonTtyStepLine(i + 1, states.length, state, env)}\n`);
+    // Section header — imprime na primeira vez que vemos essa seção.
+    if (!printedSections.has(state.step.section)) {
+      printedSections.add(state.step.section);
+      const sectionName = t(`install.section.${state.step.section}`, env.lang);
+      writer.write(`${renderSectionHeader(sectionName, env.color)}\n`);
+    }
+
+    // Step lines (1 + opcionais de erro).
+    for (const line of renderStepCompletion(state, env)) {
+      writer.write(`${line}\n`);
+    }
   }
+
+  const errors = states.filter((s) => s.status === "error");
+  const report: InstallReport = {
+    steps: states,
+    errors,
+    succeeded: errors.length === 0,
+  };
+
+  // Linha em branco + closer.
+  writer.write(`\n${renderCloser(report, env)}\n`);
+
+  return report;
 }

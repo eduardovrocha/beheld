@@ -30,36 +30,103 @@ function envFor(lang: Lang, tty: boolean) {
   return { tty, color: false, lang, termWidth: 80 };
 }
 
-// ── Sequência de escritas (não-TTY mode) ─────────────────────────────────────
+// ── Append-only: garantir que NÃO há redraw, alt buffer, ou cursor magic ────
 
-describe("runInstall — non-TTY", () => {
-  test("uma linha por step + opener + closer", async () => {
+describe("runInstall — append-only", () => {
+  test("não emite nenhum escape de redraw ou alt buffer", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
     const steps = [
       mkStep("preflight", "install.preflight.platform", true, true),
-      mkStep("install", "install.install.engine", true, true, "(1.2s)"),
+      mkStep("install", "install.install.engine", true, true),
       mkStep("verify", "install.verify.mcp", false, true),
     ];
-    const report = await runInstall(steps, envFor("en", false), w);
-    const lines = w.out().split("\n").filter((l) => l.length > 0);
-    // Opener + header + 3 step lines + closer = 6
-    expect(lines.length).toBeGreaterThanOrEqual(5);
-    expect(w.out()).toContain("My name is B3H31D");
-    expect(w.out()).toContain("[1/3]");
-    expect(w.out()).toContain("[2/3]");
-    expect(w.out()).toContain("[3/3]");
-    expect(report.succeeded).toBe(true);
+    await runInstall(steps, envFor("en", true), w);
+    const out = w.out();
+    // Sem clear screen, sem cursor home, sem alt buffer enter/leave,
+    // sem cursor up. Output é puramente append-only.
+    expect(out).not.toContain("\x1b[2J");
+    expect(out).not.toContain("\x1b[0;0H");
+    expect(out).not.toContain("\x1b[?1049h");
+    expect(out).not.toContain("\x1b[?1049l");
+    expect(out).not.toMatch(/\x1b\[\d+A/); // cursor up por N
   });
 
+  test("opener aparece UMA vez (não é reprintado por step)", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true),
+      mkStep("install", "install.install.engine", true, true),
+      mkStep("verify", "install.verify.mcp", false, true),
+    ];
+    await runInstall(steps, envFor("en", true), w);
+    const matches = w.out().match(/My name is B3H31D/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBe(1);
+  });
+
+  test("section header impresso só na primeira ocorrência da seção", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true),
+      mkStep("preflight", "install.preflight.dataDir", true, true),
+      mkStep("install", "install.install.engine", true, true),
+      mkStep("install", "install.install.start", true, true),
+    ];
+    await runInstall(steps, envFor("en", true), w);
+    const preflightHeaders = w.out().match(/· pre-flight/g);
+    const installHeaders = w.out().match(/· install/g);
+    expect(preflightHeaders!.length).toBe(1);
+    expect(installHeaders!.length).toBe(1);
+  });
+
+  test("cada step gera uma linha visível", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true, "darwin arm64"),
+      mkStep("install", "install.install.engine", true, true, "(2.1s)"),
+      mkStep("verify", "install.verify.mcp", false, true),
+    ];
+    await runInstall(steps, envFor("en", true), w);
+    const out = w.out();
+    expect(out).toContain("✓ platform");
+    expect(out).toContain("darwin arm64");
+    expect(out).toContain("✓ engine binary extracted");
+    expect(out).toContain("(2.1s)");
+    expect(out).toContain("✓ MCP server");
+  });
+});
+
+// ── lang ─────────────────────────────────────────────────────────────────────
+
+describe("runInstall — lang", () => {
   test("--lang pt-br produz PT-BR", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
+    const steps = [
+      mkStep("preflight", "install.preflight.platform", true, true),
+      mkStep("verify", "install.verify.mcp", false, true),
+    ];
+    await runInstall(steps, envFor("pt-br", true), w);
+    const out = w.out();
+    expect(out).toContain("Meu nome é B3H31D");
+    expect(out).toContain("pré-flight");
+    expect(out).toContain("verificação");
+    expect(out).toContain("Pronto. Estou de olho.");
+  });
+
+  test("default EN", async () => {
+    const { runInstall } = await import("../../src/install/runner");
+    const w = captureWriter();
     const steps = [mkStep("preflight", "install.preflight.platform", true, true)];
-    await runInstall(steps, envFor("pt-br", false), w);
-    expect(w.out()).toContain("Meu nome é B3H31D");
-    expect(w.out()).toContain("pré-flight");
-    expect(w.out()).toContain("instalado");
+    await runInstall(steps, envFor("en", true), w);
+    const out = w.out();
+    expect(out).toContain("My name is B3H31D");
+    expect(out).toContain("pre-flight");
+    expect(out).toContain("Done. I'm watching.");
   });
 });
 
@@ -88,10 +155,12 @@ describe("runInstall — short-circuit", () => {
       },
     ];
     const w = captureWriter();
-    const report = await runInstall(steps, envFor("en", false), w);
+    const report = await runInstall(steps, envFor("en", true), w);
     expect(installRan).toBe(false);
     expect(report.succeeded).toBe(false);
     expect(report.errors).toHaveLength(1);
+    // Como install não rodou, o header de install nem aparece.
+    expect(w.out()).not.toContain("· install\n");
   });
 
   test("verify NÃO aborta na primeira falha — todos rodam até o fim", async () => {
@@ -125,7 +194,7 @@ describe("runInstall — short-circuit", () => {
       },
     ];
     const w = captureWriter();
-    const report = await runInstall(steps, envFor("en", false), w);
+    const report = await runInstall(steps, envFor("en", true), w);
     expect(v2Ran).toBe(true);
     expect(v3Ran).toBe(true);
     expect(report.errors).toHaveLength(1);
@@ -141,11 +210,11 @@ describe("runInstall — closer", () => {
     const w = captureWriter();
     await runInstall(
       [mkStep("preflight", "install.preflight.platform", true, true)],
-      envFor("en", false),
+      envFor("en", true),
       w,
     );
-    expect(w.out()).toContain("installed.");
-    expect(w.out()).not.toContain("with errors");
+    expect(w.out()).toContain("Done. I'm watching.");
+    expect(w.out()).not.toContain("reported error");
   });
 
   test("error parcial → closer com label do primeiro error", async () => {
@@ -159,83 +228,15 @@ describe("runInstall — closer", () => {
         run: async () => ({ ok: false, errorReason: "timeout :7338" }),
       },
     ];
-    await runInstall(steps, envFor("en", false), w);
-    expect(w.out()).toContain("with errors");
-  });
-});
-
-// ── TTY mode — cursor magic ─────────────────────────────────────────────────
-
-describe("runInstall — TTY mode", () => {
-  test("entra e sai do alternate screen buffer no caminho TTY", async () => {
-    const { runInstall } = await import("../../src/install/runner");
-    const w = captureWriter();
-    const steps = [mkStep("preflight", "install.preflight.platform", true, true)];
     await runInstall(steps, envFor("en", true), w);
-    const out = w.out();
-    // Enter alt: \x1b[?1049h, esconde cursor: \x1b[?25l
-    expect(out).toContain("\x1b[?1049h");
-    expect(out).toContain("\x1b[?25l");
-    // Sai do alt: \x1b[?1049l, mostra cursor: \x1b[?25h
-    expect(out).toContain("\x1b[?1049l");
-    expect(out).toContain("\x1b[?25h");
-    // Ordem: enter precede leave
-    expect(out.indexOf("\x1b[?1049h")).toBeLessThan(out.indexOf("\x1b[?1049l"));
-  });
-
-  test("scrollback fica com UMA ocorrência do snapshot final, não N", async () => {
-    const { runInstall } = await import("../../src/install/runner");
-    const w = captureWriter();
-    const steps = [
-      mkStep("preflight", "install.preflight.platform", true, true),
-      mkStep("install", "install.install.engine", true, true),
-      mkStep("verify", "install.verify.mcp", false, true),
-    ];
-    await runInstall(steps, envFor("en", true), w);
-    const out = w.out();
-    // O snapshot final + closer são escritos APÓS o leave-alt-buffer.
-    // Pegamos só o que vem depois do leave — isso é o que vai pro scrollback.
-    const leaveIdx = out.indexOf("\x1b[?1049l");
-    expect(leaveIdx).toBeGreaterThan(-1);
-    const postLeave = out.slice(leaveIdx);
-    // Opener aparece UMA vez no scrollback (o final summary).
-    const openerMatches = postLeave.match(/My name is B3H31D/g);
-    expect(openerMatches).not.toBeNull();
-    expect(openerMatches!.length).toBe(1);
-  });
-
-  test("dentro do alt buffer, opener é reprintado a cada redraw", async () => {
-    const { runInstall } = await import("../../src/install/runner");
-    const w = captureWriter();
-    const steps = [
-      mkStep("preflight", "install.preflight.platform", true, true),
-      mkStep("install", "install.install.engine", true, true),
-    ];
-    await runInstall(steps, envFor("en", true), w);
-    const out = w.out();
-    // Total ocorrências do opener: initial draw + N steps redraws + final
-    // summary no buffer normal = N + 2.
-    const matches = out.match(/My name is B3H31D/g);
-    expect(matches!.length).toBe(steps.length + 2);
-  });
-
-  test("TTY com lang pt-br ainda usa voz B3 PT-BR", async () => {
-    const { runInstall } = await import("../../src/install/runner");
-    const w = captureWriter();
-    await runInstall(
-      [mkStep("preflight", "install.preflight.platform", true, true)],
-      envFor("pt-br", true),
-      w,
-    );
-    expect(w.out()).toContain("Meu nome é B3H31D");
-    expect(w.out()).toContain("Pronto. Estou de olho.");
+    expect(w.out()).toContain("Scoring engine reported error");
   });
 });
 
 // ── overrideLabel ────────────────────────────────────────────────────────────
 
 describe("overrideLabel", () => {
-  test("substitui o label padrão do step quando o run retorna overrideLabel", async () => {
+  test("substitui o label padrão sem concatenação", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const w = captureWriter();
     const steps: Step[] = [
@@ -246,17 +247,16 @@ describe("overrideLabel", () => {
         run: async () => ({ ok: true, overrideLabel: "Daemons já em execução" }),
       },
     ];
-    await runInstall(steps, envFor("pt-br", false), w);
+    await runInstall(steps, envFor("pt-br", true), w);
     expect(w.out()).toContain("Daemons já em execução");
-    // O label padrão NÃO deve aparecer junto.
-    expect(w.out()).not.toContain("daemons iniciados Daemons já em execução");
+    expect(w.out()).not.toContain("daemons iniciados Daemons");
   });
 });
 
 // ── InstallReport ────────────────────────────────────────────────────────────
 
 describe("runInstall — InstallReport", () => {
-  test("errors lista step states com status=error em ordem", async () => {
+  test("errors lista step states em ordem", async () => {
     const { runInstall } = await import("../../src/install/runner");
     const steps: Step[] = [
       {
@@ -274,7 +274,7 @@ describe("runInstall — InstallReport", () => {
       },
     ];
     const w = captureWriter();
-    const report = await runInstall(steps, envFor("en", false), w);
+    const report = await runInstall(steps, envFor("en", true), w);
     expect(report.errors.length).toBe(2);
     expect(report.errors[0]!.step.labelKey).toBe("install.verify.mcp");
     expect(report.errors[1]!.step.labelKey).toBe("install.verify.autostart");

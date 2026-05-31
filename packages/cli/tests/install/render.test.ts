@@ -1,34 +1,5 @@
 import { test, expect, describe } from "bun:test";
 
-// ── renderProgressBar (pure) ─────────────────────────────────────────────────
-
-describe("renderProgressBar", () => {
-  test("0/10 → empty bar", async () => {
-    const { renderProgressBar } = await import("../../src/install/render");
-    expect(renderProgressBar(0, 10, 20)).toBe("[                    ] 0/10 · 0%");
-  });
-
-  test("6/10 → 12/20 fill", async () => {
-    const { renderProgressBar } = await import("../../src/install/render");
-    expect(renderProgressBar(6, 10, 20)).toBe("[████████████        ] 6/10 · 60%");
-  });
-
-  test("10/10 → full bar", async () => {
-    const { renderProgressBar } = await import("../../src/install/render");
-    expect(renderProgressBar(10, 10, 20)).toBe("[████████████████████] 10/10 · 100%");
-  });
-
-  test("clamps done > total", async () => {
-    const { renderProgressBar } = await import("../../src/install/render");
-    expect(renderProgressBar(15, 10, 20)).toBe("[████████████████████] 10/10 · 100%");
-  });
-
-  test("clamps done < 0", async () => {
-    const { renderProgressBar } = await import("../../src/install/render");
-    expect(renderProgressBar(-5, 10, 20)).toBe("[                    ] 0/10 · 0%");
-  });
-});
-
 // ── renderActionStep (pure) ──────────────────────────────────────────────────
 
 describe("renderActionStep", () => {
@@ -61,58 +32,96 @@ describe("renderActionStep", () => {
   });
 });
 
-// ── renderVerifyLine (pure) ──────────────────────────────────────────────────
+// ── renderSectionHeader ──────────────────────────────────────────────────────
 
-describe("renderVerifyLine", () => {
-  test("working (no color)", async () => {
-    const { renderVerifyLine } = await import("../../src/install/render");
-    expect(
-      renderVerifyLine({
-        status: "working",
-        label: "MCP server",
-        statusText: "working",
-        labelColumnWidth: 16,
-        color: false,
-      }),
-    ).toBe("    MCP server       [working]");
+describe("renderSectionHeader", () => {
+  test("sem cor", async () => {
+    const { renderSectionHeader } = await import("../../src/install/render");
+    expect(renderSectionHeader("pre-flight", false)).toBe("  · pre-flight");
   });
 
-  test("error (no color)", async () => {
-    const { renderVerifyLine } = await import("../../src/install/render");
-    expect(
-      renderVerifyLine({
-        status: "error",
-        label: "Scoring engine",
-        statusText: "error",
-        labelColumnWidth: 16,
-        color: false,
-      }),
-    ).toBe("    Scoring engine   [error]");
+  test("com cor usa bronze no dot", async () => {
+    const { renderSectionHeader, BRONZE } = await import("../../src/install/render");
+    const out = renderSectionHeader("pre-flight", true);
+    expect(out).toContain(BRONZE);
+    expect(out).toContain("pre-flight");
+  });
+});
+
+// ── renderStepCompletion ─────────────────────────────────────────────────────
+
+describe("renderStepCompletion", () => {
+  test("step ok → 1 linha", async () => {
+    const { renderStepCompletion } = await import("../../src/install/render");
+    const state = {
+      step: {
+        section: "install" as const,
+        labelKey: "install.install.engine",
+        isAction: true,
+        run: async () => ({ ok: true }),
+      },
+      status: "ok" as const,
+      result: { ok: true, detail: "(2.1s)" },
+    };
+    const lines = renderStepCompletion(state, { tty: true, color: false, lang: "en", termWidth: 80 });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("✓");
+    expect(lines[0]).toContain("engine binary extracted");
+    expect(lines[0]).toContain("(2.1s)");
   });
 
-  test("pending shows ellipsis", async () => {
-    const { renderVerifyLine } = await import("../../src/install/render");
-    expect(
-      renderVerifyLine({
-        status: "pending",
-        label: "Autostart",
-        statusText: "…",
-        labelColumnWidth: 16,
-        color: false,
-      }),
-    ).toBe("    Autostart        […]");
+  test("step error com reason → 2 linhas", async () => {
+    const { renderStepCompletion } = await import("../../src/install/render");
+    const state = {
+      step: {
+        section: "verify" as const,
+        labelKey: "install.verify.engine",
+        isAction: false,
+        run: async () => ({ ok: false }),
+      },
+      status: "error" as const,
+      result: { ok: false, errorReason: "/health timeout :7338" },
+    };
+    const lines = renderStepCompletion(state, { tty: true, color: false, lang: "en", termWidth: 80 });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("✗");
+    expect(lines[1]).toContain("reason: /health timeout :7338");
   });
 
-  test("error with color uses RED", async () => {
-    const { renderVerifyLine, RED } = await import("../../src/install/render");
-    const out = renderVerifyLine({
-      status: "error",
-      label: "X",
-      statusText: "error",
-      labelColumnWidth: 4,
-      color: true,
-    });
-    expect(out).toContain(RED);
+  test("step error com reason + seeAlso → 3 linhas", async () => {
+    const { renderStepCompletion } = await import("../../src/install/render");
+    const state = {
+      step: {
+        section: "verify" as const,
+        labelKey: "install.verify.engine",
+        isAction: false,
+        run: async () => ({ ok: false }),
+      },
+      status: "error" as const,
+      result: { ok: false, errorReason: "A", errorSeeAlso: "~/.beheld/install.log" },
+    };
+    const lines = renderStepCompletion(state, { tty: true, color: false, lang: "en", termWidth: 80 });
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain("reason: A");
+    expect(lines[2]).toContain("see:");
+    expect(lines[2]).toContain("~/.beheld/install.log");
+  });
+
+  test("overrideLabel substitui labelKey", async () => {
+    const { renderStepCompletion } = await import("../../src/install/render");
+    const state = {
+      step: {
+        section: "install" as const,
+        labelKey: "install.install.start",
+        isAction: true,
+        run: async () => ({ ok: true }),
+      },
+      status: "ok" as const,
+      result: { ok: true, overrideLabel: "Daemons já em execução" },
+    };
+    const lines = renderStepCompletion(state, { tty: true, color: false, lang: "pt-br", termWidth: 80 });
+    expect(lines[0]).toContain("Daemons já em execução");
+    expect(lines[0]).not.toContain("daemons iniciados");
   });
 });
 

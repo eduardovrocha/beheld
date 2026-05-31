@@ -50,11 +50,6 @@ const DICT: Record<string, Entry> = {
   "install.section.install": { en: "install", "pt-br": "instalação" },
   "install.section.verify": { en: "verification", "pt-br": "verificação" },
 
-  // Status labels (só na verify)
-  "install.status.working": { en: "working", "pt-br": "funcionando" },
-  "install.status.error": { en: "error", "pt-br": "error" },
-  "install.status.pending": { en: "…", "pt-br": "…" },
-
   // Pre-flight labels
   "install.preflight.platform": { en: "platform", "pt-br": "plataforma" },
   "install.preflight.dataDir": { en: "~/.beheld/ available", "pt-br": "~/.beheld/ disponível" },
@@ -88,14 +83,6 @@ const DICT: Record<string, Entry> = {
   // Detail/error meta
   "install.error.reason": { en: "reason", "pt-br": "motivo" },
   "install.error.see": { en: "see", "pt-br": "ver" },
-
-  // Não-TTY header
-  "install.nontty.header": { en: "B3H31D :: install", "pt-br": "B3H31D :: install" },
-  "install.nontty.done.ok": { en: "B3H31D :: installed.", "pt-br": "B3H31D :: instalado." },
-  "install.nontty.done.partial": {
-    en: "B3H31D :: installed, with errors.",
-    "pt-br": "B3H31D :: instalado, com erros.",
-  },
 };
 
 /**

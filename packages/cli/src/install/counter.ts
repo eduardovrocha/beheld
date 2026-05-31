@@ -25,8 +25,24 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-export const REGISTER_URL = "https://beheld.dev/api/install/register";
+/**
+ * Base do endpoint público do beheld. Override via BEHELD_API_URL pra testes
+ * locais contra o container Rails (ex: http://localhost:3000) ou ambiente
+ * de staging. Em produção, sem override, vai pra beheld.dev.
+ */
+export const DEFAULT_API_BASE = "https://beheld.dev";
 export const REQUEST_TIMEOUT_MS = 3_000;
+
+export function getApiBase(): string {
+  const override = process.env.BEHELD_API_URL;
+  if (!override) return DEFAULT_API_BASE;
+  // Strip trailing slash pra concatenação ficar limpa.
+  return override.replace(/\/+$/, "");
+}
+
+export function registerUrl(): string {
+  return `${getApiBase()}/api/install/register`;
+}
 
 export interface RegisterPayload {
   id: string;
@@ -116,7 +132,7 @@ export async function registerFirstInstall(
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const res = await fetchImpl(REGISTER_URL, {
+    const res = await fetchImpl(registerUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

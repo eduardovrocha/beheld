@@ -6,12 +6,14 @@ import * as os from "os";
 let tmpDir: string;
 const origDataDir = process.env.BEHELD_DATA_DIR;
 const origNoTel = process.env.BEHELD_NO_TELEMETRY;
+const origApiUrl = process.env.BEHELD_API_URL;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "beheld-counter-"));
   process.env.BEHELD_DATA_DIR = tmpDir;
   fs.mkdirSync(path.join(tmpDir, ".beheld"), { recursive: true, mode: 0o700 });
   delete process.env.BEHELD_NO_TELEMETRY;
+  delete process.env.BEHELD_API_URL;
 });
 
 afterEach(() => {
@@ -19,6 +21,8 @@ afterEach(() => {
   else process.env.BEHELD_DATA_DIR = origDataDir;
   if (origNoTel === undefined) delete process.env.BEHELD_NO_TELEMETRY;
   else process.env.BEHELD_NO_TELEMETRY = origNoTel;
+  if (origApiUrl === undefined) delete process.env.BEHELD_API_URL;
+  else process.env.BEHELD_API_URL = origApiUrl;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -175,6 +179,50 @@ describe("registerFirstInstall", () => {
     await registerFirstInstall(validPayload, { fetchImpl: fakeFetch as never });
     const headers = capturedHeaders as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
+  });
+});
+
+// ── BEHELD_API_URL override ──────────────────────────────────────────────────
+
+describe("getApiBase / registerUrl", () => {
+  test("default → beheld.dev", async () => {
+    const { getApiBase, registerUrl } = await import("../../src/install/counter");
+    expect(getApiBase()).toBe("https://beheld.dev");
+    expect(registerUrl()).toBe("https://beheld.dev/api/install/register");
+  });
+
+  test("override via BEHELD_API_URL", async () => {
+    process.env.BEHELD_API_URL = "http://localhost:3000";
+    const { getApiBase, registerUrl } = await import("../../src/install/counter");
+    expect(getApiBase()).toBe("http://localhost:3000");
+    expect(registerUrl()).toBe("http://localhost:3000/api/install/register");
+  });
+
+  test("trailing slash no override é removida", async () => {
+    process.env.BEHELD_API_URL = "http://localhost:3000///";
+    const { registerUrl } = await import("../../src/install/counter");
+    expect(registerUrl()).toBe("http://localhost:3000/api/install/register");
+  });
+
+  test("BEHELD_API_URL vazio cai pro default", async () => {
+    process.env.BEHELD_API_URL = "";
+    const { getApiBase } = await import("../../src/install/counter");
+    expect(getApiBase()).toBe("https://beheld.dev");
+  });
+
+  test("POST usa a URL derivada do BEHELD_API_URL", async () => {
+    process.env.BEHELD_API_URL = "http://localhost:3000";
+    const { registerFirstInstall } = await import("../../src/install/counter");
+    let capturedUrl: string | undefined;
+    const fakeFetch = async (url: string) => {
+      capturedUrl = url;
+      return { ok: true, status: 204 } as Response;
+    };
+    await registerFirstInstall(
+      { id: "550e8400-e29b-41d4-a716-446655440000", os: "macos", version: "0.3.2" },
+      { fetchImpl: fakeFetch as never },
+    );
+    expect(capturedUrl).toBe("http://localhost:3000/api/install/register");
   });
 });
 

@@ -238,7 +238,7 @@ export function claudeCommandPath(base = homedir()): string {
 /** Bump whenever SLASH_COMMAND_CONTENT changes in a way that should override
  *  previously-installed copies. The installer rewrites any file whose
  *  detectable version is below this value. */
-export const SLASH_COMMAND_VERSION = "5";
+export const SLASH_COMMAND_VERSION = "6";
 
 /**
  * Body of `~/.claude/commands/beheld.md`. Exported so tests can pin it as a
@@ -291,8 +291,19 @@ Regra 1 — Modo conversacional b3:
   → Voz: terceira pessoa ("B3H31D percebe que...", "B3H31D entende que...")
   → Testemunha: relata o observado, nunca julga o dev
   → Sem listas, sem cabeçalhos, sem blocos de código
-  → Sem itálico em nenhum momento — tipografia ereta apenas
   → Nenhum conteúdo fora do template acima — apenas a decoração e o parágrafo
+
+  → TIPOGRAFIA — REGRA ABSOLUTA: ZERO ITÁLICO em qualquer parte da resposta.
+    Proibições explícitas:
+      - NUNCA usar asterisco simples *palavra* — isso vira itálico no render
+      - NUNCA usar underscore _palavra_ — também vira itálico
+      - NUNCA usar blockquote (>) — o CLI renderiza blockquote em itálico
+      - NUNCA usar tags HTML <em>, <i>, ou qualquer marcação equivalente
+    Permitido apenas:
+      - **palavra** (asterisco DUPLO) para o nome B3H31D no template
+      - texto plano, sem nenhuma ênfase tipográfica
+    Se quiser destacar um termo, escreva-o entre aspas: "como assim".
+    Nunca por itálico. Tipografia ereta é parte da identidade do B3H31D.
 
 Regra 2 — Import com URL:
   Se "$ARGUMENTS" começar com "import " (com espaço, case-sensitive):

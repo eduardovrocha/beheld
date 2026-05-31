@@ -71,7 +71,7 @@ describe("installClaudeSlashCommand — versioning", () => {
     const content = readFileSync(file, "utf-8");
     expect(content.startsWith("---\n")).toBe(true);
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(SLASH_COMMAND_VERSION).toBe("5");
+    expect(SLASH_COMMAND_VERSION).toBe("6");
   });
 
   test("test_slash_command_version_1_overwritten_on_init", async () => {
@@ -93,7 +93,7 @@ describe("installClaudeSlashCommand — versioning", () => {
 
     const content = readFileSync(file, "utf-8");
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(content).toMatch(/^---\nversion: "5"\n---\n/);
+    expect(content).toMatch(/^---\nversion: "6"\n---\n/);
     // Old greeting and old "Retorne a saudação" trailer must be gone.
     expect(content).not.toContain("sou a testemunha da evolução");
     expect(content).not.toContain("Retorne a saudação");
@@ -107,7 +107,7 @@ describe("installClaudeSlashCommand — versioning", () => {
 
     const content = readFileSync(file, "utf-8");
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(content).toMatch(/^---\nversion: "5"\n---\n/);
+    expect(content).toMatch(/^---\nversion: "6"\n---\n/);
     // v3 had no stack routing — v4 must introduce it.
     expect(content).toContain("Regra 4 — Stack");
   });
@@ -152,8 +152,8 @@ describe("installClaudeSlashCommand — versioning", () => {
     expect(content).toContain("**B3H31D** [resposta na voz de testemunha");
     // Decoração + linha vazia + parágrafo do B3H31D, sem prefixo de blockquote.
     expect(content).toMatch(/-\(·⊙·\)-\n\s*\n\s*\*\*B3H31D\*\*/);
-    // v5: explicitamente proíbe itálico.
-    expect(content).toContain("Sem itálico");
+    // v6: regra absoluta contra itálico — citação literal das proibições.
+    expect(content).toContain("ZERO ITÁLICO");
   });
 
   test("test_slash_command_content_contains_signal_symbol", async () => {
@@ -168,13 +168,13 @@ describe("installClaudeSlashCommand — versioning", () => {
     expect(content).not.toContain("─ ( · · · ⊙ · · · ) ─");
   });
 
-  test("test_slash_command_content_contains_version_5_frontmatter", async () => {
+  test("test_slash_command_content_contains_version_6_frontmatter", async () => {
     const file = tmpFile("beheld.md");
     await installClaudeSlashCommand(file);
 
     const content = readFileSync(file, "utf-8");
     expect(content.startsWith("---\n")).toBe(true);
-    expect(content).toContain('version: "5"');
+    expect(content).toContain('version: "6"');
   });
 
   test("test_slash_command_content_contains_greeting_instruction", async () => {
@@ -246,12 +246,19 @@ describe("installClaudeSlashCommand — versioning", () => {
     expect(onDisk).toBe(SLASH_COMMAND_CONTENT);
 
     expect(SLASH_COMMAND_CONTENT).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(SLASH_COMMAND_CONTENT).toMatch(/^---\nversion: "5"\n---\n/);
+    expect(SLASH_COMMAND_CONTENT).toMatch(/^---\nversion: "6"\n---\n/);
     expect(SLASH_COMMAND_CONTENT).toContain("B3H31D");
     // v5: invariants visuais
     expect(SLASH_COMMAND_CONTENT).toContain("-(·⊙·)-");
     expect(SLASH_COMMAND_CONTENT).not.toContain("> ─");
-    expect(SLASH_COMMAND_CONTENT).toContain("Sem itálico");
+    // v6: regra absoluta contra itálico — proibições explícitas para cada
+    // forma de marcação que poderia virar itálico no render.
+    expect(SLASH_COMMAND_CONTENT).toContain("ZERO ITÁLICO");
+    expect(SLASH_COMMAND_CONTENT).toContain("asterisco simples");
+    expect(SLASH_COMMAND_CONTENT).toContain("underscore");
+    expect(SLASH_COMMAND_CONTENT).toContain("blockquote");
+    expect(SLASH_COMMAND_CONTENT).toContain("<em>");
+    expect(SLASH_COMMAND_CONTENT).toContain("aspas");
     // Five routing rules: "Regra 1" through "Regra 5".
     expect(SLASH_COMMAND_CONTENT).toContain("Regra 1");
     expect(SLASH_COMMAND_CONTENT).toContain("Regra 2");

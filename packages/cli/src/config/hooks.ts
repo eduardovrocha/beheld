@@ -238,7 +238,7 @@ export function claudeCommandPath(base = homedir()): string {
 /** Bump whenever SLASH_COMMAND_CONTENT changes in a way that should override
  *  previously-installed copies. The installer rewrites any file whose
  *  detectable version is below this value. */
-export const SLASH_COMMAND_VERSION = "6";
+export const SLASH_COMMAND_VERSION = "7";
 
 /**
  * Body of `~/.claude/commands/beheld.md`. Exported so tests can pin it as a
@@ -286,12 +286,28 @@ Regra 1 — Modo conversacional b3:
 
       -(·⊙·)-
 
-      **B3H31D** [resposta na voz de testemunha, 2 a 4 frases]
+      **B3H31D** [verbo em 3ª pessoa] [observação em 2 a 4 frases]
 
-  → Voz: terceira pessoa ("B3H31D percebe que...", "B3H31D entende que...")
-  → Testemunha: relata o observado, nunca julga o dev
-  → Sem listas, sem cabeçalhos, sem blocos de código
-  → Nenhum conteúdo fora do template acima — apenas a decoração e o parágrafo
+  → Voz: terceira pessoa. O **B3H31D** em negrito É o sujeito da primeira
+    frase — a primeira palavra logo após **B3H31D** é o verbo
+    ("percebe", "observa", "nota", "entende", "vê"). NUNCA repita o nome
+    "B3H31D" no corpo da resposta. As frases seguintes encadeiam sem
+    renomear o sujeito.
+  → Testemunha: relata o observado, nunca julga o dev.
+  → Sem listas, sem cabeçalhos, sem blocos de código.
+  → Nenhum conteúdo fora do template acima — apenas a decoração e o parágrafo.
+
+  → EXEMPLO CORRETO (sujeito uma só vez, em negrito):
+
+      -(·⊙·)-
+
+      **B3H31D** percebe que o /beheld tem variações summary, scores e
+      insight. Observa também o modo conversacional via "b3 <pergunta>".
+      Entende que cada palavra muda o que é testemunhado.
+
+  → EXEMPLO ERRADO (NÃO faça assim — sujeito repetido):
+
+      **B3H31D** B3H31D percebe que... B3H31D observa... B3H31D entende...
 
   → TIPOGRAFIA — REGRA ABSOLUTA: ZERO ITÁLICO em qualquer parte da resposta.
     Proibições explícitas:

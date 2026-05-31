@@ -71,7 +71,7 @@ describe("installClaudeSlashCommand — versioning", () => {
     const content = readFileSync(file, "utf-8");
     expect(content.startsWith("---\n")).toBe(true);
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(SLASH_COMMAND_VERSION).toBe("6");
+    expect(SLASH_COMMAND_VERSION).toBe("7");
   });
 
   test("test_slash_command_version_1_overwritten_on_init", async () => {
@@ -93,7 +93,7 @@ describe("installClaudeSlashCommand — versioning", () => {
 
     const content = readFileSync(file, "utf-8");
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(content).toMatch(/^---\nversion: "6"\n---\n/);
+    expect(content).toMatch(/^---\nversion: "7"\n---\n/);
     // Old greeting and old "Retorne a saudação" trailer must be gone.
     expect(content).not.toContain("sou a testemunha da evolução");
     expect(content).not.toContain("Retorne a saudação");
@@ -107,7 +107,7 @@ describe("installClaudeSlashCommand — versioning", () => {
 
     const content = readFileSync(file, "utf-8");
     expect(content).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(content).toMatch(/^---\nversion: "6"\n---\n/);
+    expect(content).toMatch(/^---\nversion: "7"\n---\n/);
     // v3 had no stack routing — v4 must introduce it.
     expect(content).toContain("Regra 4 — Stack");
   });
@@ -149,7 +149,8 @@ describe("installClaudeSlashCommand — versioning", () => {
     const content = readFileSync(file, "utf-8");
     // v5: removido o blockquote (>) para evitar render italico no CLI.
     expect(content).toContain("-(·⊙·)-");
-    expect(content).toContain("**B3H31D** [resposta na voz de testemunha");
+    // v7: template usa "[verbo em 3ª pessoa]" porque o bold B3H31D é o sujeito.
+    expect(content).toContain("**B3H31D** [verbo em 3ª pessoa]");
     // Decoração + linha vazia + parágrafo do B3H31D, sem prefixo de blockquote.
     expect(content).toMatch(/-\(·⊙·\)-\n\s*\n\s*\*\*B3H31D\*\*/);
     // v6: regra absoluta contra itálico — citação literal das proibições.
@@ -162,19 +163,21 @@ describe("installClaudeSlashCommand — versioning", () => {
 
     const content = readFileSync(file, "utf-8");
     expect(content).toContain("-(·⊙·)-");
+    // v7: a decoração aparece 2 vezes — uma no template e outra no EXEMPLO
+    // CORRETO. Esse é o número fixo esperado; mais ou menos indica drift.
     const occurrences = content.split("-(·⊙·)-").length - 1;
-    expect(occurrences).toBe(1);
+    expect(occurrences).toBe(2);
     // Garantir que a decoração antiga não vazou.
     expect(content).not.toContain("─ ( · · · ⊙ · · · ) ─");
   });
 
-  test("test_slash_command_content_contains_version_6_frontmatter", async () => {
+  test("test_slash_command_content_contains_version_7_frontmatter", async () => {
     const file = tmpFile("beheld.md");
     await installClaudeSlashCommand(file);
 
     const content = readFileSync(file, "utf-8");
     expect(content.startsWith("---\n")).toBe(true);
-    expect(content).toContain('version: "6"');
+    expect(content).toContain('version: "7"');
   });
 
   test("test_slash_command_content_contains_greeting_instruction", async () => {
@@ -246,7 +249,7 @@ describe("installClaudeSlashCommand — versioning", () => {
     expect(onDisk).toBe(SLASH_COMMAND_CONTENT);
 
     expect(SLASH_COMMAND_CONTENT).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
-    expect(SLASH_COMMAND_CONTENT).toMatch(/^---\nversion: "6"\n---\n/);
+    expect(SLASH_COMMAND_CONTENT).toMatch(/^---\nversion: "7"\n---\n/);
     expect(SLASH_COMMAND_CONTENT).toContain("B3H31D");
     // v5: invariants visuais
     expect(SLASH_COMMAND_CONTENT).toContain("-(·⊙·)-");
@@ -259,6 +262,15 @@ describe("installClaudeSlashCommand — versioning", () => {
     expect(SLASH_COMMAND_CONTENT).toContain("blockquote");
     expect(SLASH_COMMAND_CONTENT).toContain("<em>");
     expect(SLASH_COMMAND_CONTENT).toContain("aspas");
+    // v7: regra "sujeito uma só vez" — bold B3H31D é o sujeito da primeira
+    // frase; corpo da resposta NUNCA repete o nome. Usamos regex porque o
+    // prompt tem line wrap que separa "nome" e "B3H31D" em linhas distintas.
+    expect(SLASH_COMMAND_CONTENT).toMatch(/NUNCA repita o nome\s+"B3H31D" no corpo/);
+    expect(SLASH_COMMAND_CONTENT).toContain("EXEMPLO CORRETO");
+    expect(SLASH_COMMAND_CONTENT).toContain("EXEMPLO ERRADO");
+    // O exemplo errado contém o anti-padrão exato pra ficar visível na revisão
+    // e pro modelo reconhecer e evitar.
+    expect(SLASH_COMMAND_CONTENT).toContain("**B3H31D** B3H31D percebe");
     // Five routing rules: "Regra 1" through "Regra 5".
     expect(SLASH_COMMAND_CONTENT).toContain("Regra 1");
     expect(SLASH_COMMAND_CONTENT).toContain("Regra 2");

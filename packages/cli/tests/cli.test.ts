@@ -506,9 +506,11 @@ describe("selfHealClaudeIntegration", () => {
     expect(healed.slashCommandRestored).toBe(true);
     expect(healed.mcpServerRestored).toBe(true);
 
-    // v4 slash command content — frontmatter + greeting + routing rules.
+    // Slash command content — frontmatter + greeting + routing rules.
+    // Pin dinâmico evita atualização manual a cada bump da versão.
     const slashContent = readFileSync(commandFile(), "utf8");
-    expect(slashContent).toContain('version: "4"');
+    const { SLASH_COMMAND_VERSION } = await import("../src/config/hooks");
+    expect(slashContent).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
     expect(slashContent).toContain("B3H31D");
     const cfg = JSON.parse(readFileSync(claudeJson(), "utf8"));
     expect(cfg.mcpServers?.beheld?.args).toEqual(["server", "--stdio"]);

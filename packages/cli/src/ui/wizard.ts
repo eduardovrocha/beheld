@@ -224,10 +224,37 @@ async function screen4(
   const { buildInstallSteps } = await import("../install/steps");
   const { runInstall } = await import("../install/runner");
   const { detectRenderEnv } = await import("../install/render");
+  const { isFirstInstall, isOptedOut, getRegisterPayload, registerFirstInstall } =
+    await import("../install/counter");
+  const { VERSION } = await import("../index");
 
   const steps = buildInstallSteps(environments, actions);
   const env = detectRenderEnv({ lang });
-  await runInstall(steps, env);
+
+  // Contador de instalações cross-repo. Só na PRIMEIRA execução do init e
+  // se o usuário não optou por desligar via BEHELD_NO_TELEMETRY. Payload
+  // construído ANTES de runInstall para que o disclosure mostre o id real
+  // que vai ser enviado.
+  let counterPayload: { id: string; os: string; version: string } | undefined;
+  let counterPromise: Promise<unknown> | undefined;
+  if (isFirstInstall() && !isOptedOut()) {
+    const payload = getRegisterPayload(VERSION);
+    if (payload !== null) {
+      counterPayload = payload;
+      // Fire-and-forget — não bloqueia o resto do install. Capturamos a
+      // promise pra dar await no fim, garantindo que o processo não morre
+      // antes do POST resolver/timeout (e que o arquivo install-id é gravado).
+      counterPromise = registerFirstInstall(payload);
+    }
+  }
+
+  await runInstall(steps, env, undefined, { counterPayload });
+
+  if (counterPromise) {
+    // Espera o POST resolver (ou timeout em 3s). registerFirstInstall nunca
+    // throw — sempre retorna { sent, reason }. Não fazemos nada com o resultado.
+    await counterPromise.catch(() => undefined);
+  }
 
   rl.close();
 }

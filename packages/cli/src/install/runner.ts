@@ -1,6 +1,7 @@
 import { t } from "../i18n/install";
 import {
   renderCloser,
+  renderCounterDisclosure,
   renderOpener,
   renderSectionHeader,
   renderStepCompletion,
@@ -42,15 +43,34 @@ function isSectionBlocking(section: Section): boolean {
  * O ato de ver as linhas aparecerem é o feedback de progresso. Em ~3 segundos
  * de install, isso é mais legível que uma barra animada.
  */
+export interface RunInstallOpts {
+  /**
+   * Disclosure do contador de instalações. Quando presente, é impresso entre
+   * o opener e o primeiro `· pre-flight`. O caller decide se inclui ou não
+   * (vê BEHELD_NO_TELEMETRY, isFirstInstall, etc.); o runner só renderiza.
+   */
+  counterPayload?: { id: string; os: string; version: string };
+}
+
 export async function runInstall(
   steps: Step[],
   env: RenderEnv,
   writer: Writer = DEFAULT_WRITER,
+  opts: RunInstallOpts = {},
 ): Promise<InstallReport> {
   const states = initialStates(steps);
 
   // Opener — mesmo formato em TTY e não-TTY.
   writer.write(`${renderOpener(env)}\n\n`);
+
+  // Counter disclosure — só na primeira instalação e fora de opt-out.
+  // Decisão tomada pelo caller; aqui só renderiza se o payload veio.
+  if (opts.counterPayload) {
+    for (const line of renderCounterDisclosure(opts.counterPayload, env)) {
+      writer.write(`${line}\n`);
+    }
+    writer.write("\n");
+  }
 
   const printedSections = new Set<Section>();
   let abortRemainingBlocking = false;

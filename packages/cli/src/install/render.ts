@@ -98,6 +98,27 @@ export function renderOpener(env: RenderEnv): string {
   return `${glyph}${t("install.opener", env.lang)}`;
 }
 
+/**
+ * Disclosure visível do contador. Mostrado UMA vez, na primeira instalação,
+ * entre o opener e o primeiro `· pre-flight`. Imprime o payload literal
+ * (id + os + version) pro usuário ver exatamente o que está sendo enviado.
+ *
+ * Quando BEHELD_NO_TELEMETRY=1, esta função não deve ser chamada — o
+ * caller filtra antes.
+ */
+export function renderCounterDisclosure(
+  payload: { id: string; os: string; version: string },
+  env: RenderEnv,
+): string[] {
+  const glyph = `  ${colorize("⦿", BRONZE, env.color)}  `;
+  const payloadJson = `{ id: ${payload.id}, os: ${payload.os}, version: ${payload.version} }`;
+  return [
+    `${glyph}${t("counter.heading", env.lang)}`,
+    `     ${dimize(`${t("counter.sent", env.lang)}: ${payloadJson}`, env.color)}`,
+    `     ${dimize(t("counter.disable", env.lang), env.color)}`,
+  ];
+}
+
 export function renderCloser(report: InstallReport, env: RenderEnv): string {
   const glyph = `  ${colorize("⦿", BRONZE, env.color)}  `;
   if (report.succeeded) {

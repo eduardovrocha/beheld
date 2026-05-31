@@ -83,6 +83,19 @@ const DICT: Record<string, Entry> = {
   // Detail/error meta
   "install.error.reason": { en: "reason", "pt-br": "motivo" },
   "install.error.see": { en: "see", "pt-br": "ver" },
+
+  // Counter — primeira instalação. Aparece UMA vez na vida, entre opener
+  // e primeiro `· pre-flight`. Quando BEHELD_NO_TELEMETRY=1 está setado,
+  // nada disso é impresso (opt-out invisível).
+  "counter.heading": {
+    en: "Registering first install with beheld.dev",
+    "pt-br": "Registrando primeira instalação com beheld.dev",
+  },
+  "counter.sent": { en: "sent", "pt-br": "enviado" },
+  "counter.disable": {
+    en: "to disable in future: BEHELD_NO_TELEMETRY=1",
+    "pt-br": "desliga futuras: BEHELD_NO_TELEMETRY=1",
+  },
 };
 
 /**

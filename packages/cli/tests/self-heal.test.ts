@@ -49,7 +49,10 @@ describe("selfHealCommand", () => {
     await selfHealCommand({ base });
     const file = join(base, ".claude", "commands", "beheld.md");
     expect(existsSync(file)).toBe(true);
-    expect(readFileSync(file, "utf8")).toContain('version: "4"');
+    // Pin dinâmico: usa SLASH_COMMAND_VERSION em vez de literal, evita
+    // ter que atualizar este teste a cada bump da versão do slash command.
+    const { SLASH_COMMAND_VERSION } = await import("../src/config/hooks");
+    expect(readFileSync(file, "utf8")).toContain(`version: "${SLASH_COMMAND_VERSION}"`);
   });
 
   test("restores ~/.claude.json MCP entry when opted in and missing", async () => {

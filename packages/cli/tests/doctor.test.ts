@@ -609,3 +609,185 @@ describe("takeProcessingSnapshot", () => {
     expect(s.profileDbWal).toBeNull();
   });
 });
+
+// ── parseLaunchctlList (pure) ────────────────────────────────────────────────
+
+describe("parseLaunchctlList", () => {
+  test("extracts PID when present", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.parseLaunchctlList(`{ "PID" = 12345; "LastExitStatus" = 0; }`),
+    ).toEqual({ pid: 12345 });
+  });
+
+  test("returns empty when loaded but no PID (not running)", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseLaunchctlList(`{ "LastExitStatus" = 0; }`)).toEqual({});
+  });
+
+  test("returns empty for empty stdout", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseLaunchctlList("")).toEqual({});
+  });
+
+  test("returns empty for unexpected format", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.parseLaunchctlList("PID=12345")).toEqual({});
+  });
+});
+
+// ── evaluateSystemdState (pure) ──────────────────────────────────────────────
+
+describe("evaluateSystemdState", () => {
+  test("enabled + active → {true, true}", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateSystemdState("enabled\n", "active\n")).toEqual({
+      enabled: true,
+      active: true,
+    });
+  });
+
+  test("enabled + inactive → {true, false}", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateSystemdState("enabled\n", "inactive\n")).toEqual({
+      enabled: true,
+      active: false,
+    });
+  });
+
+  test("disabled + active → {false, true}", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateSystemdState("disabled\n", "active\n")).toEqual({
+      enabled: false,
+      active: true,
+    });
+  });
+
+  test("static counts as enabled", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateSystemdState("static\n", "active\n")).toEqual({
+      enabled: true,
+      active: true,
+    });
+  });
+
+  test("masked + inactive → {false, false}", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.evaluateSystemdState("masked\n", "inactive\n")).toEqual({
+      enabled: false,
+      active: false,
+    });
+  });
+});
+
+// ── findSignaturesInLog (pure) ───────────────────────────────────────────────
+
+describe("findSignaturesInLog", () => {
+  test("empty text → []", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.findSignaturesInLog("", _internal.LOG_SIGNATURES)).toEqual([]);
+  });
+
+  test("no signatures present → []", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.findSignaturesInLog("foo\nbar\n", _internal.LOG_SIGNATURES)).toEqual([]);
+  });
+
+  test("one signature, two occurrences", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const hits = _internal.findSignaturesInLog(
+      "... Errno 48 ... and then again Errno 48 ...",
+      _internal.LOG_SIGNATURES,
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ pattern: "Errno 48", count: 2 });
+    expect(hits[0].hint).toBeTruthy();
+  });
+
+  test("two signatures keep catalog order", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    // Reverse the order in the text — output must follow the SIGNATURES order,
+    // not the order in which they appear in the log.
+    const hits = _internal.findSignaturesInLog(
+      "engine trigger timeout — second.\nFirst line had Errno 48.\nAnother engine trigger timeout.",
+      _internal.LOG_SIGNATURES,
+    );
+    expect(hits.map((h: { pattern: string }) => h.pattern)).toEqual([
+      "Errno 48",
+      "engine trigger timeout",
+    ]);
+    expect(hits[0].count).toBe(1);
+    expect(hits[1].count).toBe(2);
+  });
+
+  test("case-sensitive — 'errno 48' (lowercase) does not match 'Errno 48'", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(
+      _internal.findSignaturesInLog("errno 48 in lowercase", _internal.LOG_SIGNATURES),
+    ).toEqual([]);
+  });
+});
+
+// ── readLogTail (integration, tmpdir) ────────────────────────────────────────
+
+describe("readLogTail", () => {
+  test("missing file → null", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    expect(_internal.readLogTail(path.join(tmpDir, "nonexistent.log"), 1024)).toBeNull();
+  });
+
+  test("file smaller than maxBytes → returns full content", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const fp = path.join(tmpDir, "small.log");
+    fs.writeFileSync(fp, "hello world\n");
+    expect(_internal.readLogTail(fp, 1024)).toBe("hello world\n");
+  });
+
+  test("file larger than maxBytes → returns last maxBytes bytes", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const fp = path.join(tmpDir, "big.log");
+    // 5000 bytes total, "TAIL" stamped exactly at the last 4 bytes.
+    const buf = Buffer.alloc(5000, "x");
+    Buffer.from("TAIL").copy(buf, 4996);
+    fs.writeFileSync(fp, buf);
+    const tail = _internal.readLogTail(fp, 100);
+    expect(tail).not.toBeNull();
+    expect(tail!.length).toBe(100);
+    expect(tail!.endsWith("TAIL")).toBe(true);
+  });
+});
+
+// ── checkLogSignatures (integration via BEHELD_DATA_DIR) ─────────────────────
+
+describe("checkLogSignatures", () => {
+  test("log ausente → ok", async () => {
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.checkLogSignatures();
+    expect(r.severity).toBe("ok");
+    expect(r.lines.join(" ")).toContain("ainda não criado");
+  });
+
+  test("log limpo → ok", async () => {
+    fs.writeFileSync(path.join(tmpDir, ".beheld", "daemon.log"), "tudo normal aqui\n");
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.checkLogSignatures();
+    expect(r.severity).toBe("ok");
+    expect(r.lines.join(" ")).toContain("Nenhuma assinatura conhecida");
+  });
+
+  test("log com Errno 48 → warn + hint da primeira assinatura", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, ".beheld", "daemon.log"),
+      "ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 7338): address already in use\n".repeat(
+        12,
+      ),
+    );
+    const { _internal } = await import("../src/commands/doctor");
+    const r = _internal.checkLogSignatures();
+    expect(r.severity).toBe("warn");
+    const joined = r.lines.join(" ");
+    expect(joined).toContain("Errno 48");
+    expect(joined).toContain("×12");
+    expect(r.hint).toContain("Socket preso");
+  });
+});

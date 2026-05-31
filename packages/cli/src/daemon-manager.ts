@@ -16,6 +16,15 @@ const pidFile = () => join(beheldDir(), "daemon.pid");
 const logFile = () => join(beheldDir(), "daemon.log");
 const binaryPath = () => join(homedir(), ".local", "bin", "beheld");
 
+// Autostart identifiers — exported so other commands (e.g. doctor) can probe
+// the LaunchAgent / systemd unit without duplicating the names.
+export const LAUNCH_AGENT_LABEL = "com.beheld.daemon";
+export const SYSTEMD_SERVICE_NAME = "beheld.service";
+export const launchAgentPlistPath = (): string =>
+  join(homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+export const systemdUnitPath = (): string =>
+  join(homedir(), ".config", "systemd", "user", SYSTEMD_SERVICE_NAME);
+
 interface DaemonPids {
   mcp?: number;
   engine?: number;
@@ -220,7 +229,7 @@ export function generateLaunchAgentPlist(bin: string, devDir: string): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.beheld.daemon</string>
+  <string>${LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${bin}</string>
@@ -259,18 +268,16 @@ export async function installAutostart(): Promise<void> {
   const bin = existsSync(binaryPath()) ? binaryPath() : process.execPath;
 
   if (platform() === "darwin") {
-    const dir = join(homedir(), "Library", "LaunchAgents");
-    const plist = join(dir, "com.beheld.daemon.plist");
-    await mkdir(dir, { recursive: true });
+    const plist = launchAgentPlistPath();
+    await mkdir(dirname(plist), { recursive: true });
     await writeFile(plist, generateLaunchAgentPlist(bin, beheldDir()));
     // launchctl load is best-effort; ignore errors in non-interactive envs
     spawn("launchctl", ["load", "-w", plist], { stdio: "ignore" });
   } else if (platform() === "linux") {
-    const dir = join(homedir(), ".config", "systemd", "user");
-    const unit = join(dir, "beheld.service");
-    await mkdir(dir, { recursive: true });
+    const unit = systemdUnitPath();
+    await mkdir(dirname(unit), { recursive: true });
     await writeFile(unit, generateSystemdService(bin, beheldDir()));
-    spawn("systemctl", ["--user", "enable", "--now", "beheld.service"], {
+    spawn("systemctl", ["--user", "enable", "--now", SYSTEMD_SERVICE_NAME], {
       stdio: "ignore",
     });
   }

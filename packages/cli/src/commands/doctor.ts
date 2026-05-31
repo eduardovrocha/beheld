@@ -1,9 +1,15 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mcpHealth, mcpStatus } from "../client/mcp-client";
 import { engineHealth } from "../client/engine-client";
+import {
+  LAUNCH_AGENT_LABEL,
+  SYSTEMD_SERVICE_NAME,
+  launchAgentPlistPath,
+  systemdUnitPath,
+} from "../daemon-manager";
 import { GREEN, RED, YELLOW, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 type Severity = "ok" | "warn" | "crit";
@@ -564,6 +570,261 @@ function evaluateBacklog(snap: ProcessingSnapshot): CheckResult {
   };
 }
 
+// ── autostart probe (LaunchAgent on macOS / systemd user on Linux) ──────────
+
+function parseLaunchctlList(stdout: string): { pid?: number } {
+  // launchctl list <label> emite um plist-like:
+  //   { "PID" = 12345; "LastExitStatus" = 0; ... }
+  // Quando carregado sem PID → "PID" não aparece.
+  const m = stdout.match(/"PID"\s*=\s*(\d+)\s*;/);
+  if (!m) return {};
+  const n = parseInt(m[1]!, 10);
+  return Number.isFinite(n) ? { pid: n } : {};
+}
+
+function evaluateSystemdState(
+  isEnabledStdout: string,
+  isActiveStdout: string,
+): { enabled: boolean; active: boolean } {
+  const e = isEnabledStdout.trim();
+  const a = isActiveStdout.trim();
+  // "static" = sempre disponível (não pode ser desativado) — equivale a enabled.
+  const enabled = e === "enabled" || e === "static";
+  const active = a === "active";
+  return { enabled, active };
+}
+
+function checkAutostartMacOS(): CheckResult {
+  const label = `Autostart (LaunchAgent ${LAUNCH_AGENT_LABEL})`;
+  const plist = launchAgentPlistPath();
+  if (!existsSync(plist)) {
+    return {
+      severity: "warn",
+      label,
+      lines: [
+        `${YELLOW}⚠${RESET} LaunchAgent ${LAUNCH_AGENT_LABEL} ausente em ${plist.replace(homedir(), "~")}`,
+      ],
+      hint: "Execute: beheld init",
+    };
+  }
+  const res = spawnSync("launchctl", ["list", LAUNCH_AGENT_LABEL], { stdio: "pipe" });
+  if (res.status !== 0) {
+    return {
+      severity: "warn",
+      label,
+      lines: [`${YELLOW}⚠${RESET} LaunchAgent ${LAUNCH_AGENT_LABEL} instalado mas não carregado`],
+      hint: `launchctl bootstrap gui/$UID ${plist.replace(homedir(), "~")}`,
+    };
+  }
+  const parsed = parseLaunchctlList(res.stdout?.toString() ?? "");
+  if (parsed.pid === undefined) {
+    return {
+      severity: "warn",
+      label,
+      lines: [`${YELLOW}⚠${RESET} LaunchAgent ${LAUNCH_AGENT_LABEL} carregado mas inativo`],
+      hint: `launchctl kickstart gui/$UID/${LAUNCH_AGENT_LABEL}`,
+    };
+  }
+  return {
+    severity: "ok",
+    label,
+    lines: [`${GREEN}✓${RESET} LaunchAgent ${LAUNCH_AGENT_LABEL} ativo (PID ${parsed.pid})`],
+  };
+}
+
+function checkAutostartLinux(): CheckResult {
+  const label = `Autostart (systemd ${SYSTEMD_SERVICE_NAME})`;
+  const unit = systemdUnitPath();
+  if (!existsSync(unit)) {
+    return {
+      severity: "warn",
+      label,
+      lines: [`${YELLOW}⚠${RESET} Serviço ${SYSTEMD_SERVICE_NAME} não instalado`],
+      hint: "Execute: beheld init",
+    };
+  }
+  const enabledRes = spawnSync("systemctl", ["--user", "is-enabled", SYSTEMD_SERVICE_NAME], {
+    stdio: "pipe",
+  });
+  const activeRes = spawnSync("systemctl", ["--user", "is-active", SYSTEMD_SERVICE_NAME], {
+    stdio: "pipe",
+  });
+  const enabledOut = enabledRes.stdout?.toString() ?? "";
+  const activeOut = activeRes.stdout?.toString() ?? "";
+  const state = evaluateSystemdState(enabledOut, activeOut);
+
+  if (state.enabled && state.active) {
+    return {
+      severity: "ok",
+      label,
+      lines: [`${GREEN}✓${RESET} Serviço ${SYSTEMD_SERVICE_NAME} enabled e active`],
+    };
+  }
+  if (state.enabled && !state.active) {
+    return {
+      severity: "warn",
+      label,
+      lines: [
+        `${YELLOW}⚠${RESET} Serviço ${SYSTEMD_SERVICE_NAME} enabled mas ${activeOut.trim() || "?"}`,
+      ],
+      hint: `systemctl --user start ${SYSTEMD_SERVICE_NAME}`,
+    };
+  }
+  if (!state.enabled && state.active) {
+    return {
+      severity: "warn",
+      label,
+      lines: [
+        `${YELLOW}⚠${RESET} Serviço ${SYSTEMD_SERVICE_NAME} ativo agora mas não reinicia após reboot`,
+      ],
+      hint: `systemctl --user enable ${SYSTEMD_SERVICE_NAME}`,
+    };
+  }
+  return {
+    severity: "warn",
+    label,
+    lines: [`${YELLOW}⚠${RESET} Serviço ${SYSTEMD_SERVICE_NAME} não habilitado`],
+    hint: `systemctl --user enable --now ${SYSTEMD_SERVICE_NAME}`,
+  };
+}
+
+function checkAutostart(): CheckResult | null {
+  if (platform() === "darwin") return checkAutostartMacOS();
+  if (platform() === "linux") return checkAutostartLinux();
+  return null;
+}
+
+// ── log.signatures probe ────────────────────────────────────────────────────
+
+interface LogSignature {
+  pattern: string;
+  hint: string;
+}
+
+const LOG_SIGNATURES: LogSignature[] = [
+  {
+    pattern: "Errno 48",
+    hint: "Socket preso — provável engine zumbi; rodar doctor periodicamente",
+  },
+  {
+    pattern: "Address already in use",
+    hint: "Mesma raiz que Errno 48 (variação por libc/distro)",
+  },
+  {
+    pattern: "engine trigger timeout",
+    hint: "Engine não responde aos triggers do daemon",
+  },
+  {
+    pattern: "Engine falhou ao iniciar",
+    hint: "Auto-restart bateu na parede — checar busy-loop / PID stale",
+  },
+  {
+    pattern: "MCP server falhou ao iniciar",
+    hint: "Auto-restart do MCP bateu na parede — checar porta 7337 ocupada",
+  },
+  {
+    pattern: "Traceback (most recent call last)",
+    hint: "Exceção não tratada — checar ~/.beheld/daemon.log",
+  },
+];
+
+const LOG_TAIL_BYTES = 64 * 1024;
+
+function daemonLogPath(): string {
+  return join(beheldDir(), "daemon.log");
+}
+
+function readLogTail(path: string, maxBytes: number): string | null {
+  let st;
+  try {
+    st = statSync(path);
+  } catch {
+    return null;
+  }
+  if (st.size <= maxBytes) {
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+  }
+  // Arquivo maior que maxBytes → ler só o sufixo.
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    readSync(fd, buf, 0, maxBytes, st.size - maxBytes);
+    return buf.toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function findSignaturesInLog(
+  text: string,
+  signatures: LogSignature[],
+): Array<{ pattern: string; count: number; hint: string }> {
+  const hits: Array<{ pattern: string; count: number; hint: string }> = [];
+  for (const sig of signatures) {
+    if (!sig.pattern) continue;
+    let count = 0;
+    let idx = 0;
+    while (true) {
+      const found = text.indexOf(sig.pattern, idx);
+      if (found < 0) break;
+      count++;
+      idx = found + sig.pattern.length;
+    }
+    if (count > 0) hits.push({ pattern: sig.pattern, count, hint: sig.hint });
+  }
+  return hits;
+}
+
+function checkLogSignatures(): CheckResult {
+  const label = "Assinaturas no daemon.log";
+  const path = daemonLogPath();
+  if (!existsSync(path)) {
+    return {
+      severity: "ok",
+      label,
+      lines: [`${DIM}~/.beheld/daemon.log ainda não criado${RESET}`],
+    };
+  }
+  const tail = readLogTail(path, LOG_TAIL_BYTES);
+  if (tail === null) {
+    return {
+      severity: "warn",
+      label,
+      lines: [`${YELLOW}⚠${RESET} Não foi possível ler ~/.beheld/daemon.log`],
+    };
+  }
+  const hits = findSignaturesInLog(tail, LOG_SIGNATURES);
+  if (hits.length === 0) {
+    return {
+      severity: "ok",
+      label,
+      lines: [`${GREEN}✓${RESET} Nenhuma assinatura conhecida nas últimas 64 KB do log`],
+    };
+  }
+  const summary = hits.map((h) => `"${h.pattern}" (×${h.count})`).join(", ");
+  return {
+    severity: "warn",
+    label,
+    lines: [`${YELLOW}⚠${RESET} Assinaturas no daemon.log: ${summary}`],
+    hint: hits[0]!.hint,
+  };
+}
+
 function computeExitCode(all: CheckResult[]): 0 | 1 | 2 {
   if (all.some((r) => r.severity === "crit")) return 2;
   if (all.some((r) => r.severity === "warn")) return 1;
@@ -710,6 +971,12 @@ export async function doctorCommand(): Promise<void> {
   const orphans = evaluateBacklog(snap);
   printResult(orphans);
 
+  // Infra probes — autostart (platform-specific) e assinaturas conhecidas no log.
+  const autostart = checkAutostart();
+  if (autostart) printResult(autostart);
+  const logSigs = checkLogSignatures();
+  printResult(logSigs);
+
   const jsonl = await checkJsonlToday();
   printResult(jsonl);
 
@@ -724,6 +991,8 @@ export async function doctorCommand(): Promise<void> {
     dbWrite,
     dbWal,
     orphans,
+    ...(autostart ? [autostart] : []),
+    logSigs,
     jsonl,
   ];
   const crits = all.filter((c) => c.severity === "crit");
@@ -771,4 +1040,11 @@ export const _internal = {
   formatBytes,
   formatDuration,
   computeExitCode,
+  parseLaunchctlList,
+  evaluateSystemdState,
+  checkAutostart,
+  findSignaturesInLog,
+  readLogTail,
+  checkLogSignatures,
+  LOG_SIGNATURES,
 };

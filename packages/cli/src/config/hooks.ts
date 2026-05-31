@@ -238,7 +238,7 @@ export function claudeCommandPath(base = homedir()): string {
 /** Bump whenever SLASH_COMMAND_CONTENT changes in a way that should override
  *  previously-installed copies. The installer rewrites any file whose
  *  detectable version is below this value. */
-export const SLASH_COMMAND_VERSION = "4";
+export const SLASH_COMMAND_VERSION = "5";
 
 /**
  * Body of `~/.claude/commands/beheld.md`. Exported so tests can pin it as a
@@ -253,9 +253,10 @@ export const SLASH_COMMAND_VERSION = "4";
  *     stack-keywords (F6.12b), fallback-view. b3 must precede import to avoid
  *     ambiguity ("b3 import ..." is conversational, not an import). Stack is
  *     placed before the catch-all view so the keywords don't fall into it.
- *   - b3 mode embeds the literal blockquote template, including the signal
- *     symbol `─ ( · · · ⊙ · · · ) ─`, so the on-disk prompt fully specifies
- *     the visual format without runtime branching
+ *   - b3 mode embeds the literal response template, including the signal
+ *     symbol `-(·⊙·)-`. v5 removed the markdown blockquote (>) prefix
+ *     because the CLI was rendering blockquote content in italic; we want
+ *     upright-only typography (per S1352 — Remove all italic styling)
  *   - stack keywords accepted: stack | linguagens | frameworks | arquitetura
  */
 export const SLASH_COMMAND_CONTENT = `---
@@ -283,14 +284,15 @@ Regra 1 — Modo conversacional b3:
     responda diretamente sem chamar a tool
   → Formate a resposta obrigatoriamente neste template markdown:
 
-      > ─ ( · · · ⊙ · · · ) ─
-      >
-      > **B3H31D** [resposta na voz de testemunha, 2 a 4 frases]
+      -(·⊙·)-
+
+      **B3H31D** [resposta na voz de testemunha, 2 a 4 frases]
 
   → Voz: terceira pessoa ("B3H31D percebe que...", "B3H31D entende que...")
   → Testemunha: relata o observado, nunca julga o dev
-  → Sem listas, sem cabeçalhos, sem blocos de código dentro do blockquote
-  → Nenhum conteúdo fora do blockquote — apenas o template acima
+  → Sem listas, sem cabeçalhos, sem blocos de código
+  → Sem itálico em nenhum momento — tipografia ereta apenas
+  → Nenhum conteúdo fora do template acima — apenas a decoração e o parágrafo
 
 Regra 2 — Import com URL:
   Se "$ARGUMENTS" começar com "import " (com espaço, case-sensitive):

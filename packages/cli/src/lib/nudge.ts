@@ -35,7 +35,7 @@ export function maybeShowBundleNudge(): void {
   // stderr so we don't pollute scripts that pipe stdout (e.g. `beheld view --json | jq …`).
   process.stderr.write(
     `\n→ Seu bundle tem ${days} dia${days === 1 ? "" : "s"}.\n` +
-    `  Atualize para enriquecer sua curva de evolução: beheld profile generate\n\n`,
+    `  Atualize para enriquecer sua curva de evolução: beheld snapshot\n\n`,
   );
 
   markShown();

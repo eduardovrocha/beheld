@@ -73,7 +73,7 @@ describe("maybeShowBundleNudge", () => {
     const { maybeShowBundleNudge } = await import("../src/lib/nudge");
     const out = captureStderr(() => maybeShowBundleNudge());
     expect(out).toMatch(/Seu bundle tem 7 dias/);
-    expect(out).toMatch(/beheld profile generate/);
+    expect(out).toMatch(/beheld snapshot/);
   });
 
   it("escolhe o snapshot mais novo entre vários (idade do mais recente)", async () => {

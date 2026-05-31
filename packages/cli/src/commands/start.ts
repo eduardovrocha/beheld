@@ -21,6 +21,11 @@ async function healIntegration(): Promise<void> {
 }
 
 export async function startCommand(): Promise<void> {
+  // Sinal explícito do usuário "quero retomar". Se o supervisor estava
+  // suspenso por backoff (Camada 2), limpa o flag e loga "auto-restart
+  // retomado" — antes de qualquer outra coisa.
+  daemonManager.clearBackoffStateOnUserStart();
+
   await healIntegration();
 
   // Pre-check so we only show the "this might take a while" hint when we're

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { start as daemonManagerStart } from "../daemon-manager";
-import { pidListeningOn } from "./doctor";
+import { pidListeningOn, waitSocketRelease as utilWaitSocketRelease } from "../util/ports";
 import type { EngineCheck, ProcessingSnapshot } from "./doctor";
 
 // ── tipos públicos ───────────────────────────────────────────────────────────
@@ -124,14 +124,7 @@ export function killProcess(pid: number): boolean {
   }
 }
 
-export async function waitSocketRelease(port: number, timeoutMs: number): Promise<boolean> {
-  const t0 = Date.now();
-  while (Date.now() - t0 < timeoutMs) {
-    if (pidListeningOn(port) === undefined) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return pidListeningOn(port) === undefined;
-}
+export const waitSocketRelease = utilWaitSocketRelease;
 
 export async function walCheckpoint(
   dbPath: string,

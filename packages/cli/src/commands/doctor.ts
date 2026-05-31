@@ -12,6 +12,8 @@ import {
 } from "../daemon-manager";
 import { selfHealEngine } from "./heal-engine";
 import type { HealReport, HealStep } from "./heal-engine";
+import { pidListeningOn } from "../util/ports";
+export { pidListeningOn };
 import { GREEN, RED, YELLOW, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 type Severity = "ok" | "warn" | "crit";
@@ -202,17 +204,8 @@ function enginePort(): number {
   return portFromUrl(process.env.BEHELD_ENGINE_URL, 7338);
 }
 
-export function pidListeningOn(port: number): number | undefined {
-  // lsof is available on macOS and most Linux distros
-  const res = spawnSync("lsof", ["-i", `:${port}`, "-P", "-n", "-sTCP:LISTEN", "-t"], {
-    stdio: "pipe",
-  });
-  if (res.status !== 0) return undefined;
-  const out = (res.stdout?.toString() ?? "").trim();
-  if (!out) return undefined;
-  const n = parseInt(out.split("\n")[0]!, 10);
-  return Number.isFinite(n) ? n : undefined;
-}
+// pidListeningOn agora mora em util/ports.ts (compartilhado com supervisor).
+// Re-exportado abaixo para preservar contratos de teste do D0-D2.
 
 async function fetchEnginePid(): Promise<number | undefined> {
   return pidListeningOn(enginePort());

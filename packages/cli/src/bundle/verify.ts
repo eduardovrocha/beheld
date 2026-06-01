@@ -14,7 +14,72 @@
  *   4. chain     — walks previous_hash recursively, verifying each link
  */
 import { payloadHash, payloadToCanonical } from "./canonical";
-import type { Bundle, BundlePayload } from "./types";
+import type { Bundle, BundlePayload, HarnessSource } from "./types";
+
+// ── manifest (R1.1, spec §3.3) ──────────────────────────────────────────────
+
+/** Detected schema family of a bundle. v6 is current; v5/v1 are accepted in
+ *  read-only fallback so legacy artifacts continue verifying. */
+export type DetectedSchema = "v6" | "v5_legacy" | "v1_legacy" | "unknown";
+
+export interface BundleManifest {
+  /** Programmatic schema family (machine-readable). */
+  schema: DetectedSchema;
+  /** Human-friendly label rendered by the CLI (e.g. "v6", "v5 (legacy)"). */
+  schemaLabel: string;
+  /** Section names actually present in the payload, in canonical order.
+   *  v6: "core" always, "enrichment" when present.
+   *  v5: "l1" always, "l2" when present.
+   *  v1: "signals". */
+  sections: string[];
+  /** Capture fidelity per source, extracted from payload.enrichment.harness_sources.
+   *  Empty array when the bundle is v5/v1 (those schemas had no harness_sources). */
+  harnessSources: HarnessSource[];
+}
+
+/** Pure: detect schema + list sections + extract harness_sources from a Bundle
+ *  (or any record loaded from disk). Never throws — falls through to "unknown"
+ *  when shape is unrecognized. */
+export function summarizeManifest(bundle: Bundle | Record<string, unknown>): BundleManifest {
+  const raw = (bundle as { payload?: Record<string, unknown> }).payload;
+  const payload = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+
+  // Schema detection — fallback chain mirrors validateSchema below.
+  if ("core" in payload) {
+    const sections: string[] = ["core"];
+    let harnessSources: HarnessSource[] = [];
+    const enr = payload.enrichment;
+    if (enr && typeof enr === "object") {
+      sections.push("enrichment");
+      const hs = (enr as { harness_sources?: unknown }).harness_sources;
+      if (Array.isArray(hs)) {
+        harnessSources = hs.filter(
+          (s): s is HarnessSource =>
+            !!s &&
+            typeof s === "object" &&
+            typeof (s as HarnessSource).harness === "string" &&
+            typeof (s as HarnessSource).capture_fidelity === "string" &&
+            typeof (s as HarnessSource).sessions === "number",
+        );
+      }
+    }
+    return { schema: "v6", schemaLabel: "v6", sections, harnessSources };
+  }
+  if ("l1" in payload) {
+    const sections: string[] = ["l1"];
+    if (payload.l2 && typeof payload.l2 === "object") sections.push("l2");
+    return { schema: "v5_legacy", schemaLabel: "v5 (legacy)", sections, harnessSources: [] };
+  }
+  if ("signals" in payload) {
+    return {
+      schema: "v1_legacy",
+      schemaLabel: "v1 (legacy)",
+      sections: ["signals"],
+      harnessSources: [],
+    };
+  }
+  return { schema: "unknown", schemaLabel: "unknown", sections: [], harnessSources: [] };
+}
 
 export interface CheckResult {
   ok: boolean;

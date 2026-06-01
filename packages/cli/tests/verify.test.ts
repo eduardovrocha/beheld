@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { payloadHash, payloadToCanonical } from "../src/bundle/canonical";
 import {
   summarize,
+  summarizeManifest,
   verifyBundle,
   verifyChain,
   type BundleResolver,
@@ -490,3 +491,140 @@ describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
     expect(out).toContain("Seção core ausente");
   });
 });
+
+// ── R1.1 §3.3 — manifest (schema + sections + capture_fidelity per source) ───
+
+describe("summarizeManifest — pure detection", () => {
+  test("v6 full bundle: schema=v6, sections=[core, enrichment], harness_sources extracted", () => {
+    const bundle = {
+      version: "6",
+      payload: {
+        core: { total_repos: 1 },
+        enrichment: {
+          harness_sources: [
+            { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
+            { harness: "cursor", capture_fidelity: "local_log_tail", sessions: 12 },
+          ],
+          sessions_analyzed: 42,
+        },
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v6");
+    expect(m.schemaLabel).toBe("v6");
+    expect(m.sections).toEqual(["core", "enrichment"]);
+    expect(m.harnessSources).toHaveLength(2);
+    expect(m.harnessSources[0]).toEqual({
+      harness: "claude_code",
+      capture_fidelity: "native_hook",
+      sessions: 30,
+    });
+    expect(m.harnessSources[1]?.capture_fidelity).toBe("local_log_tail");
+  });
+
+  test("v6 core-only bundle: schema=v6, sections=[core], no harness_sources", () => {
+    const bundle = {
+      version: "6",
+      payload: {
+        core: { total_repos: 3 },
+        // enrichment intentionally absent
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v6");
+    expect(m.sections).toEqual(["core"]);
+    expect(m.harnessSources).toEqual([]);
+  });
+
+  test("v5 legacy bundle: schema=v5_legacy, sections=[l1, l2], no harness_sources", () => {
+    const bundle = {
+      version: "5",
+      payload: {
+        l1: { total_repos: 1 },
+        l2: { sessions_analyzed: 10 },
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v5_legacy");
+    expect(m.schemaLabel).toBe("v5 (legacy)");
+    expect(m.sections).toEqual(["l1", "l2"]);
+    expect(m.harnessSources).toEqual([]);
+  });
+
+  test("v1 legacy bundle: schema=v1_legacy, sections=[signals]", () => {
+    const bundle = {
+      version: "1",
+      payload: {
+        signals: { sessions_analyzed: 5 },
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v1_legacy");
+    expect(m.schemaLabel).toBe("v1 (legacy)");
+    expect(m.sections).toEqual(["signals"]);
+  });
+
+  test("unknown shape: schema=unknown, empty sections, never throws", () => {
+    const m = summarizeManifest({ version: "?", payload: { mystery: 1 } });
+    expect(m.schema).toBe("unknown");
+    expect(m.sections).toEqual([]);
+    expect(m.harnessSources).toEqual([]);
+  });
+
+  test("malformed harness_sources entries are filtered out (not crash)", () => {
+    const bundle = {
+      version: "6",
+      payload: {
+        core: {},
+        enrichment: {
+          harness_sources: [
+            { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
+            null,
+            { harness: "broken" /* missing fields */ },
+            { harness: "cursor", capture_fidelity: "local_log_tail", sessions: 12 },
+          ],
+        },
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.harnessSources).toHaveLength(2);
+    expect(m.harnessSources.map((s) => s.harness)).toEqual(["claude_code", "cursor"]);
+  });
+});
+
+describe("manifest matches the on-disk fixtures", () => {
+  const FIXTURES = join(import.meta.dir, "fixtures");
+
+  test("bundle_v6_full.json: v6 + core+enrichment + claude_code/native_hook", () => {
+    const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v6_full.json"), "utf8"));
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v6");
+    expect(m.sections).toEqual(["core", "enrichment"]);
+    expect(m.harnessSources).toEqual([
+      { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
+    ]);
+  });
+
+  test("bundle_v6_core_only.json: v6 + only core + zero harness_sources", () => {
+    const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v6_core_only.json"), "utf8"));
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v6");
+    expect(m.sections).toEqual(["core"]);
+    expect(m.harnessSources).toEqual([]);
+  });
+
+  test("bundle_v5_legacy.json: v5_legacy + l1+l2 + no harness_sources", () => {
+    const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v5_legacy.json"), "utf8"));
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v5_legacy");
+    expect(m.sections).toEqual(["l1", "l2"]);
+    expect(m.harnessSources).toEqual([]);
+  });
+});
+
+// NOTA: testes E2E do verifyCommand não estão aqui porque o comando tem
+// process.exit nos paths de erro, o que mata o runner. A função pura
+// summarizeManifest é coberta pelos 6 testes acima + 3 fixture-load tests.
+// O wiring do print de manifest é mecânico (3 console.log lines em
+// commands/verify.ts) e validado por inspeção manual rodando
+// `beheld verify <fixture>.beheld`.

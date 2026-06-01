@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { composition, summarize, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
+import { composition, summarize, summarizeManifest, verifyBundle, verifyChain, type BundleResolver } from "../bundle/verify";
 import { verifyAttestation } from "../bundle/attestation-verify";
 import type { Bundle } from "../bundle/types";
 import { fetchRekorEntry, parseRekorResponse, rekorEntryUrl } from "../lib/rekor";
@@ -67,6 +67,28 @@ export async function verifyCommand(
   }
 
   const result = await verifyBundle(raw);
+
+  // R1.1 §3.3 — manifest no topo: schema detectado, sections presentes,
+  // capture_fidelity por fonte de enrichment. NUNCA grada bundle por
+  // riqueza — apenas sinaliza o que o verifier observou.
+  const manifest = summarizeManifest(raw as Record<string, unknown>);
+  console.log("");
+  console.log(`  ${DIM}schema       ${RESET}${manifest.schemaLabel}`);
+  console.log(`  ${DIM}sections     ${RESET}${manifest.sections.join(" · ") || "(nenhuma)"}`);
+  if (manifest.harnessSources.length > 0) {
+    const formatted = manifest.harnessSources
+      .map(
+        (s) =>
+          `${s.harness} (${s.capture_fidelity} · ${s.sessions} session${s.sessions === 1 ? "" : "s"})`,
+      )
+      .join(", ");
+    console.log(`  ${DIM}sources      ${RESET}${formatted}`);
+  } else if (manifest.schema === "v6") {
+    console.log(`  ${DIM}sources      (sem enrichment — bundle L1-only)${RESET}`);
+  } else {
+    console.log(`  ${DIM}sources      (não rastreado em ${manifest.schemaLabel})${RESET}`);
+  }
+  console.log("");
 
   console.log(`  Verificação: ${filePath}`);
   console.log(`    ${mark(result.checks.schema.ok)} schema    ${result.checks.schema.reason ?? ""}`);

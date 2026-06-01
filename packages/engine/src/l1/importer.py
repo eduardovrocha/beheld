@@ -151,6 +151,16 @@ class L1Importer:
                 last_commit_at=signals.last_commit_at,
             )
 
+            # 5a. R1.2a — persist per-month commit counts for GrowthRateScorer
+            #     windows. Fail-soft: a save error here must NOT abort the
+            #     ingest (F6.2 signals were already persisted above).
+            try:
+                self._db.save_l1_monthly_buckets(
+                    signals.root_commit_hash, signals.commits_by_month
+                )
+            except Exception:
+                pass
+
             # 5b. F6.12a — persist language weights + architecture patterns.
             #     Fail-soft per the spec: a save failure here must never abort
             #     the ingest (the F6.2 signals were already saved above).

@@ -60,6 +60,11 @@ class L1ExtractedSignals:
     # Empty list on failure so the importer can still persist the rest.
     language_weights: list[LanguageWeight] = field(default_factory=list)
     architecture_patterns: list[ArchitecturePattern] = field(default_factory=list)
+    # R1.2a — per-month commit counts derived from author_timestamps.
+    # Powers the GrowthRateScorer baseline (first 12 months) vs current
+    # (last 6 months) windows per spec §7.2. Keys are "YYYY-MM"; values
+    # are commit_count for THIS repo in that month.
+    commits_by_month: dict[str, int] = field(default_factory=dict)
 
 
 _ECOSYSTEM_MANIFESTS: dict[str, str] = {
@@ -333,6 +338,16 @@ def extract(
         first_commit_at = author_timestamps[-1] if author_timestamps else ""
         last_commit_at = author_timestamps[0] if author_timestamps else ""
 
+        # R1.2a — bucket author commits per ISO month "YYYY-MM" from the same
+        # author_timestamps list (already sorted, no extra git call needed).
+        # Powers GrowthRateScorer's baseline (12mo) vs current (6mo) windows.
+        commits_by_month: dict[str, int] = {}
+        for ts in author_timestamps:
+            # ts is "YYYY-MM-DDTHH:MM:SS±HH:MM"; first 7 chars are YYYY-MM.
+            month = ts[:7] if len(ts) >= 7 else ""
+            if month:
+                commits_by_month[month] = commits_by_month.get(month, 0) + 1
+
         # 10. F6.12a — language weights + architecture patterns.
         #     Both are fail-soft: returning [] on extractor exception keeps
         #     the rest of the ingest intact (existing F6.2 behavior).
@@ -360,6 +375,7 @@ def extract(
             last_commit_at=last_commit_at,
             language_weights=language_weights,
             architecture_patterns=architecture_patterns,
+            commits_by_month=commits_by_month,
         )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

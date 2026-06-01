@@ -123,6 +123,21 @@ CREATE TABLE IF NOT EXISTS l1_signals (
 
 CREATE INDEX IF NOT EXISTS idx_l1_signals_repo ON l1_signals(root_commit_hash);
 
+-- R1.2a — per-month commit counts per repo. Powers the GrowthRateScorer
+-- baseline (first 12 months) vs current (last 6 months) window comparison
+-- introduced in spec §7.2. Ecosystems/platforms/test_ratio per-month are
+-- derived in get_l1_monthly_buckets() by joining with l1_signals (every
+-- month a repo contributed inherits its global ecosystems/platforms and
+-- its commit_count-weighted test_ratio). distinct_repos per window comes
+-- from the repo_hashes set of buckets in that window.
+CREATE TABLE IF NOT EXISTS l1_monthly_buckets (
+    root_commit_hash TEXT NOT NULL REFERENCES l1_repositories(root_commit_hash),
+    month TEXT NOT NULL,           -- ISO-8601 YYYY-MM
+    commit_count INTEGER NOT NULL,
+    PRIMARY KEY (root_commit_hash, month)
+);
+CREATE INDEX IF NOT EXISTS idx_l1_monthly_buckets_month ON l1_monthly_buckets(month);
+
 CREATE TABLE IF NOT EXISTS identity_phrases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     snapshot_id INTEGER UNIQUE REFERENCES snapshots(id),
@@ -350,6 +365,29 @@ def _migration_8_add_stack_tables(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_9_add_monthly_buckets(conn: sqlite3.Connection) -> None:
+    """R1.2a — per-month commit counts per repo, powering GrowthRateScorer
+    baseline (first 12 months) vs current (last 6 months) windows per
+    spec §7.2. Legacy repos (imported before R1.2a) have NO rows in this
+    table; the GrowthRateScorer returns None for users with empty
+    monthly_buckets until they re-import. No backfill is attempted —
+    raw commit timestamps were never persisted in earlier phases."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS l1_monthly_buckets (
+            root_commit_hash TEXT NOT NULL
+                REFERENCES l1_repositories(root_commit_hash),
+            month TEXT NOT NULL,
+            commit_count INTEGER NOT NULL,
+            PRIMARY KEY (root_commit_hash, month)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_l1_monthly_buckets_month
+            ON l1_monthly_buckets(month);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "add tool_sequence_json to sessions", _migration_1_add_tool_sequence_json),
     Migration(2, "add workflow_metrics table", _migration_2_add_workflow_metrics),
@@ -361,6 +399,8 @@ MIGRATIONS: list[Migration] = [
     Migration(7, "add first_seen_at to l1_repositories (F5.7.2)", _migration_7_add_first_seen_at),
     Migration(8, "add l1 stack tables (language_weights + architecture_patterns) F6.12a",
               _migration_8_add_stack_tables),
+    Migration(9, "add l1_monthly_buckets (R1.2a — GrowthRateScorer windows)",
+              _migration_9_add_monthly_buckets),
 ]
 
 LATEST_SCHEMA_VERSION = max((m.version for m in MIGRATIONS), default=0)
@@ -918,7 +958,103 @@ class BeheldDB:
             "ecosystems_merged": ecosystems_merged,
             "platforms_merged": platforms_merged,
             "avg_test_ratio": float(row["avg_test_ratio"] or 0.0),
+            "monthly_buckets": self.get_l1_monthly_buckets(),
         }
+
+    def save_l1_monthly_buckets(
+        self,
+        root_commit_hash: str,
+        commits_by_month: dict[str, int],
+    ) -> None:
+        """R1.2a — store per-month commit counts for a repo. Replaces any
+        existing rows for the same repo (idempotent re-import).
+
+        `commits_by_month` is `{"YYYY-MM": commit_count, ...}`. Empty
+        months are NOT inserted. Callers compute this from the git log
+        timestamps in `git_extractor.extract`."""
+        conn = self.connect()
+        conn.execute(
+            "DELETE FROM l1_monthly_buckets WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
+        if not commits_by_month:
+            conn.commit()
+            return
+        conn.executemany(
+            "INSERT INTO l1_monthly_buckets "
+            "(root_commit_hash, month, commit_count) VALUES (?, ?, ?)",
+            [
+                (root_commit_hash, month, int(count))
+                for month, count in commits_by_month.items()
+                if count > 0
+            ],
+        )
+        conn.commit()
+
+    def get_l1_monthly_buckets(self) -> dict[str, dict]:
+        """R1.2a — return per-month rollup across all imported repos.
+
+        Each month maps to a dict with:
+          - commit_count (int): sum across repos
+          - test_ratio (float): commit-count-weighted average across repos
+          - ecosystems (list[str]): union from contributing repos
+          - platforms (list[str]): union from contributing repos
+          - repo_hashes (list[str]): set of repo hashes that contributed
+
+        Empty dict when no monthly_buckets rows exist (legacy data — user
+        hasn't re-imported since R1.2a)."""
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT b.month, b.root_commit_hash, b.commit_count,
+                   s.ecosystems, s.platforms, s.test_ratio
+            FROM l1_monthly_buckets b
+            JOIN l1_signals s
+              ON s.root_commit_hash = b.root_commit_hash
+            ORDER BY b.month
+            """
+        ).fetchall()
+        out: dict[str, dict] = {}
+        # Accumulators: month → {commits, weighted_test_sum, ecos, plats, repos}
+        for r in rows:
+            month = r["month"]
+            slot = out.setdefault(
+                month,
+                {
+                    "commit_count": 0,
+                    "_weighted_test_sum": 0.0,
+                    "ecosystems": set(),
+                    "platforms": set(),
+                    "repo_hashes": set(),
+                },
+            )
+            n = int(r["commit_count"])
+            slot["commit_count"] += n
+            slot["_weighted_test_sum"] += float(r["test_ratio"] or 0.0) * n
+            try:
+                eco = json.loads(r["ecosystems"] or "{}")
+                slot["ecosystems"].update(k for k, v in eco.items() if v)
+            except (TypeError, json.JSONDecodeError):
+                pass
+            try:
+                plat = json.loads(r["platforms"] or "{}")
+                slot["platforms"].update(k for k, v in plat.items() if v)
+            except (TypeError, json.JSONDecodeError):
+                pass
+            slot["repo_hashes"].add(r["root_commit_hash"])
+        # Finalize: compute weighted avg test_ratio, convert sets to sorted lists.
+        finalized: dict[str, dict] = {}
+        for month, slot in out.items():
+            commits = slot["commit_count"]
+            test_avg = (slot["_weighted_test_sum"] / commits) if commits > 0 else 0.0
+            finalized[month] = {
+                "commit_count": commits,
+                "test_ratio": test_avg,
+                "ecosystems": sorted(slot["ecosystems"]),
+                "platforms": sorted(slot["platforms"]),
+                "repo_hashes": sorted(slot["repo_hashes"]),
+            }
+        return finalized
 
     def get_l1_repositories(self) -> list[dict]:
         rows = self.connect().execute(
@@ -932,13 +1068,17 @@ class BeheldDB:
         removed, False if none existed with that hash."""
         conn = self.connect()
         conn.execute("DELETE FROM l1_signals WHERE root_commit_hash = ?", (root_commit_hash,))
-        # F6.12a cascade — keep the FK constraint clean.
+        # F6.12a + R1.2a cascade — keep the FK constraint clean.
         conn.execute(
             "DELETE FROM l1_language_weights WHERE root_commit_hash = ?",
             (root_commit_hash,),
         )
         conn.execute(
             "DELETE FROM l1_architecture_patterns WHERE root_commit_hash = ?",
+            (root_commit_hash,),
+        )
+        conn.execute(
+            "DELETE FROM l1_monthly_buckets WHERE root_commit_hash = ?",
             (root_commit_hash,),
         )
         cur = conn.execute(

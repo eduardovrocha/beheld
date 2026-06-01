@@ -121,7 +121,10 @@ class Processor:
         )
         self.db.set_profile("total_sessions", str(len(all_sessions)))
         self.db.set_profile("last_scored_at", now.isoformat())
-        self.db.set_profile("overall_score", str(overall))
+        # R1.2 — overall may be None when every dimension was absent.
+        # Store empty string to surface "not yet measured" rather than the
+        # literal "None" Python str() would produce.
+        self.db.set_profile("overall_score", str(overall) if overall is not None else "")
 
         # Workflow metrics over the recent window — feeds coach + .beheld (F5).
         # Falls back to full history when recent window is sparse to avoid flaky values.

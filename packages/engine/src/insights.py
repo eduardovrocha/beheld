@@ -49,13 +49,19 @@ class InsightGenerator:
         try:
             import anthropic
 
+            # R1.2 — render None as "n/a (dimensão ausente)" so the LLM
+            # understands an absent dimension means no data was observed,
+            # not a literal numeric 0 (which would corrupt the insight).
+            def _fmt(v):
+                return f"{v}" if v is not None else "n/a (dimensão ausente)"
+
             prompt = (
                 f"Developer profile scores (0-100):\n"
-                f"  prompt_quality={scores.prompt_quality}\n"
+                f"  prompt_quality={_fmt(scores.prompt_quality)}\n"
                 f"  test_maturity={scores.test_maturity}\n"
                 f"  tech_breadth={scores.tech_breadth}\n"
-                f"  growth_rate={scores.growth_rate}\n"
-                f"  overall={scores.overall}\n"
+                f"  growth_rate={_fmt(scores.growth_rate)}\n"
+                f"  overall={_fmt(scores.overall)}\n"
                 f"  sessions_analyzed={scores.sessions_analyzed}\n\n"
                 f"Generate 2-3 brief, actionable insights for this developer. "
                 f"Focus on technical growth and coding practices. "
@@ -86,15 +92,21 @@ class InsightGenerator:
         pq, tm, tb, gr = scores.prompt_quality, scores.test_maturity, scores.tech_breadth, scores.growth_rate
         n = scores.sessions_analyzed
 
-        if overall >= 80:
-            items.append(f"Top {100 - overall}% em score geral — excelente uso do Claude")
-        elif overall >= 60:
-            items.append(f"Score geral {overall}/100 — acima da média")
+        # R1.2 — `overall`, `prompt_quality`, and `growth_rate` may be None
+        # when the underlying dimension was absent. Guard every numeric
+        # comparison so insights skip the absent dimension instead of
+        # crashing on a None comparison.
+        if overall is not None:
+            if overall >= 80:
+                items.append(f"Top {100 - overall}% em score geral — excelente uso do Claude")
+            elif overall >= 60:
+                items.append(f"Score geral {overall}/100 — acima da média")
 
-        if pq >= 75:
-            items.append("Qualidade de prompt acima da média — contexto rico e sessões longas")
-        elif pq < 40:
-            items.append("Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas")
+        if pq is not None:
+            if pq >= 75:
+                items.append("Qualidade de prompt acima da média — contexto rico e sessões longas")
+            elif pq < 40:
+                items.append("Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas")
 
         if tm >= 70:
             items.append("Alta maturidade em testes — TDD e test coverage bem integrados")
@@ -104,13 +116,15 @@ class InsightGenerator:
         if tb >= 80:
             items.append("Alta diversidade técnica — múltiplos ecossistemas e plataformas")
 
-        if gr > 55:
-            items.append("Crescimento positivo nos últimos 30 dias")
-        elif gr < 45:
-            items.append("Score estável — consistência é um ativo")
+        if gr is not None:
+            if gr > 55:
+                items.append("Crescimento positivo nos últimos 30 dias")
+            elif gr < 45:
+                items.append("Score estável — consistência é um ativo")
 
         if not items:
-            items.append(f"Score geral: {overall}/100 baseado em {n} sessões")
+            overall_label = f"{overall}/100" if overall is not None else "n/a"
+            items.append(f"Score geral: {overall_label} baseado em {n} sessões")
 
         return {
             "insights": items[:4],

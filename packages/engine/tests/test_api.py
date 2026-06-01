@@ -55,8 +55,16 @@ def test_scores_current_empty_db(client: TestClient) -> None:
         assert key in data
 
 
-def test_scores_current_returns_zeros_when_no_data(client: TestClient) -> None:
-    assert client.get("/scores/current").json()["overall"] == 0
+def test_scores_current_returns_null_for_absent_dimensions_when_no_data(client: TestClient) -> None:
+    # R1.2 — empty profile surfaces null (not 0) for dimensions with
+    # Optional semantics. test_maturity/tech_breadth keep numeric 0
+    # because their scorers always return int.
+    payload = client.get("/scores/current").json()
+    assert payload["overall"] is None
+    assert payload["prompt_quality"] is None
+    assert payload["growth_rate"] is None
+    assert payload["test_maturity"] == 0
+    assert payload["tech_breadth"] == 0
 
 
 def test_scores_current_with_data(client: TestClient, test_db: BeheldDB) -> None:

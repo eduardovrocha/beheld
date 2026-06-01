@@ -9,41 +9,51 @@ from scorers.base import DataSource, L1Snapshot
 
 _INFRA_PLATFORMS = frozenset({"docker", "cloud_infra", "ci_cd"})
 
-# Weight of L1 in the combined score when both layers are present.
-_L1_WEIGHT = 0.60
-_L2_WEIGHT = 0.40
+# Weight of core (git history) in the combined score when both layers
+# are present. Per spec §3.1: core dominates because it represents what
+# the dev actually built, not just what they discussed with an AI.
+_CORE_WEIGHT = 0.60
+_ENRICHMENT_WEIGHT = 0.40
 
 
 class TechBreadthScorer:
     """
-    L2 dimensions (sums to 100):
+    Enrichment dimensions (sums to 100):
       +40  distinct ecosystems (max 6)
       +30  distinct platforms (max 5)
       +20  distinct languages (max 4)
       +10  infra tools present (docker / cloud / CI)
 
-    Combined with L1 (when present) using a 60/40 weight so the git history
-    dominates — it represents what the dev has actually built.
+    Combined with core (git history) using a 60/40 weight so the git
+    history dominates — it represents what the dev has actually built.
+
+    R1.2 — fallback_when_enrichment_missing = True. When enrichment is
+    absent (no sessions captured), the scorer returns the core-only score
+    derived from the user's imported repos. No neutral-50 fallback.
     """
 
-    data_sources: ClassVar[list[DataSource]] = ["l1", "l2"]
+    data_sources: ClassVar[list[DataSource]] = ["core", "enrichment"]
+    fallback_when_enrichment_missing: ClassVar[bool] = True
 
     def score(self, sessions: list[Session], l1: Optional[L1Snapshot] = None) -> int:
         l1 = l1 or L1Snapshot()
-        l2_score = self._score_l2(sessions)
+        enrichment_score = self._score_enrichment(sessions)
 
         if l1.is_empty:
-            return l2_score
+            # No imported repos. Score whatever enrichment we have (may be 0).
+            return enrichment_score
 
-        l1_score = self._score_l1(l1)
+        core_score = self._score_core(l1)
         if not sessions:
-            return l1_score
+            # R1.2 — enrichment absent. Honor fallback_when_enrichment_missing
+            # by returning core-only (no neutral 50).
+            return core_score
 
-        return int(round(l1_score * _L1_WEIGHT + l2_score * _L2_WEIGHT))
+        return int(round(core_score * _CORE_WEIGHT + enrichment_score * _ENRICHMENT_WEIGHT))
 
-    # ── L2 (sessions) — existing logic, unchanged ─────────────────────────
+    # ── enrichment (sessions) — existing logic, unchanged ─────────────────
 
-    def _score_l2(self, sessions: list[Session]) -> int:
+    def _score_enrichment(self, sessions: list[Session]) -> int:
         if not sessions:
             return 0
 
@@ -67,15 +77,16 @@ class TechBreadthScorer:
 
         return min(100, result)
 
-    # ── L1 (git history) ──────────────────────────────────────────────────
+    # ── core (git history) ────────────────────────────────────────────────
 
-    def _score_l1(self, l1: L1Snapshot) -> int:
+    def _score_core(self, l1: L1Snapshot) -> int:
         if l1.is_empty:
             return 0
 
         eco_count = len(l1.ecosystem_keys)
         plat_count = len(l1.platform_keys)
-        # Map L1 extensions through the existing detector for parity with L2.
+        # Map core extensions through the existing detector for parity
+        # with the enrichment path.
         fake_paths = [f"f.{ext}" for ext in l1.extensions.keys()]
         languages = detect_languages(fake_paths)
 

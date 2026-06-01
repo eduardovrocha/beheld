@@ -10,39 +10,47 @@ _TEST_COMMANDS = frozenset(
 )
 _TEST_EXTENSIONS = (".spec.", ".test.", "_spec.", "_test.")
 
-_L1_WEIGHT = 0.50
-_L2_WEIGHT = 0.50
+_CORE_WEIGHT = 0.50
+_ENRICHMENT_WEIGHT = 0.50
 
 
 class TestMaturityScorer:
     """
-    L2 dimensions (sums to 100):
+    Enrichment dimensions (sums to 100):
       +35  % sessions with has_test_context
       +30  TDD / test-after workflow pattern
       +20  test file extensions present
       +15  test commands in bash
 
-    Combined with the L1 baseline (avg_test_ratio across imported repos)
-    using a 50/50 weight — historical testing rigor and current habits both
-    matter equally.
+    Combined with the core baseline (avg_test_ratio across imported repos)
+    using a 50/50 weight — historical testing rigor and current habits
+    both matter equally.
+
+    R1.2 — fallback_when_enrichment_missing = True. When enrichment is
+    absent (no sessions captured), the scorer returns the core baseline
+    (avg_test_ratio * 100). No neutral-50 fallback.
     """
 
-    data_sources: ClassVar[list[DataSource]] = ["l1", "l2"]
+    data_sources: ClassVar[list[DataSource]] = ["core", "enrichment"]
+    fallback_when_enrichment_missing: ClassVar[bool] = True
 
     def score(self, sessions: list[Session], l1: Optional[L1Snapshot] = None) -> int:
         l1 = l1 or L1Snapshot()
-        l2_score = self._score_l2(sessions)
+        enrichment_score = self._score_enrichment(sessions)
 
         if l1.is_empty:
-            return l2_score
+            # No imported repos. Score whatever enrichment we have.
+            return enrichment_score
 
-        l1_baseline = int(round(max(0.0, min(1.0, l1.avg_test_ratio)) * 100))
+        core_baseline = int(round(max(0.0, min(1.0, l1.avg_test_ratio)) * 100))
         if not sessions:
-            return l1_baseline
+            # R1.2 — enrichment absent. Honor fallback_when_enrichment_missing
+            # by returning the core baseline (no neutral 50).
+            return core_baseline
 
-        return int(round(l1_baseline * _L1_WEIGHT + l2_score * _L2_WEIGHT))
+        return int(round(core_baseline * _CORE_WEIGHT + enrichment_score * _ENRICHMENT_WEIGHT))
 
-    def _score_l2(self, sessions: list[Session]) -> int:
+    def _score_enrichment(self, sessions: list[Session]) -> int:
         if not sessions:
             return 0
 

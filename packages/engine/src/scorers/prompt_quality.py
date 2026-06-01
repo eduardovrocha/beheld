@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 from models import Session
 from scorers.base import DataSource
@@ -18,14 +18,22 @@ class PromptQualityScorer:
       +15  long productive sessions (duration > 10 min AND events > 10)
       +10  sessions using Bash / advanced tools
 
-    L2-only by design — prompt quality has no analogue in git history.
+    Enrichment-exclusive by design (spec §7.3 — R1.2) — prompt quality has no
+    analogue in git history. When enrichment is absent (no sessions captured
+    from any harness), the scorer returns None and the dimension simply does
+    not appear in the profile. This is the "honestidade de captura" principle:
+    we never fabricate a neutral score for an unobserved dimension.
     """
 
-    data_sources: ClassVar[list[DataSource]] = ["l2"]
+    data_sources: ClassVar[list[DataSource]] = ["enrichment"]
+    fallback_when_enrichment_missing: ClassVar[bool] = False
 
-    def score(self, sessions: list[Session]) -> int:
+    def score(self, sessions: list[Session]) -> Optional[int]:
         if not sessions:
-            return 0
+            # R1.2 — return None instead of 0 to signal "dimension absent"
+            # rather than "observed at neutral value". Honors
+            # fallback_when_enrichment_missing = False.
+            return None
 
         result = 0
 

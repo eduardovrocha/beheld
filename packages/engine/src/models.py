@@ -83,12 +83,19 @@ class Signal:
 
 @dataclass
 class Scores:
+    # R1.2 — prompt_quality and growth_rate may be None when their source
+    # data is absent (PromptQuality has fallback_when_enrichment_missing=False;
+    # GrowthRate returns None when L1 history is < 6 months and no L2 data).
+    # The dimension is dropped from the profile rather than fabricated at
+    # neutral-50. Spec §3 / R1.2 "honestidade de captura". `overall` also
+    # widens to Optional[int] (renormalized over present dimensions, or None
+    # when every dimension is absent).
     date: str
-    prompt_quality: int
+    prompt_quality: Optional[int]
     test_maturity: int
     tech_breadth: int
-    growth_rate: int
-    overall: int
+    growth_rate: Optional[int]
+    overall: Optional[int]
     sessions_analyzed: int
 
 

@@ -3,8 +3,22 @@
 core       = signals derived from git repository history (imported via /l1/import).
 enrichment = signals derived from Claude Code / Continue.dev sessions (existing).
 
-Each scorer declares which layers it consumes via the `data_sources` ClassVar.
+Each scorer declares two ClassVars:
+
+  data_sources: list[DataSource]
+    Which layers the scorer consumes. Pure documentation — runtime behavior
+    is governed by the .score() method's own logic.
+
+  fallback_when_enrichment_missing: bool (default True via Protocol)
+    When True (default), scorer runs with core-only when enrichment is
+    absent and produces a numeric score. When False, scorer returns None
+    when enrichment is absent (dimension disappears from the profile —
+    spec §3 / R1.2 principle "honestidade de captura").
+
 Scorers must NEVER conflate layers — combination is explicit and weighted.
+The neutral-50 fallback for empty L2 (legacy behavior) is REMOVED in R1.2:
+scorers with fallback=True use core-only; scorers with fallback=False
+return None.
 
 Naming note (R1.2): the wire format uses `payload.core`/`payload.enrichment`
 (spec §3.2). Internally, the dataclass keeps the name `L1Snapshot` to avoid

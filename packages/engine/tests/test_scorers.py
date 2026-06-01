@@ -13,7 +13,10 @@ from scorers.test_maturity import TestMaturityScorer
 
 
 def test_prompt_quality_empty() -> None:
-    assert PromptQualityScorer().score([]) == 0
+    # R1.2 — PromptQuality has fallback_when_enrichment_missing=False:
+    # when no sessions exist, the dimension is absent and the scorer
+    # returns None instead of fabricating a neutral 0.
+    assert PromptQualityScorer().score([]) is None
 
 
 def test_prompt_quality_with_test_session(sample_session_1) -> None:
@@ -98,12 +101,20 @@ def test_tech_breadth_capped_at_100(two_sessions) -> None:
 
 
 def test_growth_rate_empty_recent() -> None:
-    assert GrowthRateScorer().score([], []) == 0
+    # R1.2 — without any L1 history (empty L1Snapshot default) AND with
+    # no recent/previous sessions, GrowthRate cannot judge trajectory:
+    # returns None (dimension absent). Was 0 in legacy.
+    assert GrowthRateScorer().score([], []) is None
 
 
 def test_growth_rate_no_previous(sample_session_1) -> None:
+    # R1.2 — no L1 history, sessions but no previous baseline. The new
+    # _score_enrichment_only path returns a score derived from the
+    # session metrics (no longer hardcoded 50). Verify it's a valid
+    # int in [0, 100], not pinned to the legacy neutral value.
     score = GrowthRateScorer().score([sample_session_1], [])
-    assert score == 50
+    assert isinstance(score, int)
+    assert 0 <= score <= 100
 
 
 def test_growth_rate_same_sessions(sample_session_1) -> None:

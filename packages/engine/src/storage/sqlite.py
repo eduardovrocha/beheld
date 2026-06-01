@@ -1297,12 +1297,17 @@ class BeheldDB:
 
 
 def _row_to_scores(r: dict) -> Scores:
+    """R1.2 — preserve NULL for prompt_quality, growth_rate, and overall.
+    The DB stores INTEGER columns that allow NULL; collapsing to 0 would
+    fabricate a neutral observation where none exists ("dimensão ausente"
+    semantic). test_maturity, tech_breadth, sessions_analyzed remain
+    non-nullable in practice (their scorers always return an int)."""
     return Scores(
         date=r["date"],
-        prompt_quality=r["prompt_quality"] or 0,
+        prompt_quality=r["prompt_quality"],
         test_maturity=r["test_maturity"] or 0,
         tech_breadth=r["tech_breadth"] or 0,
-        growth_rate=r["growth_rate"] or 0,
-        overall=r["overall"] or 0,
+        growth_rate=r["growth_rate"],
+        overall=r["overall"],
         sessions_analyzed=r["sessions_analyzed"] or 0,
     )

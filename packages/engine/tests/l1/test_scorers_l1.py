@@ -67,10 +67,18 @@ def _l1(
 
 
 def test_scorers_declare_data_sources() -> None:
-    assert PromptQualityScorer.data_sources == ["l2"]
-    assert TestMaturityScorer.data_sources == ["l1", "l2"]
-    assert TechBreadthScorer.data_sources == ["l1", "l2"]
-    assert GrowthRateScorer.data_sources == ["l1", "l2"]
+    # R1.2 — data_sources strings renamed l1/l2 → core/enrichment per
+    # spec §3.2. fallback_when_enrichment_missing ClassVar declared per
+    # scorer: True for the three with a core baseline, False for
+    # PromptQuality (enrichment-exclusive).
+    assert PromptQualityScorer.data_sources == ["enrichment"]
+    assert PromptQualityScorer.fallback_when_enrichment_missing is False
+    assert TestMaturityScorer.data_sources == ["core", "enrichment"]
+    assert TestMaturityScorer.fallback_when_enrichment_missing is True
+    assert TechBreadthScorer.data_sources == ["core", "enrichment"]
+    assert TechBreadthScorer.fallback_when_enrichment_missing is True
+    assert GrowthRateScorer.data_sources == ["core", "enrichment"]
+    assert GrowthRateScorer.fallback_when_enrichment_missing is True
 
 
 # ── TechBreadth ──────────────────────────────────────────────────────────────
@@ -100,11 +108,12 @@ def test_tech_breadth_with_l2_only_preserves_existing_behavior() -> None:
     assert with_empty_l1 > 0  # the sessions cover several ecosystems/platforms
 
 
-def test_tech_breadth_combines_l1_and_l2_with_correct_weights() -> None:
-    """Override the private scorers to known values and verify the 60/40 blend."""
+def test_tech_breadth_combines_core_and_enrichment_with_correct_weights() -> None:
+    """R1.2 — verify the 60/40 blend after internal rename from
+    _score_l1/_score_l2 to _score_core/_score_enrichment."""
     scorer = TechBreadthScorer()
-    scorer._score_l1 = lambda l1: 80  # type: ignore[method-assign]
-    scorer._score_l2 = lambda sessions: 40  # type: ignore[method-assign]
+    scorer._score_core = lambda l1: 80  # type: ignore[method-assign]
+    scorer._score_enrichment = lambda sessions: 40  # type: ignore[method-assign]
     sessions = [_session()]
     l1 = _l1()
     result = scorer.score(sessions, l1=l1)
@@ -112,9 +121,11 @@ def test_tech_breadth_combines_l1_and_l2_with_correct_weights() -> None:
     assert result == 64
 
 
-def test_tech_breadth_l1_only_no_sessions_returns_l1_score() -> None:
+def test_tech_breadth_core_only_no_sessions_returns_core_score() -> None:
+    """R1.2 — enrichment absent → fallback_when_enrichment_missing=True
+    returns the core-only score (no neutral-50 fallback)."""
     scorer = TechBreadthScorer()
-    scorer._score_l1 = lambda l1: 72  # type: ignore[method-assign]
+    scorer._score_core = lambda l1: 72  # type: ignore[method-assign]
     result = scorer.score(sessions=[], l1=_l1())
     assert result == 72
 
@@ -191,25 +202,32 @@ def test_growth_rate_l1_empty_falls_back_to_l2_comparison() -> None:
     assert with_empty_l1 == without_l1_arg
 
 
-def test_growth_rate_l2_empty_returns_50() -> None:
-    """No recent activity → neutral 50 (cannot judge trajectory)."""
+def test_growth_rate_enrichment_empty_without_monthly_buckets_returns_none() -> None:
+    """R1.2 — no recent/previous sessions AND core has no monthly_buckets
+    (legacy fixture or pre-R1.2a data) → cannot judge trajectory →
+    returns None (dimension absent). The legacy neutral-50 was removed
+    per spec rule "honestidade de captura"."""
+    # _l1() helper produces an L1Snapshot WITHOUT monthly_buckets.
     score = GrowthRateScorer().score(recent=[], previous=[], l1=_l1())
-    assert score == 50
+    assert score is None
 
 
-def test_growth_rate_l2_empty_l1_empty_returns_0() -> None:
-    """Pre-Phase-6 invariant: no L2 activity and no L1 → 0."""
+def test_growth_rate_enrichment_empty_l1_empty_returns_none() -> None:
+    """R1.2 — no enrichment AND no core data at all → None (no dimension
+    to observe). Was 0 in legacy."""
     score = GrowthRateScorer().score(recent=[], previous=[])
-    assert score == 0
+    assert score is None
 
 
-# ── PromptQuality (L2 only) ──────────────────────────────────────────────────
+# ── PromptQuality (enrichment-only) ──────────────────────────────────────────
 
 
-def test_prompt_quality_ignores_l1_completely() -> None:
-    """PromptQualityScorer must not accept an l1 parameter — and its declared
-    data_sources reflects L2-only consumption."""
-    assert PromptQualityScorer.data_sources == ["l2"]
+def test_prompt_quality_ignores_core_completely() -> None:
+    """R1.2 — PromptQualityScorer is enrichment-exclusive: it must not
+    accept an l1 (core) parameter, and its declared data_sources is
+    ['enrichment'] with fallback_when_enrichment_missing=False."""
+    assert PromptQualityScorer.data_sources == ["enrichment"]
+    assert PromptQualityScorer.fallback_when_enrichment_missing is False
 
     import inspect
     sig = inspect.signature(PromptQualityScorer().score)
@@ -225,7 +243,9 @@ def test_overall_weights_sum_to_one() -> None:
 
 
 def test_overall_weights_declare_sources() -> None:
-    assert WEIGHTS["prompt_quality"]["sources"] == ["l2"]
-    assert WEIGHTS["test_maturity"]["sources"] == ["l1", "l2"]
-    assert WEIGHTS["tech_breadth"]["sources"] == ["l1", "l2"]
-    assert WEIGHTS["growth_rate"]["sources"] == ["l1", "l2"]
+    # R1.2 — sources strings renamed l1/l2 → core/enrichment per spec §3.2.
+    # Weight values are UNCHANGED (PromptQuality is the only enrichment-only).
+    assert WEIGHTS["prompt_quality"]["sources"] == ["enrichment"]
+    assert WEIGHTS["test_maturity"]["sources"] == ["core", "enrichment"]
+    assert WEIGHTS["tech_breadth"]["sources"] == ["core", "enrichment"]
+    assert WEIGHTS["growth_rate"]["sources"] == ["core", "enrichment"]

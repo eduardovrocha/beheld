@@ -161,12 +161,15 @@ def process() -> dict:
 def scores_current() -> dict:
     scores = db.get_current_scores()
     if scores is None:
+        # R1.2 — surface absent dimensions as null, not as a neutral 0.
+        # PromptQuality and GrowthRate now return None when their source
+        # data is missing; the API mirrors that honestly.
         return {
-            "prompt_quality": 0,
+            "prompt_quality": None,
             "test_maturity": 0,
             "tech_breadth": 0,
-            "growth_rate": 0,
-            "overall": 0,
+            "growth_rate": None,
+            "overall": None,
             "sessions_analyzed": 0,
             "sessions_today": 0,
             "updated_at": None,
@@ -269,13 +272,17 @@ def _build_session_context(session_hint: str) -> SessionContext:
 
 
 def _empty_scores() -> Scores:
+    # R1.2 — empty profile: dimensions with Optional semantics are None.
+    # test_maturity / tech_breadth stay 0 because their scorers always
+    # return an int (fallback_when_enrichment_missing=True with core-only
+    # path even when l1 is empty produces 0, not None).
     return Scores(
         date="",
-        prompt_quality=0,
+        prompt_quality=None,
         test_maturity=0,
         tech_breadth=0,
-        growth_rate=0,
-        overall=0,
+        growth_rate=None,
+        overall=None,
         sessions_analyzed=0,
     )
 

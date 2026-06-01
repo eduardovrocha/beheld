@@ -103,8 +103,10 @@ function formatLive(payload: CoachPayload): string {
     }
   }
   lines.push("");
+  // R1.2c — overall may be null when every dimension is absent.
+  const overallTxt = payload.scores.overall === null ? "—/100" : `${payload.scores.overall}/100`;
   lines.push(
-    `Score geral: ${payload.scores.overall}/100 · ${payload.scores.sessions_analyzed} sessões · ${payload.data_freshness}`,
+    `Score geral: ${overallTxt} · ${payload.scores.sessions_analyzed} sessões · ${payload.data_freshness}`,
   );
 
   return wrap(lines.join("\n"), payload);

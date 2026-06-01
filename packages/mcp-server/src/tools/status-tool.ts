@@ -3,7 +3,8 @@ import type { McpTool } from "./types";
 const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
 
 interface EngineScores {
-  overall: number;
+  // R1.2c — overall may be null when every dimension is absent.
+  overall: number | null;
   sessions_analyzed: number;
   updated_at: string | null;
   sessions_today?: number;
@@ -21,9 +22,12 @@ export const statusTool: McpTool = {
       });
       if (!r.ok) throw new Error(`engine returned ${r.status}`);
       const scores = (await r.json()) as EngineScores;
+      // R1.2c — label renders "—/100" when overall is null (every
+      // dimension absent), preserving the structure for the sidebar.
+      const labelOverall = scores.overall === null ? "—" : String(scores.overall);
       return {
         score: scores.overall,
-        label: `Beheld ${scores.overall}/100`,
+        label: `Beheld ${labelOverall}/100`,
         sessions_today: scores.sessions_today ?? scores.sessions_analyzed,
         last_updated: scores.updated_at,
         top_insight: scores.top_insight ?? null,

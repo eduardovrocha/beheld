@@ -185,9 +185,29 @@ const SCORE_LABELS: Record<string, string> = {
 const SCORE_DIMENSIONS = ["prompt_quality", "test_maturity", "tech_breadth", "growth_rate"] as const;
 
 function renderScoresSection(scores: BundlePayload["scores"] | undefined): string {
-  if (!scores || typeof scores.overall !== "number") return "";
+  // R1.2c — overall may legitimately be null in a v7 bundle (every
+  // dimension absent at scoring time). Only render the section when
+  // we have ANY numeric score to display. If the bundle has scores
+  // but overall is null AND no per-dimension is numeric, hide the
+  // entire section (saves the public retrato from showing an empty
+  // grid). Bundles without scores at all still return "" upstream.
+  if (!scores) return "";
+  const hasAnyNumeric =
+    typeof scores.overall === "number" ||
+    SCORE_DIMENSIONS.some((dim) => typeof scores[dim] === "number");
+  if (!hasAnyNumeric) return "";
   const rows = SCORE_DIMENSIONS.map((dim) => {
-    const val = scores[dim] ?? 0;
+    const val = scores[dim];
+    if (typeof val !== "number") {
+      // R1.2c — per-dimension absent: render "—" with an empty bar so
+      // the row still reads as a dimension that wasn't observed.
+      return `
+      <div class="score-row score-row-absent">
+        <div class="score-name">${escapeHtml(SCORE_LABELS[dim])}</div>
+        <div class="score-bar"></div>
+        <div class="score-val">—</div>
+      </div>`;
+    }
     const clamped = Math.max(0, Math.min(100, val));
     return `
       <div class="score-row">
@@ -196,12 +216,13 @@ function renderScoresSection(scores: BundlePayload["scores"] | undefined): strin
         <div class="score-val">${val}</div>
       </div>`;
   }).join("");
-  const overall = scores.overall ?? 0;
+  const overallNum =
+    typeof scores.overall === "number" ? String(scores.overall) : "—";
   return `
     <section class="scores" aria-label="Scores">
       <div class="label">Scores</div>
       <div class="score-overall">
-        <span class="score-overall-num">${overall}</span>
+        <span class="score-overall-num">${overallNum}</span>
         <span class="score-overall-of">/100</span>
         <span class="score-overall-tag">geral</span>
       </div>
@@ -403,7 +424,18 @@ const TIER_BADGE: Record<TrustTier, TierBadgeSpec> = {
 function renderTierBadge(bundle: Bundle): string {
   const tier = computeTier(bundle as Parameters<typeof computeTier>[0]);
   const spec = TIER_BADGE[tier];
-  return `<span class="tier-badge tier-${spec.variant}" title="${escapeHtml(spec.hint)}" data-tier="${tier}">${escapeHtml(spec.label)}</span>`;
+  const attrs = `class="tier-badge tier-${spec.variant}" title="${escapeHtml(spec.hint)}" data-tier="${tier}"`;
+  // For fully_verifiable bundles, link the badge to the public Sigstore
+  // Rekor entry — recruiters can click the badge to inspect the inclusion
+  // proof. Other tiers stay non-clickable spans.
+  const rekor = (bundle as { rekor?: BundleRekorView | null }).rekor;
+  const rekorUrl =
+    tier === "fully_verifiable" && rekor && typeof rekor.logIndex === "number"
+      ? `https://search.sigstore.dev/?logIndex=${rekor.logIndex}`
+      : null;
+  return rekorUrl
+    ? `<a ${attrs} href="${escapeHtml(rekorUrl)}" target="_blank" rel="noopener">${escapeHtml(spec.label)}</a>`
+    : `<span ${attrs}>${escapeHtml(spec.label)}</span>`;
 }
 
 // ── F6.12 / nível 3 — full trust details panel (inside the expandable) ──────
@@ -601,8 +633,40 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       --ink-soft: #6B6B6B;
       --rule: #D9D6D0;
       --rule-soft: #E5E2DD;
+      --card-bg: #FFFFFF;
       --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+    }
+    /* Auto dark mode for direct file:// access or browsers without an
+       explicit override; the SPA wraps this in an iframe and sets
+       html[data-theme] on it directly (see SnapshotIframe). */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --ink: #e6e1d8;
+        --ink-soft: #8b8278;
+        --rule: #252b35;
+        --rule-soft: #1e242e;
+        --card-bg: #11161e;
+      }
+    }
+    /* Explicit overrides — set by the SPA on the iframe's html element so
+       the theme toggle (auto / light / dark) flows into the retrato. */
+    html[data-theme="light"] {
+      --bg: #FAF8F5;
+      --ink: #1A1A1A;
+      --ink-soft: #6B6B6B;
+      --rule: #D9D6D0;
+      --rule-soft: #E5E2DD;
+      --card-bg: #FFFFFF;
+    }
+    html[data-theme="dark"] {
+      --bg: #0d1117;
+      --ink: #e6e1d8;
+      --ink-soft: #8b8278;
+      --rule: #252b35;
+      --rule-soft: #1e242e;
+      --card-bg: #11161e;
     }
     html { -webkit-text-size-adjust: 100%; }
     body {
@@ -610,7 +674,7 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       font-feature-settings: "ss01", "cv11"; line-height: 1.5;
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     }
-    .page { max-width: 640px; margin: 0 auto; padding: 96px 32px 64px; }
+    .page { /* max-width: 640px; */ margin: 0 auto; padding: 96px 32px 64px; }
     .header {
       display: flex; justify-content: space-between; align-items: baseline;
       color: var(--ink-soft); font-size: 14px; margin-bottom: 80px;
@@ -618,7 +682,7 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
     .header .name { font-weight: 500; color: var(--ink); }
     .identity {
       font-family: var(--serif); font-size: 30px; line-height: 1.25;
-      letter-spacing: -0.015em; font-weight: 400; max-width: 540px;
+      letter-spacing: -0.015em; font-weight: 400;
     }
     .divider { width: 64px; height: 1px; background: var(--rule); margin: 64px 0; }
     .facts { display: flex; flex-direction: column; gap: 32px; }
@@ -677,11 +741,33 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       letter-spacing: 0.01em;
       line-height: 1.5;
       cursor: help;
+      text-decoration: none;
     }
+    a.tier-badge { cursor: pointer; }
+    a.tier-badge:hover { filter: brightness(0.95); }
     .tier-badge.tier-trusted {
       background: #E8F1EB; color: #2E7D5F;
       border: 1px solid #B7D5C2;
     }
+    /* Dark overrides for the hardcoded chip + panel that don't read from
+       --bg/--ink. The verification icons keep their hue (success/error
+       cues stay legible on both backgrounds). */
+    @media (prefers-color-scheme: dark) {
+      .tier-badge.tier-trusted {
+        background: rgba(74, 124, 78, 0.18); color: #7fa87f;
+        border-color: rgba(127, 168, 127, 0.4);
+      }
+      .verification-details { background: rgba(255, 255, 255, 0.04); }
+    }
+    html[data-theme="light"] .tier-badge.tier-trusted {
+      background: #E8F1EB; color: #2E7D5F; border-color: #B7D5C2;
+    }
+    html[data-theme="light"] .verification-details { background: rgba(0,0,0,0.02); }
+    html[data-theme="dark"] .tier-badge.tier-trusted {
+      background: rgba(74, 124, 78, 0.18); color: #7fa87f;
+      border-color: rgba(127, 168, 127, 0.4);
+    }
+    html[data-theme="dark"] .verification-details { background: rgba(255, 255, 255, 0.04); }
     .tier-badge.tier-strong {
       background: var(--ink); color: var(--bg);
     }

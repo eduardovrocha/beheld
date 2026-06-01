@@ -18,17 +18,26 @@ import type { Bundle, BundlePayload, HarnessSource } from "./types";
 
 // ── manifest (R1.1, spec §3.3) ──────────────────────────────────────────────
 
-/** Detected schema family of a bundle. v6 is current; v5/v1 are accepted in
- *  read-only fallback so legacy artifacts continue verifying. */
-export type DetectedSchema = "v6" | "v5_legacy" | "v1_legacy" | "unknown";
+/** Detected schema family of a bundle. v7 is current; v6/v5/v1 are accepted
+ *  in read-only fallback so legacy artifacts continue verifying.
+ *  v6 and v7 share the same payload shape (payload.core / payload.enrichment);
+ *  the difference is that v7 allows null in payload.scores.{prompt_quality,
+ *  growth_rate, overall} per spec §7 + R1.2c. Detection uses bundle.version
+ *  string when present, falling back to payload shape inspection. */
+export type DetectedSchema =
+  | "v7"
+  | "v6_legacy"
+  | "v5_legacy"
+  | "v1_legacy"
+  | "unknown";
 
 export interface BundleManifest {
   /** Programmatic schema family (machine-readable). */
   schema: DetectedSchema;
-  /** Human-friendly label rendered by the CLI (e.g. "v6", "v5 (legacy)"). */
+  /** Human-friendly label rendered by the CLI (e.g. "v7", "v6 (legacy)"). */
   schemaLabel: string;
   /** Section names actually present in the payload, in canonical order.
-   *  v6: "core" always, "enrichment" when present.
+   *  v7/v6: "core" always, "enrichment" when present.
    *  v5: "l1" always, "l2" when present.
    *  v1: "signals". */
   sections: string[];
@@ -37,33 +46,80 @@ export interface BundleManifest {
   harnessSources: HarnessSource[];
 }
 
+function _extractHarnessSources(enrichment: Record<string, unknown>): HarnessSource[] {
+  const hs = enrichment.harness_sources;
+  if (!Array.isArray(hs)) return [];
+  return hs.filter(
+    (s): s is HarnessSource =>
+      !!s &&
+      typeof s === "object" &&
+      typeof (s as HarnessSource).harness === "string" &&
+      typeof (s as HarnessSource).capture_fidelity === "string" &&
+      typeof (s as HarnessSource).sessions === "number",
+  );
+}
+
 /** Pure: detect schema + list sections + extract harness_sources from a Bundle
  *  (or any record loaded from disk). Never throws — falls through to "unknown"
  *  when shape is unrecognized. */
 export function summarizeManifest(bundle: Bundle | Record<string, unknown>): BundleManifest {
   const raw = (bundle as { payload?: Record<string, unknown> }).payload;
   const payload = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const version = (bundle as { version?: unknown }).version;
 
-  // Schema detection — fallback chain mirrors validateSchema below.
+  // Primary detection: bundle.version field when present. v7 and v6 share
+  // payload shape but differ in score nullability semantic, so the version
+  // string is the authoritative discriminator.
+  if (typeof version === "string") {
+    if (version === "7" && "core" in payload) {
+      const sections: string[] = ["core"];
+      let harnessSources: HarnessSource[] = [];
+      const enr = payload.enrichment;
+      if (enr && typeof enr === "object") {
+        sections.push("enrichment");
+        harnessSources = _extractHarnessSources(enr as Record<string, unknown>);
+      }
+      return { schema: "v7", schemaLabel: "v7", sections, harnessSources };
+    }
+    if (version === "6" && "core" in payload) {
+      const sections: string[] = ["core"];
+      let harnessSources: HarnessSource[] = [];
+      const enr = payload.enrichment;
+      if (enr && typeof enr === "object") {
+        sections.push("enrichment");
+        harnessSources = _extractHarnessSources(enr as Record<string, unknown>);
+      }
+      return { schema: "v6_legacy", schemaLabel: "v6 (legacy)", sections, harnessSources };
+    }
+    if (version === "5" && "l1" in payload) {
+      const sections: string[] = ["l1"];
+      if (payload.l2 && typeof payload.l2 === "object") sections.push("l2");
+      return { schema: "v5_legacy", schemaLabel: "v5 (legacy)", sections, harnessSources: [] };
+    }
+    if (version === "1" && "signals" in payload) {
+      return {
+        schema: "v1_legacy",
+        schemaLabel: "v1 (legacy)",
+        sections: ["signals"],
+        harnessSources: [],
+      };
+    }
+    // version field present but mismatched payload shape — fall through to
+    // shape-based detection below.
+  }
+
+  // Secondary: payload shape inspection when bundle.version is missing or
+  // doesn't match. Treats core+enrichment as v6_legacy (most permissive
+  // current schema with the same shape).
   if ("core" in payload) {
     const sections: string[] = ["core"];
     let harnessSources: HarnessSource[] = [];
     const enr = payload.enrichment;
     if (enr && typeof enr === "object") {
       sections.push("enrichment");
-      const hs = (enr as { harness_sources?: unknown }).harness_sources;
-      if (Array.isArray(hs)) {
-        harnessSources = hs.filter(
-          (s): s is HarnessSource =>
-            !!s &&
-            typeof s === "object" &&
-            typeof (s as HarnessSource).harness === "string" &&
-            typeof (s as HarnessSource).capture_fidelity === "string" &&
-            typeof (s as HarnessSource).sessions === "number",
-        );
-      }
+      harnessSources = _extractHarnessSources(enr as Record<string, unknown>);
     }
-    return { schema: "v6", schemaLabel: "v6", sections, harnessSources };
+    return { schema: "v6_legacy", schemaLabel: "v6 (legacy)", sections, harnessSources };
   }
   if ("l1" in payload) {
     const sections: string[] = ["l1"];

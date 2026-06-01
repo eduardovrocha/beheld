@@ -57,8 +57,10 @@ export function renderCoachText(payload: CoachPayload): string {
     lines.push(`  ${DIM}Contexto: ${ctx.session_phase_hint} · ${ecos}${RESET}`);
   }
 
+  // R1.2c — overall may be null when every dimension is absent.
+  const overallTxt = payload.scores.overall === null ? "—/100" : `${payload.scores.overall}/100`;
   lines.push(
-    `  ${DIM}Score: ${payload.scores.overall}/100 · ${payload.scores.sessions_analyzed} sessões${RESET}`,
+    `  ${DIM}Score: ${overallTxt} · ${payload.scores.sessions_analyzed} sessões${RESET}`,
   );
   lines.push("");
 

@@ -495,9 +495,9 @@ describe("verifyBundle — L1 / L2 sections (F6.8)", () => {
 // ── R1.1 §3.3 — manifest (schema + sections + capture_fidelity per source) ───
 
 describe("summarizeManifest — pure detection", () => {
-  test("v6 full bundle: schema=v6, sections=[core, enrichment], harness_sources extracted", () => {
+  test("v7 full bundle: schema=v7, sections=[core, enrichment], harness_sources extracted", () => {
     const bundle = {
-      version: "6",
+      version: "7",
       payload: {
         core: { total_repos: 1 },
         enrichment: {
@@ -510,8 +510,8 @@ describe("summarizeManifest — pure detection", () => {
       },
     };
     const m = summarizeManifest(bundle);
-    expect(m.schema).toBe("v6");
-    expect(m.schemaLabel).toBe("v6");
+    expect(m.schema).toBe("v7");
+    expect(m.schemaLabel).toBe("v7");
     expect(m.sections).toEqual(["core", "enrichment"]);
     expect(m.harnessSources).toHaveLength(2);
     expect(m.harnessSources[0]).toEqual({
@@ -522,18 +522,39 @@ describe("summarizeManifest — pure detection", () => {
     expect(m.harnessSources[1]?.capture_fidelity).toBe("local_log_tail");
   });
 
-  test("v6 core-only bundle: schema=v6, sections=[core], no harness_sources", () => {
+  test("v7 core-only bundle: schema=v7, sections=[core], no harness_sources", () => {
     const bundle = {
-      version: "6",
+      version: "7",
       payload: {
         core: { total_repos: 3 },
-        // enrichment intentionally absent
       },
     };
     const m = summarizeManifest(bundle);
-    expect(m.schema).toBe("v6");
+    expect(m.schema).toBe("v7");
     expect(m.sections).toEqual(["core"]);
     expect(m.harnessSources).toEqual([]);
+  });
+
+  test("v6 legacy bundle: schema=v6_legacy, payload shape identical, label flagged as legacy", () => {
+    // R1.2c — v6 bundles still verify but are marked legacy because v7
+    // is the current wire (scores can be null). v6 and v7 share the
+    // same payload shape (core/enrichment) — only bundle.version differs.
+    const bundle = {
+      version: "6",
+      payload: {
+        core: { total_repos: 1 },
+        enrichment: {
+          harness_sources: [
+            { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
+          ],
+        },
+      },
+    };
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v6_legacy");
+    expect(m.schemaLabel).toBe("v6 (legacy)");
+    expect(m.sections).toEqual(["core", "enrichment"]);
+    expect(m.harnessSources).toHaveLength(1);
   });
 
   test("v5 legacy bundle: schema=v5_legacy, sections=[l1, l2], no harness_sources", () => {
@@ -573,7 +594,7 @@ describe("summarizeManifest — pure detection", () => {
 
   test("malformed harness_sources entries are filtered out (not crash)", () => {
     const bundle = {
-      version: "6",
+      version: "7",
       payload: {
         core: {},
         enrichment: {
@@ -590,25 +611,71 @@ describe("summarizeManifest — pure detection", () => {
     expect(m.harnessSources).toHaveLength(2);
     expect(m.harnessSources.map((s) => s.harness)).toEqual(["claude_code", "cursor"]);
   });
+
+  test("R1.2c — bundle.version='7' is authoritative even when payload shape is core/enrichment", () => {
+    // Cross-check: with bundle.version="7", schema MUST be v7 (current),
+    // not v6_legacy. The version field is the discriminator between v6
+    // and v7 since payload shape is identical.
+    const v7 = { version: "7", payload: { core: {} } };
+    expect(summarizeManifest(v7).schema).toBe("v7");
+
+    // Conversely, version="6" with same payload → v6_legacy.
+    const v6 = { version: "6", payload: { core: {} } };
+    expect(summarizeManifest(v6).schema).toBe("v6_legacy");
+  });
+
+  test("R1.2c — payload-only fallback (no bundle.version) treats core+enrichment as v6_legacy", () => {
+    // Defensive: when a caller passes only a payload-shaped record without
+    // bundle.version, we fall back to shape-based detection. The most
+    // permissive current schema with that shape is v6_legacy (v7 requires
+    // the explicit version label).
+    const m = summarizeManifest({ payload: { core: {} } });
+    expect(m.schema).toBe("v6_legacy");
+  });
 });
 
 describe("manifest matches the on-disk fixtures", () => {
   const FIXTURES = join(import.meta.dir, "fixtures");
 
-  test("bundle_v6_full.json: v6 + core+enrichment + claude_code/native_hook", () => {
+  test("bundle_v7_full.json: v7 + core+enrichment + claude_code/native_hook (current schema)", () => {
+    const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v7_full.json"), "utf8"));
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v7");
+    expect(m.sections).toEqual(["core", "enrichment"]);
+    expect(m.harnessSources).toEqual([
+      { harness: "claude_code", capture_fidelity: "native_hook", sessions: 42 },
+    ]);
+  });
+
+  test("bundle_v7_core_only.json: v7 + only core + zero harness_sources + null scores", () => {
+    const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v7_core_only.json"), "utf8"));
+    const m = summarizeManifest(bundle);
+    expect(m.schema).toBe("v7");
+    expect(m.sections).toEqual(["core"]);
+    expect(m.harnessSources).toEqual([]);
+    // R1.2c — scores carry null for absent dimensions.
+    expect(bundle.payload.scores.prompt_quality).toBeNull();
+    expect(bundle.payload.scores.growth_rate).toBeNull();
+    expect(bundle.payload.scores.overall).toBeNull();
+    // test_maturity / tech_breadth keep numeric values.
+    expect(typeof bundle.payload.scores.test_maturity).toBe("number");
+    expect(typeof bundle.payload.scores.tech_breadth).toBe("number");
+  });
+
+  test("bundle_v6_full.json: v6_legacy + core+enrichment (read-only fallback)", () => {
     const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v6_full.json"), "utf8"));
     const m = summarizeManifest(bundle);
-    expect(m.schema).toBe("v6");
+    expect(m.schema).toBe("v6_legacy");
     expect(m.sections).toEqual(["core", "enrichment"]);
     expect(m.harnessSources).toEqual([
       { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
     ]);
   });
 
-  test("bundle_v6_core_only.json: v6 + only core + zero harness_sources", () => {
+  test("bundle_v6_core_only.json: v6_legacy + only core + zero harness_sources", () => {
     const bundle = JSON.parse(readFileSync(join(FIXTURES, "bundle_v6_core_only.json"), "utf8"));
     const m = summarizeManifest(bundle);
-    expect(m.schema).toBe("v6");
+    expect(m.schema).toBe("v6_legacy");
     expect(m.sections).toEqual(["core"]);
     expect(m.harnessSources).toEqual([]);
   });

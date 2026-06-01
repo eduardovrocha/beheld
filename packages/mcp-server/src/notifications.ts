@@ -99,7 +99,12 @@ export class NotificationService {
         signal: AbortSignal.timeout(2000),
       });
       if (!r.ok) return;
-      const scores = (await r.json()) as { overall: number };
+      const scores = (await r.json()) as { overall: number | null };
+
+      // R1.2c — when every dimension is absent, overall is null. Skip the
+      // notification entirely: a daily-score notification reading "score —"
+      // would be noise, not signal.
+      if (scores.overall === null) return;
 
       let delta: number | null = null;
       try {
@@ -107,9 +112,12 @@ export class NotificationService {
           signal: AbortSignal.timeout(2000),
         });
         if (histRes.ok) {
-          const history = (await histRes.json()) as Array<{ overall: number }>;
-          if (history.length >= 2) {
-            delta = scores.overall - history[history.length - 2].overall;
+          const history = (await histRes.json()) as Array<{ overall: number | null }>;
+          const previous = history[history.length - 2]?.overall;
+          // Only compute a delta when BOTH endpoints are numeric — comparing
+          // a numeric score against an absent baseline is meaningless.
+          if (history.length >= 2 && typeof previous === "number") {
+            delta = scores.overall - previous;
           }
         }
       } catch {

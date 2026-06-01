@@ -1,7 +1,11 @@
 import type { ProfileData, Scores, ViewFlags } from "../types";
 import { RESET, BOLD, GREEN, YELLOW, RED, DIM, CYAN } from "./styles";
 
-function color(score: number): string {
+function color(score: number | null): string {
+  // R1.2c — null = dimension absent (PromptQuality with no enrichment,
+  // GrowthRate with <6mo history). Use DIM so it visually reads as
+  // "not observed" rather than as a bad score.
+  if (score === null) return DIM;
   if (score >= 75) return GREEN;
   if (score >= 50) return YELLOW;
   return RED;
@@ -17,9 +21,15 @@ function bar(score: number, width = 20): string {
   return "█".repeat(filled) + "░".repeat(empty);
 }
 
-function scoreLine(label: string, score: number): string {
+function scoreLine(label: string, score: number | null): string {
+  // R1.2c — null score → render "—" in the value slot and an empty bar.
+  // Matches the "dimensão ausente" semantic without crashing on numeric
+  // operations or printing the literal "null".
   const c = color(score);
   const padded = label.padEnd(18);
+  if (score === null) {
+    return `  ${padded} ${c}  —${RESET}  ${DIM}${"─".repeat(10)}${RESET}`;
+  }
   return `  ${padded} ${c}${String(score).padStart(3)}${RESET}  ${c}${bar(score)}${RESET}`;
 }
 
@@ -57,11 +67,15 @@ export function renderProfile(data: ProfileData, flags: ViewFlags): string {
 
   if (flags.scoresOnly) {
     if (!scores) return "0 0 0 0";
+    // R1.2c — scoresOnly is a machine-readable format. Render null as the
+    // literal string "null" so downstream tooling can distinguish absent
+    // from zero. Padding/positioning preserved (4 space-separated fields).
+    const fmt = (v: number | null): string => (v === null ? "null" : String(v));
     return [
-      scores.prompt_quality,
-      scores.test_maturity,
-      scores.tech_breadth,
-      scores.growth_rate,
+      fmt(scores.prompt_quality),
+      fmt(scores.test_maturity),
+      fmt(scores.tech_breadth),
+      fmt(scores.growth_rate),
     ].join(" ");
   }
 
@@ -85,8 +99,11 @@ export function renderProfile(data: ProfileData, flags: ViewFlags): string {
       lines.push(scoreLine("Growth rate", scores.growth_rate));
       lines.push("");
       const oc = color(scores.overall);
+      // R1.2c — overall can be null when every dimension is absent.
+      // Render "—/100" with DIM color so the absence reads cleanly.
+      const overallTxt = scores.overall === null ? "—/100" : `${scores.overall}/100`;
       lines.push(
-        `  ${bold("Overall")}                ${oc}${scores.overall}/100${RESET}  ${DIM}(${scores.sessions_analyzed} sessões)${RESET}`,
+        `  ${bold("Overall")}                ${oc}${overallTxt}${RESET}  ${DIM}(${scores.sessions_analyzed} sessões)${RESET}`,
       );
     }
   } else {

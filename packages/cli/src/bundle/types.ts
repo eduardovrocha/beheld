@@ -5,10 +5,17 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-// Schema v6 (R1.1 — beheld-evolucao-multitool): payload.l1/l2 renamed to
-// payload.core/enrichment. capture_fidelity introduced as first-class
-// metadata inside enrichment.harness_sources[*]. See spec §3 + §8.
-export const BUNDLE_VERSION = "6";
+// Schema v7 (R1.2c — beheld-evolucao-multitool):
+//   v6 (R1.1) renamed payload.l1/l2 → core/enrichment and added
+//   capture_fidelity in enrichment.harness_sources[*].
+//   v7 (R1.2c) widens payload.scores.{prompt_quality, growth_rate,
+//   overall} to (number | null) in canonical JSON. Honours the
+//   "honestidade de captura" principle: when PromptQuality has no
+//   enrichment to observe, or GrowthRate has <6 months of history,
+//   the score is null (dimension absent) instead of being fabricated
+//   at a neutral value.
+// See spec §3 + §7 + §8.
+export const BUNDLE_VERSION = "7";
 
 /** Closed enum of capture fidelity values per spec §3.3. Any new value
  *  REQUIRES a schema bump + spec PR (no silent expansion). */
@@ -28,12 +35,22 @@ export const CAPTURE_FIDELITY_VALUES: readonly CaptureFidelity[] = [
 ] as const;
 
 export interface BundleScores {
+  /** R1.2c — prompt_quality, growth_rate, and overall widen to
+   *  (number | null) to honour the "honestidade de captura" principle:
+   *  - prompt_quality is null when no enrichment was captured (the
+   *    scorer is enrichment-exclusive, spec §7.3).
+   *  - growth_rate is null when the core history is shorter than 6
+   *    months (insufficient baseline for the §7.2 trajectory).
+   *  - overall is null when EVERY dimension is null (no dimension
+   *    observed at all).
+   *  test_maturity / tech_breadth keep `number` because their scorers
+   *  always return an int (fallback_when_enrichment_missing=True). */
   date: string;
-  prompt_quality: number;
+  prompt_quality: number | null;
   test_maturity: number;
   tech_breadth: number;
-  growth_rate: number;
-  overall: number;
+  growth_rate: number | null;
+  overall: number | null;
   sessions_analyzed: number;
 }
 

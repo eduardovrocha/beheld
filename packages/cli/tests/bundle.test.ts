@@ -195,8 +195,10 @@ const EXPECTED_HASH =
 // ── canonical_json basics ────────────────────────────────────────────────────
 
 describe("canonicalJson — primitives", () => {
-  test("BUNDLE_VERSION is '5'", () => {
-    expect(BUNDLE_VERSION).toBe("6");
+  test("BUNDLE_VERSION is the current wire schema string", () => {
+    // R1.2c — current wire is v7 (Optional scores in canonical). v6/v5/v1
+    // bundles still verify via the fallback chain in summarizeManifest.
+    expect(BUNDLE_VERSION).toBe("7");
   });
 
   test("sorts keys alphabetically", () => {

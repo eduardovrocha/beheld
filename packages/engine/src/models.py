@@ -222,10 +222,16 @@ class CoachPayload:
 # commit — the cross-language canonical hash test (test_bundle_contract) catches
 # drift.
 
-# Schema v6 (R1.1 — beheld-evolucao-multitool): payload.l1/l2 renamed to
-# payload.core/enrichment. capture_fidelity introduced as first-class metadata
-# inside enrichment.harness_sources[*]. See docs/beheld-evolucao-multitool.md §3.
-BUNDLE_VERSION = "6"
+# Schema v7 (R1.2c — beheld-evolucao-multitool):
+#   v6 (R1.1) renamed payload.l1/l2 → core/enrichment and added
+#   capture_fidelity in enrichment.harness_sources[*].
+#   v7 (R1.2c) widens payload.scores.{prompt_quality, growth_rate, overall}
+#   to Optional[int] | null in canonical JSON. Honours the "honestidade de
+#   captura" principle: when PromptQuality has no enrichment to observe, or
+#   GrowthRate has <6 months of history, the score is null (dimension
+#   absent) instead of being fabricated at a neutral value.
+# See docs/beheld-evolucao-multitool.md §3 and §7.
+BUNDLE_VERSION = "7"
 
 # Closed enum of capture fidelity values. Any new value REQUIRES a schema
 # bump + spec PR (no silent expansion). See spec §3.3.

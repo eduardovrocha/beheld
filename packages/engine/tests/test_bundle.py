@@ -197,8 +197,11 @@ EXPECTED_HASH = "sha256:3cd9ef34f20a9e1abf6dc3de2bc43bfe909d7ac29d21975cd69c931c
 # ── canonical_json basics ────────────────────────────────────────────────────
 
 
-def test_bundle_version_is_five() -> None:
-    assert BUNDLE_VERSION == "6"
+def test_bundle_version_is_current() -> None:
+    # R1.2c — current wire is v7. v6 / v5 / v1 still verify via the
+    # CLI's summarizeManifest fallback chain; the Python side emits
+    # only the current version.
+    assert BUNDLE_VERSION == "7"
 
 
 def test_canonical_sorts_keys_alphabetically() -> None:
@@ -307,7 +310,8 @@ def test_bundle_wrapper_serializes_with_payload_inside() -> None:
         public_key="ed25519:beef",
     )
     out = json.loads(canonical_json(dataclasses.asdict(bundle)))
-    assert out["version"] == "6"
+    # R1.2c — bumped to v7 alongside the Optional widening of payload.scores.
+    assert out["version"] == "7"
     assert out["hash"] == EXPECTED_HASH
     assert out["signature"] == "ed25519:dead"
     assert out["public_key"] == "ed25519:beef"

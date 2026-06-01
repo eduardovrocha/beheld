@@ -24,11 +24,16 @@ const IMPORT_POLL_INTERVAL_MS = 1500;
 const IMPORT_TIMEOUT_MS = 120_000;
 
 interface EngineScores {
-  prompt_quality: number;
+  // R1.2c — prompt_quality, growth_rate, and overall may be null when the
+  // dimension was absent at scoring time (PromptQuality is enrichment-
+  // exclusive; GrowthRate needs ≥6 months of core history; overall is
+  // null when every dimension is null). test_maturity / tech_breadth stay
+  // numeric (their scorers always return an int).
+  prompt_quality: number | null;
   test_maturity: number;
   tech_breadth: number;
-  growth_rate: number;
-  overall: number;
+  growth_rate: number | null;
+  overall: number | null;
   sessions_analyzed: number;
   updated_at: string | null;
   source: "live" | "cache";
@@ -104,17 +109,27 @@ async function fetchInsights(): Promise<Insight | null> {
   }
 }
 
-function bar(score: number, width = 10): string {
+function bar(score: number | null, width = 10): string {
+  // R1.2c — null score → empty bar of dashes. Reads as "not observed"
+  // rather than as "scored zero".
+  if (score === null) return "─".repeat(width);
   const filled = Math.max(0, Math.min(width, Math.round((score / 100) * width)));
   return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+/** R1.2c — pad a score value into a 3-char column, rendering null as "  —". */
+function scoreCell(value: number | null): string {
+  return value === null ? "  —" : String(value).padStart(3);
 }
 
 function formatSummary(scores: EngineScores, insights: string[]): string {
   if (scores.sessions_analyzed === 0) {
     return "Beheld: nenhuma sessão analisada ainda. Continue usando o Claude Code — volte após algumas sessões.";
   }
+  // R1.2c — overall may be null when every dimension is absent.
+  const overallTxt = scores.overall === null ? "—/100" : `${scores.overall}/100`;
   const lines: string[] = [
-    `Score geral: ${scores.overall}/100  ${bar(scores.overall)}  (${scores.sessions_analyzed} sessões)`,
+    `Score geral: ${overallTxt}  ${bar(scores.overall)}  (${scores.sessions_analyzed} sessões)`,
     "",
   ];
   for (const insight of insights.slice(0, 3)) {
@@ -131,12 +146,12 @@ function formatScores(scores: EngineScores): string {
     return "Beheld: nenhuma sessão analisada ainda.";
   }
   return [
-    `Prompt quality  ${String(scores.prompt_quality).padStart(3)}  ${bar(scores.prompt_quality)}`,
-    `Test maturity   ${String(scores.test_maturity).padStart(3)}  ${bar(scores.test_maturity)}`,
-    `Tech breadth    ${String(scores.tech_breadth).padStart(3)}  ${bar(scores.tech_breadth)}`,
-    `Growth rate     ${String(scores.growth_rate).padStart(3)}  ${bar(scores.growth_rate)}`,
+    `Prompt quality  ${scoreCell(scores.prompt_quality)}  ${bar(scores.prompt_quality)}`,
+    `Test maturity   ${scoreCell(scores.test_maturity)}  ${bar(scores.test_maturity)}`,
+    `Tech breadth    ${scoreCell(scores.tech_breadth)}  ${bar(scores.tech_breadth)}`,
+    `Growth rate     ${scoreCell(scores.growth_rate)}  ${bar(scores.growth_rate)}`,
     "",
-    `Overall         ${String(scores.overall).padStart(3)}`,
+    `Overall         ${scoreCell(scores.overall)}`,
   ].join("\n");
 }
 
@@ -151,13 +166,15 @@ function formatFull(scores: EngineScores, summary: ProfileSummary | null, insigh
     return "Beheld: nenhuma sessão analisada ainda. Continue usando o Claude Code.";
   }
 
+  // R1.2c — null-safe rendering across all 4 dimensions + overall.
+  const overallTxt = scores.overall === null ? "—/100" : `${scores.overall}/100`;
   const lines: string[] = [
-    `Score geral: ${scores.overall}/100  ${bar(scores.overall)}  (${scores.sessions_analyzed} sessões)`,
+    `Score geral: ${overallTxt}  ${bar(scores.overall)}  (${scores.sessions_analyzed} sessões)`,
     "",
-    `Prompt quality  ${String(scores.prompt_quality).padStart(3)}  ${bar(scores.prompt_quality)}`,
-    `Test maturity   ${String(scores.test_maturity).padStart(3)}  ${bar(scores.test_maturity)}`,
-    `Tech breadth    ${String(scores.tech_breadth).padStart(3)}  ${bar(scores.tech_breadth)}`,
-    `Growth rate     ${String(scores.growth_rate).padStart(3)}  ${bar(scores.growth_rate)}`,
+    `Prompt quality  ${scoreCell(scores.prompt_quality)}  ${bar(scores.prompt_quality)}`,
+    `Test maturity   ${scoreCell(scores.test_maturity)}  ${bar(scores.test_maturity)}`,
+    `Tech breadth    ${scoreCell(scores.tech_breadth)}  ${bar(scores.tech_breadth)}`,
+    `Growth rate     ${scoreCell(scores.growth_rate)}  ${bar(scores.growth_rate)}`,
   ];
 
   if (summary && summary.total_sessions > 0) {

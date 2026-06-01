@@ -1,0 +1,37 @@
+{
+  "_comment": "Schema v7 L1-only bundle: payload.core present, payload.enrichment absent, scores reflect 'dimensão ausente' semantic. prompt_quality is null because the scorer is enrichment-exclusive (no sessions captured). growth_rate is null because core history is shorter than 6 months. overall is null because only test_maturity and tech_breadth produced numeric scores and a 2-of-4 partial overall would be misleading (calculate_overall returns null when too many dimensions are absent — see scorers/overall.py renormalization). Used to test that the verifier accepts null score values without rejecting the bundle.",
+  "version": "7",
+  "payload": {
+    "created_at": "2026-06-01T00:00:00+00:00",
+    "beheld_version": "0.3.0",
+    "previous_hash": null,
+    "scores": {
+      "date": "2026-05-31",
+      "prompt_quality": null,
+      "test_maturity": 30,
+      "tech_breadth": 55,
+      "growth_rate": null,
+      "overall": null,
+      "sessions_analyzed": 0
+    },
+    "core": {
+      "total_repos": 2,
+      "total_commits": 120,
+      "earliest_commit": "2026-03-15T00:00:00+00:00",
+      "latest_commit": "2026-05-30T00:00:00+00:00",
+      "ecosystems": { "go": true, "rust": true },
+      "platforms": { "docker": true },
+      "avg_test_ratio": 0.30,
+      "root_commit_hashes": [
+        { "hash": "4444444444444444444444444444444444444444", "first_seen_at": "2026-05-15T00:00:00+00:00" },
+        { "hash": "5555555555555555555555555555555555555555", "first_seen_at": "2026-05-20T00:00:00+00:00" }
+      ]
+    },
+    "engine_version_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "stack": null,
+    "signals": null,
+    "identity": null,
+    "emergent": null,
+    "insights": null
+  }
+}

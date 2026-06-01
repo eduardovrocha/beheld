@@ -599,10 +599,10 @@ def test_snapshot_payload_builds_valid_shape(
     assert "beheld_version" in data
     assert "previous_hash" in data
     assert "scores" in data
-    assert "l1" in data
-    assert "l2" in data
+    assert "core" in data
+    assert "enrichment" in data
     # l2 contains the same 7 fields the old `signals` did
-    l2 = data["l2"]
+    l2 = data["enrichment"]
     for key in (
         "platforms", "ecosystems", "workflow_distribution",
         "project_categories", "workflow_metrics",
@@ -626,7 +626,7 @@ def test_snapshot_payload_carries_persisted_workflow_metrics(
         sessions_analyzed=10,
     )
     data = client.post("/snapshot/payload").json()
-    wm = data["l2"]["workflow_metrics"]
+    wm = data["enrichment"]["workflow_metrics"]
     assert wm["test_after_ratio"] == 0.78
     assert wm["bash_to_read_ratio"] == 4.2
 

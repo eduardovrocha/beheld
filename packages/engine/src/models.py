@@ -215,12 +215,25 @@ class CoachPayload:
 # commit — the cross-language canonical hash test (test_bundle_contract) catches
 # drift.
 
-BUNDLE_VERSION = "5"
+# Schema v6 (R1.1 — beheld-evolucao-multitool): payload.l1/l2 renamed to
+# payload.core/enrichment. capture_fidelity introduced as first-class metadata
+# inside enrichment.harness_sources[*]. See docs/beheld-evolucao-multitool.md §3.
+BUNDLE_VERSION = "6"
+
+# Closed enum of capture fidelity values. Any new value REQUIRES a schema
+# bump + spec PR (no silent expansion). See spec §3.3.
+CAPTURE_FIDELITY_VALUES = (
+    "native_hook",
+    "statusline",
+    "local_log_tail",
+    "editor_extension",
+    "inferred",
+)
 
 
 @dataclass(frozen=True)
 class L1RepositoryRef:
-    """Reference to an imported repository in the L1 section.
+    """Reference to an imported repository in the core (git-history) section.
 
     `hash` is the opaque root-commit SHA. `first_seen_at` is the ISO-8601 UTC
     timestamp of the first time this repo was imported (immutable across
@@ -230,9 +243,10 @@ class L1RepositoryRef:
 
 
 @dataclass(frozen=True)
-class BundleL1Section:
-    """Git-history signals (Phase 6 / L1). Empty values when no repository has
-    been imported — never absent from a v2 payload."""
+class BundleCoreSection:
+    """Git-history signals (the L1 backbone — universal, harness-independent).
+    Empty values when no repository has been imported — never absent from a
+    v6 payload. Was payload.l1 in v5."""
     total_repos: int
     total_commits: int
     earliest_commit: Optional[str]
@@ -244,9 +258,26 @@ class BundleL1Section:
 
 
 @dataclass(frozen=True)
-class BundleL2Section:
-    """Session signals (Phase 2–5 / L2). Same shape as the legacy
-    `BundleSignals` — the rename reflects the new layered model."""
+class HarnessSource:
+    """Describes a single L2 capture source feeding the enrichment section.
+    Mandatory inside every enrichment payload — declares which harnesses
+    contributed and at what fidelity.
+
+    `capture_fidelity` MUST be one of CAPTURE_FIDELITY_VALUES."""
+    harness: str
+    capture_fidelity: str
+    sessions: int
+
+
+@dataclass(frozen=True)
+class BundleEnrichmentSection:
+    """Session signals (the L2 layer — circumstantial, depends on harness).
+    Was payload.l2 in v5.
+
+    R1.1 introduces `harness_sources` as a first-class field: every
+    enrichment payload declares which harnesses contributed and at what
+    fidelity. Single Claude Code source today produces a single-element list."""
+    harness_sources: list[HarnessSource]
     platforms: dict[str, int]
     ecosystems: dict[str, int]
     workflow_distribution: dict[str, float]
@@ -256,41 +287,33 @@ class BundleL2Section:
     period_days: int
 
 
-# Back-compat alias for any external code that imported the old name.
-BundleSignals = BundleL2Section
-
-
 @dataclass(frozen=True)
 class BundlePayload:
     """The signed half of a .beheld. SHA-256 of canonical_json(payload) is
     embedded in the parent Bundle.hash; that same canonical_json is what
     Ed25519 signs.
 
-    Schema v2 (Phase 6): `signals` was replaced by separate `l1` and `l2`
-    sections so verifiers can inspect each layer independently.
+    Schema v6 (R1.1 — beheld-evolucao-multitool): `l1`/`l2` renamed to
+    `core`/`enrichment` to reflect the L1-backbone model.
+    `enrichment.harness_sources` is a first-class array carrying
+    `capture_fidelity` per source. Verifier accepts v5 legacy payloads
+    (l1/l2) in read-only fallback; generator emits v6 only.
 
-    F5.7.2 added `engine_version_hash` (SHA-256 of the engine binary that
-    produced the payload). Null when running unfrozen or when hashing fails.
+    Schema v2 (Phase 6): `signals` was replaced by separate L1/L2 sections.
+    F5.7.2 added `engine_version_hash`. Schema v4 (F6.12) added the four
+    overlay fields. Schema v5 added `insights`. Schema v6 (R1.1) renames
+    the two layered sections and adds capture_fidelity metadata.
 
-    Schema v4 (F6.12 — public retrato fidelity): four new fields embed the
-    human-facing overlays that were previously fetched ad-hoc by the CLI
-    when generating the HTML page. With these included in the signed bytes,
-    the shared HTML becomes a faithful renderer of the bundle — no live
-    engine required to view what's on the page.
-
-    The new fields are typed as Optional[dict] rather than dedicated
-    dataclasses for two reasons: (1) they're produced by modules
-    (identity_adapter, identity, l1.stack_aggregator) that already return
-    JSON-shaped dicts, and forcing them through frozen dataclasses adds
-    plumbing without verifier benefit; (2) the inner shape can evolve
-    independently of the wrapper schema — only the wrapper-level field
-    names are part of the cross-language contract."""
+    The overlay fields are typed as Optional[dict] rather than dedicated
+    dataclasses — they're produced by modules that already return
+    JSON-shaped dicts, and their inner shape can evolve independently of
+    the wrapper contract."""
     created_at: str
     beheld_version: str
     previous_hash: Optional[str]
     scores: Scores
-    l1: BundleL1Section
-    l2: BundleL2Section
+    core: BundleCoreSection
+    enrichment: BundleEnrichmentSection
     engine_version_hash: Optional[str] = None
     stack: Optional[dict] = None
     signals: Optional[dict] = None

@@ -51,26 +51,26 @@ def test_payload_includes_l1_section(db_with_scores: BeheldDB) -> None:
         last_commit_at="2026-05-10T00:00:00+00:00",
     )
     p = _payload_dict(db_with_scores)
-    assert "l1" in p
-    assert p["l1"]["total_repos"] == 1
-    assert p["l1"]["total_commits"] == 100
-    assert p["l1"]["ecosystems"] == {"python": True}
-    assert p["l1"]["platforms"] == {"docker": True}
-    assert p["l1"]["avg_test_ratio"] == pytest.approx(0.42)
+    assert "core" in p
+    assert p["core"]["total_repos"] == 1
+    assert p["core"]["total_commits"] == 100
+    assert p["core"]["ecosystems"] == {"python": True}
+    assert p["core"]["platforms"] == {"docker": True}
+    assert p["core"]["avg_test_ratio"] == pytest.approx(0.42)
 
 
 def test_payload_l1_empty_when_no_bootstrap(db_with_scores: BeheldDB) -> None:
     """The L1 key is ALWAYS present in v2 payloads — empty, not absent."""
     p = _payload_dict(db_with_scores)
-    assert "l1" in p
-    assert p["l1"]["total_repos"] == 0
-    assert p["l1"]["total_commits"] == 0
-    assert p["l1"]["earliest_commit"] is None
-    assert p["l1"]["latest_commit"] is None
-    assert p["l1"]["ecosystems"] == {}
-    assert p["l1"]["platforms"] == {}
-    assert p["l1"]["avg_test_ratio"] == 0.0
-    assert p["l1"]["root_commit_hashes"] == []
+    assert "core" in p
+    assert p["core"]["total_repos"] == 0
+    assert p["core"]["total_commits"] == 0
+    assert p["core"]["earliest_commit"] is None
+    assert p["core"]["latest_commit"] is None
+    assert p["core"]["ecosystems"] == {}
+    assert p["core"]["platforms"] == {}
+    assert p["core"]["avg_test_ratio"] == 0.0
+    assert p["core"]["root_commit_hashes"] == []
 
 
 def test_payload_l1_contains_root_commit_hashes(db_with_scores: BeheldDB) -> None:
@@ -80,7 +80,7 @@ def test_payload_l1_contains_root_commit_hashes(db_with_scores: BeheldDB) -> Non
     db_with_scores.save_l1_signals("hash-B", {}, {}, {}, 0.0, {}, None, None)
 
     p = _payload_dict(db_with_scores)
-    hashes = sorted(ref["hash"] for ref in p["l1"]["root_commit_hashes"])
+    hashes = sorted(ref["hash"] for ref in p["core"]["root_commit_hashes"])
     assert hashes == ["hash-A", "hash-B"]
 
 
@@ -93,7 +93,7 @@ def test_payload_l1_root_commit_hashes_are_sorted(db_with_scores: BeheldDB) -> N
     db_with_scores.save_l1_signals("aaa", {}, {}, {}, 0.0, {}, None, None)
 
     p = _payload_dict(db_with_scores)
-    assert [ref["hash"] for ref in p["l1"]["root_commit_hashes"]] == ["aaa", "zzz"]
+    assert [ref["hash"] for ref in p["core"]["root_commit_hashes"]] == ["aaa", "zzz"]
 
 
 # ── privacy: only opaque values ──────────────────────────────────────────────
@@ -113,7 +113,7 @@ def test_payload_l1_contains_no_text_fields(db_with_scores: BeheldDB) -> None:
         first_commit_at="2024-01-01T00:00:00+00:00",
         last_commit_at="2026-05-10T00:00:00+00:00",
     )
-    l1 = _payload_dict(db_with_scores)["l1"]
+    l1 = _payload_dict(db_with_scores)["core"]
 
     # All values must be: number, bool, str-hash, str-iso, list of hashes, or
     # dict whose values are bool/number.
@@ -152,13 +152,13 @@ def test_payload_l2_section_unchanged_from_phase5(db_with_scores: BeheldDB) -> N
     """The L2 section preserves the exact shape that `signals` had in Phase 5
     so existing scoring and rendering code keeps working."""
     p = _payload_dict(db_with_scores)
-    assert "l2" in p
+    assert "enrichment" in p
     expected_keys = {
         "platforms", "ecosystems", "workflow_distribution",
         "project_categories", "workflow_metrics",
         "sessions_analyzed", "period_days",
     }
-    assert expected_keys <= set(p["l2"].keys())
+    assert expected_keys <= set(p["enrichment"].keys())
 
 
 # ── separation invariant ─────────────────────────────────────────────────────
@@ -178,16 +178,16 @@ def test_payload_l1_and_l2_are_separate_keys(db_with_scores: BeheldDB) -> None:
         last_commit_at=None,
     )
     p = _payload_dict(db_with_scores)
-    assert isinstance(p["l1"], dict)
-    assert isinstance(p["l2"], dict)
+    assert isinstance(p["core"], dict)
+    assert isinstance(p["enrichment"], dict)
     # No shared identity (different dicts).
-    assert id(p["l1"]) != id(p["l2"])
+    assert id(p["core"]) != id(p["enrichment"])
     # The L1 ecosystem dict (booleans) is structurally different from L2's
     # (counts), confirming they're populated independently.
-    if p["l1"]["ecosystems"]:
-        for v in p["l1"]["ecosystems"].values():
+    if p["core"]["ecosystems"]:
+        for v in p["core"]["ecosystems"].values():
             assert isinstance(v, bool)
-    for v in p["l2"]["ecosystems"].values():
+    for v in p["enrichment"]["ecosystems"].values():
         assert isinstance(v, int) and not isinstance(v, bool)
 
 
@@ -203,8 +203,8 @@ def test_payload_signals_is_v4_overlay_not_legacy_l2(db_with_scores: BeheldDB) -
     `signals` is present it carries the v4 overlay shape, not the legacy one."""
     p = _payload_dict(db_with_scores)
     # The L2 session block must always exist (shape preserved across v2→v4).
-    assert "l2" in p
-    assert isinstance(p["l2"], dict) and "sessions_analyzed" in p["l2"]
+    assert "enrichment" in p
+    assert isinstance(p["enrichment"], dict) and "sessions_analyzed" in p["enrichment"]
     # The v4 `signals` overlay is allowed to be None (e.g. identity_adapter
     # unavailable) but if present, must be the overlay shape, never the
     # legacy v1 L2-shape.

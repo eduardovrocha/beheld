@@ -73,18 +73,21 @@ export async function verifyCommand(
   console.log(`    ${mark(result.checks.hash.ok)} hash      ${result.checks.hash.reason ?? ""}`);
   console.log(`    ${mark(result.checks.signature.ok)} signature ${result.checks.signature.reason ?? ""}`);
 
-  // L1 / L2 section status (Phase 6 / F6.8).
-  const l1 = result.checks.l1_section;
-  const l2 = result.checks.l2_section;
-  if (l1.ok) {
-    console.log(`    ${mark(true)} L1        ${l1.repo_count ?? 0} repositórios`);
+  // Core / enrichment section status (R1.1 — was L1/L2 in Phase 6 / F6.8).
+  // Internal CheckResult field names (l1_section/l2_section) preserved for
+  // back-compat with downstream consumers; surface labels reflect the v6
+  // canonical naming.
+  const core = result.checks.l1_section;
+  const enrichment = result.checks.l2_section;
+  if (core.ok) {
+    console.log(`    ${mark(true)} core         ${core.repo_count ?? 0} repositórios`);
   } else {
-    console.log(`    ${YELLOW}⚠${RESET} L1        ${l1.reason ?? "ausente"}`);
+    console.log(`    ${YELLOW}⚠${RESET} core         ${core.reason ?? "ausente"}`);
   }
-  if (l2.ok) {
-    console.log(`    ${mark(true)} L2        ${l2.session_count ?? 0} sessões`);
+  if (enrichment.ok) {
+    console.log(`    ${mark(true)} enrichment   ${enrichment.session_count ?? 0} sessões`);
   } else {
-    console.log(`    ${mark(false)} L2        ${l2.reason ?? "ausente"}`);
+    console.log(`    ${mark(false)} enrichment   ${enrichment.reason ?? "ausente"}`);
   }
 
   let chainOk = true;

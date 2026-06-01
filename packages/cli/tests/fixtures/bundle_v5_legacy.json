@@ -1,0 +1,57 @@
+{
+  "_comment": "Pre-R1.1 v5 bundle payload — payload.l1 / payload.l2 shape. Used by the verifier back-compat test to prove R1.1 still validates pre-rename artifacts. DO NOT MUTATE.",
+  "version": "5",
+  "payload": {
+    "created_at": "2026-05-14T00:00:00+00:00",
+    "beheld_version": "0.2.0",
+    "previous_hash": null,
+    "scores": {
+      "date": "2026-05-13",
+      "prompt_quality": 50,
+      "test_maturity": 20,
+      "tech_breadth": 40,
+      "growth_rate": 30,
+      "overall": 35,
+      "sessions_analyzed": 30
+    },
+    "l1": {
+      "total_repos": 2,
+      "total_commits": 1200,
+      "earliest_commit": "2023-01-01T00:00:00+00:00",
+      "latest_commit": "2026-05-13T00:00:00+00:00",
+      "ecosystems": { "python": true, "rails": true },
+      "platforms": { "docker": true, "github": true },
+      "avg_test_ratio": 0.42,
+      "root_commit_hashes": [
+        { "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "first_seen_at": "2026-04-01T00:00:00+00:00" },
+        { "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "first_seen_at": "2026-04-15T00:00:00+00:00" }
+      ]
+    },
+    "l2": {
+      "platforms": { "docker": 10, "github": 5 },
+      "ecosystems": { "rails": 8, "react": 4 },
+      "workflow_distribution": { "tdd": 0.2, "test-after": 0.6 },
+      "project_categories": { "saas_b2b": 1.0 },
+      "workflow_metrics": {
+        "test_after_ratio": 0.6,
+        "test_first_ratio": 0.0,
+        "median_test_delay_min": 0.0,
+        "edit_to_test_lag_min": 0.0,
+        "bash_to_read_ratio": 0.0,
+        "prompt_avg_chars": 0.0,
+        "prompt_median_chars": 0.0,
+        "session_avg_duration_min": 0.0,
+        "tool_variety_avg": 0.0,
+        "ecosystem_concentration": 0.0
+      },
+      "sessions_analyzed": 30,
+      "period_days": 30
+    },
+    "engine_version_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "stack": null,
+    "signals": null,
+    "identity": null,
+    "emergent": null,
+    "insights": null
+  }
+}

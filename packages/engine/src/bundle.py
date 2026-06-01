@@ -25,9 +25,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from models import (
-    BundleL1Section,
-    BundleL2Section,
+    BundleCoreSection,
+    BundleEnrichmentSection,
     BundlePayload,
+    HarnessSource,
     L1RepositoryRef,
     Scores,
     WorkflowMetrics,
@@ -153,7 +154,20 @@ def build_bundle_payload(
     latest_snapshot = db.get_latest_snapshot()
     previous_hash = latest_snapshot["hash"] if latest_snapshot else None
 
-    l2 = BundleL2Section(
+    # R1.1 — harness_sources is the first-class capture-fidelity manifest of
+    # enrichment. Today the only adapter is Claude Code via native hooks, so
+    # we emit a single entry. The R2 adapter wave will populate multi-source
+    # lists (e.g. claude_code:native_hook + cursor:local_log_tail).
+    harness_sources = [
+        HarnessSource(
+            harness="claude_code",
+            capture_fidelity="native_hook",
+            sessions=len(sessions),
+        ),
+    ]
+
+    enrichment = BundleEnrichmentSection(
+        harness_sources=harness_sources,
         platforms=platforms,
         ecosystems=ecosystems,
         workflow_distribution=wf_dist,
@@ -163,7 +177,7 @@ def build_bundle_payload(
         period_days=period_days,
     )
 
-    l1 = _build_l1_section(db)
+    core = _build_core_section(db)
 
     # ── F6.12 / schema v4 — embedded human-facing overlays ───────────────
     # These four sections used to be fetched ad-hoc by the CLI when
@@ -213,8 +227,8 @@ def build_bundle_payload(
         beheld_version=beheld_version,
         previous_hash=previous_hash,
         scores=scores,
-        l1=l1,
-        l2=l2,
+        core=core,
+        enrichment=enrichment,
         engine_version_hash=engine_version_hash,
         stack=stack,
         signals=signals,
@@ -224,11 +238,11 @@ def build_bundle_payload(
     )
 
 
-def _build_l1_section(db) -> BundleL1Section:
-    """Aggregate L1 signals into the canonical bundle section.
+def _build_core_section(db) -> BundleCoreSection:
+    """Aggregate git-history signals into the canonical bundle core section.
 
     Returns an empty section (zeros / empty lists / null timestamps) when no
-    repository has been imported — the L1 key is always present in v2 payloads.
+    repository has been imported — the core key is always present in v6 payloads.
     Privacy: no URLs, names, or paths — only root commit hashes paired with the
     timestamp of the first import (F5.7.2)."""
     summary = db.get_l1_summary()
@@ -244,7 +258,7 @@ def _build_l1_section(db) -> BundleL1Section:
         ),
         key=lambda ref: ref.hash,
     )
-    return BundleL1Section(
+    return BundleCoreSection(
         total_repos=int(summary.get("total_repos") or 0),
         total_commits=int(summary.get("total_commits") or 0),
         earliest_commit=summary.get("earliest_commit"),

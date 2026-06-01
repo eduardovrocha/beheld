@@ -137,7 +137,7 @@ def test_root_commit_hashes_include_first_seen_at() -> None:
     payload = build_bundle_payload(db, "0.1.1", engine_version_hash="abc" * 21 + "d")
     p = dataclasses.asdict(payload)
 
-    refs = p["l1"]["root_commit_hashes"]
+    refs = p["core"]["root_commit_hashes"]
     assert len(refs) == 2
     for ref in refs:
         assert set(ref.keys()) == {"hash", "first_seen_at"}

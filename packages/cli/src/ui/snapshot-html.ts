@@ -298,20 +298,23 @@ function renderStackSection(stack: BundleStackSection | null | undefined): strin
     </section>`;
 }
 
-// F6.12 / v5 — Perfil técnico + Insights, both read from bundle.payload
-// (l2 for perfil técnico, payload.insights for the bullets).
+// F6.12 / v6 — Perfil técnico + Insights, both read from bundle.payload
+// (enrichment for perfil técnico, payload.insights for the bullets).
+// Local structural type — narrower than the canonical BundleEnrichmentSection
+// since the renderer only needs three fields and tolerates v5 bundles where
+// they live under payload.l2.
 
-interface BundleL2 {
+interface EnrichmentRendererView {
   platforms?: Record<string, number>;
   workflow_distribution?: Record<string, number>;
   sessions_analyzed?: number;
 }
 
-function renderPerfilTecnicoSection(l2: BundleL2 | undefined): string {
-  if (!l2) return "";
-  const platforms = l2.platforms ?? {};
-  const wf = l2.workflow_distribution ?? {};
-  const sessions = l2.sessions_analyzed ?? 0;
+function renderPerfilTecnicoSection(enrichment: EnrichmentRendererView | undefined): string {
+  if (!enrichment) return "";
+  const platforms = enrichment.platforms ?? {};
+  const wf = enrichment.workflow_distribution ?? {};
+  const sessions = enrichment.sessions_analyzed ?? 0;
 
   // Top 5 platforms by count.
   const platLabel = Object.entries(platforms)
@@ -525,7 +528,11 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
 
   const platformLabel = joinLabels(data.signals.tooling?.platforms, PLATFORM_LABEL, "—", 3);
 
-  const repoCount = data.bundle.payload.l1?.total_repos ?? 0;
+  // R1.1 — schema v6 uses payload.core; pre-R1.1 bundles still use payload.l1.
+  // The HTML renderer reads either so legacy bundles (re-rendered offline) keep
+  // working.
+  const corePayload = (data.bundle.payload as { core?: { total_repos?: number }; l1?: { total_repos?: number } });
+  const repoCount = corePayload.core?.total_repos ?? corePayload.l1?.total_repos ?? 0;
   const ttlDays = data.ttlDays ?? 28;
 
   const emergentBlock = data.emergent
@@ -546,8 +553,13 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
   // (attestation, rekor, signature) — no bundle change, no version bump.
   const tierBadge = renderTierBadge(data.bundle);
   const trustDetailsBlock = renderTrustDetails(data.bundle);
+  // R1.1 — schema v6 uses payload.enrichment; v5 used payload.l2. Read either.
+  const enrichmentPayload = data.bundle.payload as {
+    enrichment?: EnrichmentRendererView;
+    l2?: EnrichmentRendererView;
+  };
   const perfilTecnicoBlock = renderPerfilTecnicoSection(
-    (data.bundle.payload as { l2?: BundleL2 }).l2,
+    enrichmentPayload.enrichment ?? enrichmentPayload.l2,
   );
   const stackPayload = (data.bundle.payload as { stack?: BundleStackSection | null }).stack ?? null;
   const stackBlock = renderStackSection(stackPayload);

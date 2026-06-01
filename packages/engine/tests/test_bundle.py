@@ -23,9 +23,10 @@ from models import (
     AttestationPayload,
     Bundle,
     BundleAttestation,
-    BundleL1Section,
-    BundleL2Section,
+    BundleCoreSection,
+    BundleEnrichmentSection,
     BundlePayload,
+    HarnessSource,
     L1RepositoryRef,
     Scores,
     WorkflowMetrics,
@@ -45,7 +46,7 @@ def _fixture_payload() -> BundlePayload:
             prompt_quality=50, test_maturity=20, tech_breadth=40,
             growth_rate=30, overall=35, sessions_analyzed=30,
         ),
-        l1=BundleL1Section(
+        core=BundleCoreSection(
             total_repos=2,
             total_commits=1200,
             earliest_commit="2023-01-01T00:00:00+00:00",
@@ -58,7 +59,10 @@ def _fixture_payload() -> BundlePayload:
                 L1RepositoryRef(hash="b" * 40, first_seen_at="2026-04-15T00:00:00+00:00"),
             ],
         ),
-        l2=BundleL2Section(
+        enrichment=BundleEnrichmentSection(
+            harness_sources=[
+                HarnessSource(harness="claude_code", capture_fidelity="native_hook", sessions=30),
+            ],
             platforms={"docker": 10, "github": 5},
             ecosystems={"rails": 8, "react": 4},
             workflow_distribution={"tdd": 0.2, "test-after": 0.6},
@@ -137,17 +141,8 @@ def _fixture_payload() -> BundlePayload:
 #     from bundle import payload_to_canonical, payload_hash; \
 #     p=_fixture_payload(); print(payload_to_canonical(p)); print(payload_hash(p))"
 EXPECTED_CANONICAL = (
-    '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",'
-    '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,'
-    '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},'
-    '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",'
-    '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",'
-    '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",'
-    '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},'
-    '"insights":{"generated_at":"2026-05-14T00:00:00+00:00",'
-    '"insights":["Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",'
-    '"Baixa cobertura de testes — oportunidade de crescimento com TDD"]},'
-    '"l1":{"avg_test_ratio":0.42,'
+    '{"beheld_version":"0.2.0",'
+    '"core":{"avg_test_ratio":0.42,'
     '"earliest_commit":"2023-01-01T00:00:00+00:00",'
     '"ecosystems":{"python":true,"rails":true},'
     '"latest_commit":"2026-05-13T00:00:00+00:00",'
@@ -157,7 +152,13 @@ EXPECTED_CANONICAL = (
     '{"first_seen_at":"2026-04-15T00:00:00+00:00","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
     '],'
     '"total_commits":1200,"total_repos":2},'
-    '"l2":{"ecosystems":{"rails":8,"react":4},"period_days":30,'
+    '"created_at":"2026-05-14T00:00:00+00:00",'
+    '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,'
+    '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},'
+    '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",'
+    '"enrichment":{"ecosystems":{"rails":8,"react":4},'
+    '"harness_sources":[{"capture_fidelity":"native_hook","harness":"claude_code","sessions":30}],'
+    '"period_days":30,'
     '"platforms":{"docker":10,"github":5},"project_categories":{"saas_b2b":1},'
     '"sessions_analyzed":30,'
     '"workflow_distribution":{"tdd":0.2,"test-after":0.6},'
@@ -166,6 +167,12 @@ EXPECTED_CANONICAL = (
     '"prompt_avg_chars":0,"prompt_median_chars":0,'
     '"session_avg_duration_min":0,"test_after_ratio":0.6,'
     '"test_first_ratio":0,"tool_variety_avg":0}},'
+    '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",'
+    '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",'
+    '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},'
+    '"insights":{"generated_at":"2026-05-14T00:00:00+00:00",'
+    '"insights":["Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",'
+    '"Baixa cobertura de testes — oportunidade de crescimento com TDD"]},'
     '"previous_hash":null,'
     '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,'
     '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,'
@@ -184,14 +191,14 @@ EXPECTED_CANONICAL = (
     '"repos_analyzed":2,"total_commits_analyzed":150}}'
 )
 
-EXPECTED_HASH = "sha256:175aa083f06b458a55c3cfe4dd9692e0f0f3b43fecd7b032ec1dfe687fa391fd"
+EXPECTED_HASH = "sha256:3cd9ef34f20a9e1abf6dc3de2bc43bfe909d7ac29d21975cd69c931c177a5985"
 
 
 # ── canonical_json basics ────────────────────────────────────────────────────
 
 
 def test_bundle_version_is_five() -> None:
-    assert BUNDLE_VERSION == "5"
+    assert BUNDLE_VERSION == "6"
 
 
 def test_canonical_sorts_keys_alphabetically() -> None:
@@ -246,7 +253,7 @@ def test_fixture_canonical_matches_expected() -> None:
     verify in the Rails verification page (Phase 5 G)."""
     actual = payload_to_canonical(_fixture_payload())
     assert actual == EXPECTED_CANONICAL
-    assert len(actual) == 2464
+    assert len(actual) == 2567
 
 
 def test_fixture_hash_matches_expected() -> None:
@@ -278,8 +285,8 @@ def test_changing_any_field_changes_hash() -> None:
             overall=base.scores.overall,
             sessions_analyzed=base.scores.sessions_analyzed,
         ),
-        l1=base.l1,
-        l2=base.l2,
+        core=base.core,
+        enrichment=base.enrichment,
     )
     assert payload_hash(base) != payload_hash(tampered)
 
@@ -300,7 +307,7 @@ def test_bundle_wrapper_serializes_with_payload_inside() -> None:
         public_key="ed25519:beef",
     )
     out = json.loads(canonical_json(dataclasses.asdict(bundle)))
-    assert out["version"] == "5"
+    assert out["version"] == "6"
     assert out["hash"] == EXPECTED_HASH
     assert out["signature"] == "ed25519:dead"
     assert out["public_key"] == "ed25519:beef"

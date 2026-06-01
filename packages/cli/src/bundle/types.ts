@@ -5,7 +5,27 @@
  * same commit. The cross-language canonical hash test catches drift.
  */
 
-export const BUNDLE_VERSION = "5";
+// Schema v6 (R1.1 — beheld-evolucao-multitool): payload.l1/l2 renamed to
+// payload.core/enrichment. capture_fidelity introduced as first-class
+// metadata inside enrichment.harness_sources[*]. See spec §3 + §8.
+export const BUNDLE_VERSION = "6";
+
+/** Closed enum of capture fidelity values per spec §3.3. Any new value
+ *  REQUIRES a schema bump + spec PR (no silent expansion). */
+export type CaptureFidelity =
+  | "native_hook"
+  | "statusline"
+  | "local_log_tail"
+  | "editor_extension"
+  | "inferred";
+
+export const CAPTURE_FIDELITY_VALUES: readonly CaptureFidelity[] = [
+  "native_hook",
+  "statusline",
+  "local_log_tail",
+  "editor_extension",
+  "inferred",
+] as const;
 
 export interface BundleScores {
   date: string;
@@ -30,16 +50,17 @@ export interface BundleWorkflowMetrics {
   ecosystem_concentration: number;
 }
 
-/** Reference to a repo in the L1 section. `first_seen_at` (F5.7.2) is the
+/** Reference to a repo in the core section. `first_seen_at` (F5.7.2) is the
  *  ISO-8601 UTC timestamp of the first import — immutable across re-imports. */
 export interface L1RepositoryRef {
   hash: string;
   first_seen_at: string;
 }
 
-/** L1 — git-history signals (Phase 6). Always present in v2 payloads;
- *  empty (zeros / empty lists / null timestamps) when no repo has been imported. */
-export interface BundleL1Section {
+/** Core section — git-history signals (the L1 backbone, harness-independent).
+ *  Always present in v6 payloads; empty (zeros / empty lists / null timestamps)
+ *  when no repo has been imported. Was payload.l1 in v5. */
+export interface BundleCoreSection {
   total_repos: number;
   total_commits: number;
   earliest_commit: string | null;
@@ -50,9 +71,21 @@ export interface BundleL1Section {
   root_commit_hashes: L1RepositoryRef[];
 }
 
-/** L2 — session signals (Phase 2–5). Same shape as the legacy `signals`
- *  field; renamed to surface the layered model. */
-export interface BundleL2Section {
+/** A single L2 capture source contributing to the enrichment section.
+ *  Each enrichment payload declares which harnesses fed it and at what
+ *  fidelity. v6 always emits at least one entry; multi-source lists
+ *  appear when the R2 adapter wave ships. */
+export interface HarnessSource {
+  harness: string;
+  capture_fidelity: CaptureFidelity;
+  sessions: number;
+}
+
+/** Enrichment section — session signals (the L2 layer, circumstantial).
+ *  Was payload.l2 in v5. R1.1 adds `harness_sources` as a first-class
+ *  field carrying capture_fidelity per source. */
+export interface BundleEnrichmentSection {
+  harness_sources: HarnessSource[];
   platforms: Record<string, number>;
   ecosystems: Record<string, number>;
   workflow_distribution: Record<string, number>;
@@ -61,9 +94,6 @@ export interface BundleL2Section {
   sessions_analyzed: number;
   period_days: number;
 }
-
-/** Back-compat alias. New code should use BundleL2Section. */
-export type BundleSignals = BundleL2Section;
 
 /** F6.12 / schema v4 — language-weight + architecture-pattern aggregation
  *  embedded in the signed payload. Shape mirrors the engine's
@@ -98,8 +128,8 @@ export interface BundlePayload {
   beheld_version: string;
   previous_hash: string | null;
   scores: BundleScores;
-  l1: BundleL1Section;
-  l2: BundleL2Section;
+  core: BundleCoreSection;
+  enrichment: BundleEnrichmentSection;
   /** F5.7.2 — SHA-256 hex of the engine binary that produced the payload.
    *  Null when the engine ran unfrozen or the hash lookup failed. */
   engine_version_hash: string | null;
@@ -121,13 +151,49 @@ export interface BundlePayload {
 }
 
 /** Legacy v1 payload shape — only used by `verifyBundle` to detect bundles
- *  generated before Phase 6 and emit a friendly warning. */
+ *  generated before Phase 6 and emit a friendly warning. The `signals`
+ *  shape mirrors the pre-v6 BundleL2Section (no harness_sources). */
 export interface BundlePayloadV1 {
   created_at: string;
   beheld_version: string;
   previous_hash: string | null;
   scores: BundleScores;
-  signals: BundleL2Section;
+  signals: {
+    platforms: Record<string, number>;
+    ecosystems: Record<string, number>;
+    workflow_distribution: Record<string, number>;
+    project_categories: Record<string, number>;
+    workflow_metrics: BundleWorkflowMetrics;
+    sessions_analyzed: number;
+    period_days: number;
+  };
+}
+
+/** Pre-R1.1 v5 payload shape — only used by `verifyBundle` to read legacy
+ *  bundles signed before the rename. The two layered sections kept their
+ *  v5 names (l1 / l2) and the enrichment side did NOT carry harness_sources
+ *  or capture_fidelity. */
+export interface BundlePayloadV5Legacy {
+  created_at: string;
+  beheld_version: string;
+  previous_hash: string | null;
+  scores: BundleScores;
+  l1: BundleCoreSection;
+  l2: {
+    platforms: Record<string, number>;
+    ecosystems: Record<string, number>;
+    workflow_distribution: Record<string, number>;
+    project_categories: Record<string, number>;
+    workflow_metrics: BundleWorkflowMetrics;
+    sessions_analyzed: number;
+    period_days: number;
+  };
+  engine_version_hash?: string | null;
+  stack?: BundleStackSection | null;
+  signals?: Record<string, unknown> | null;
+  identity?: Record<string, unknown> | null;
+  emergent?: Record<string, unknown> | null;
+  insights?: { insights?: string[]; generated_at?: string | null } | null;
 }
 
 /** Identity attestation issued by the Beheld platform key

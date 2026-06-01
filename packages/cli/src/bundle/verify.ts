@@ -63,38 +63,58 @@ function validateSchema(raw: unknown): CheckResult {
       return { ok: false, reason: `payload missing '${required}'` };
     }
   }
-  // v2 → l1 + l2; v1 → signals. Accept either to keep old bundles verifiable.
-  const hasV2 = "l1" in payload && "l2" in payload;
+  // Schema discrimination (R1.1):
+  //   v6 → core + enrichment   (current generator)
+  //   v5 → l1   + l2           (Phase 6, pre-rename)
+  //   v1 → signals             (pre-Phase 6)
+  // Verifier accepts all three; the manifest output shows which schema was
+  // detected so consumers can interpret the section labels correctly.
+  const hasV6 = "core" in payload && "enrichment" in payload;
+  const hasV5 = "l1" in payload && "l2" in payload;
   const hasV1 = "signals" in payload;
-  if (!hasV2 && !hasV1) {
-    return { ok: false, reason: "payload missing both 'l2' (v2) and 'signals' (v1)" };
+  if (!hasV6 && !hasV5 && !hasV1) {
+    return {
+      ok: false,
+      reason: "payload missing required sections (no 'core'/'enrichment', no 'l1'/'l2', no legacy 'signals')",
+    };
   }
   return { ok: true };
 }
 
 interface PayloadView {
+  // v6 (current)
+  core?: { total_repos?: number; root_commit_hashes?: unknown[] };
+  enrichment?: {
+    sessions_analyzed?: number;
+    harness_sources?: Array<{ harness?: string; capture_fidelity?: string; sessions?: number }>;
+  };
+  // v5 legacy
   l1?: { total_repos?: number; root_commit_hashes?: unknown[] };
   l2?: { sessions_analyzed?: number };
+  // v1 legacy
   signals?: { sessions_analyzed?: number };
 }
 
-function validateL1Section(payload: PayloadView): VerifyResult["checks"]["l1_section"] {
-  if (!payload.l1 || typeof payload.l1 !== "object") {
+function validateCoreSection(payload: PayloadView): VerifyResult["checks"]["l1_section"] {
+  // Fallback order: v6 core → v5 l1. Both shapes mirror BundleCoreSection.
+  const core = payload.core ?? payload.l1;
+  if (!core || typeof core !== "object") {
     return {
       ok: false,
-      reason: "Seção L1 ausente — bundle gerado com versão anterior do Beheld",
+      reason: "Seção core ausente — bundle gerado com versão anterior do Beheld",
     };
   }
-  const count = typeof payload.l1.total_repos === "number" ? payload.l1.total_repos : 0;
+  const count = typeof core.total_repos === "number" ? core.total_repos : 0;
   return { ok: true, repo_count: count };
 }
 
-function validateL2Section(payload: PayloadView): VerifyResult["checks"]["l2_section"] {
-  const l2 = payload.l2 ?? payload.signals;
-  if (!l2 || typeof l2 !== "object") {
-    return { ok: false, reason: "L2 section missing (no 'l2' key, no legacy 'signals')" };
+function validateEnrichmentSection(payload: PayloadView): VerifyResult["checks"]["l2_section"] {
+  // Fallback order: v6 enrichment → v5 l2 → v1 signals.
+  const enrichment = payload.enrichment ?? payload.l2 ?? payload.signals;
+  if (!enrichment || typeof enrichment !== "object") {
+    return { ok: false, reason: "enrichment section missing (no 'enrichment'/'l2'/'signals')" };
   }
-  const count = typeof l2.sessions_analyzed === "number" ? l2.sessions_analyzed : 0;
+  const count = typeof enrichment.sessions_analyzed === "number" ? enrichment.sessions_analyzed : 0;
   return { ok: true, session_count: count };
 }
 
@@ -161,13 +181,13 @@ export async function verifyBundle(raw: unknown): Promise<VerifyResult> {
     : { ok: false, reason: "skipped (hash failed)" };
 
   const payloadView = (bundle.payload as unknown) as PayloadView;
-  const l1Check = validateL1Section(payloadView);
-  const l2Check = validateL2Section(payloadView);
+  const l1Check = validateCoreSection(payloadView);
+  const l2Check = validateEnrichmentSection(payloadView);
 
   const warnings: string[] = [];
   if (!l1Check.ok && l1Check.reason) warnings.push(l1Check.reason);
 
-  // L1 absence is a warning, not a failure — keep old bundles verifiable.
+  // core absence is a warning, not a failure — keep old bundles verifiable.
   return {
     ok: schema.ok && hashCheck.ok && sigCheck.ok && l2Check.ok,
     warnings,
@@ -242,26 +262,28 @@ export function composition(payload: BundlePayload | Record<string, unknown>): {
   trajectory: string;
 } {
   const view = payload as unknown as PayloadView;
-  const l1 = view.l1;
-  const l2 = view.l2 ?? view.signals;
-  const sessionCount = typeof l2?.sessions_analyzed === "number" ? l2.sessions_analyzed : 0;
-  // `period_days` lives on the same shape for both v1 (signals) and v2 (l2).
+  // R1.1 — read v6 core/enrichment first, fall back to v5 l1/l2 then v1 signals.
+  const core = view.core ?? view.l1;
+  const enrichment = view.enrichment ?? view.l2 ?? view.signals;
+  const sessionCount =
+    typeof enrichment?.sessions_analyzed === "number" ? enrichment.sessions_analyzed : 0;
+  // `period_days` lives on the same shape for v6 (enrichment), v5 (l2), and v1 (signals).
   const periodDays =
-    typeof (l2 as { period_days?: number } | undefined)?.period_days === "number"
-      ? (l2 as { period_days?: number }).period_days!
+    typeof (enrichment as { period_days?: number } | undefined)?.period_days === "number"
+      ? (enrichment as { period_days?: number }).period_days!
       : 0;
   const trajectory = `${sessionCount} sessões · ${periodDays} dias`;
 
-  if (!l1 || (typeof l1.total_repos === "number" && l1.total_repos === 0)) {
+  if (!core || (typeof core.total_repos === "number" && core.total_repos === 0)) {
     return {
       base: "não disponível (execute beheld import)",
       trajectory,
     };
   }
-  const repos = typeof l1.total_repos === "number" ? l1.total_repos : 0;
+  const repos = typeof core.total_repos === "number" ? core.total_repos : 0;
   const commits =
-    typeof (l1 as { total_commits?: number }).total_commits === "number"
-      ? (l1 as { total_commits?: number }).total_commits!
+    typeof (core as { total_commits?: number }).total_commits === "number"
+      ? (core as { total_commits?: number }).total_commits!
       : 0;
   return {
     base: `${repos} repositórios · ${commits.toLocaleString("pt-BR")} commits`,

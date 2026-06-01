@@ -35,7 +35,7 @@ function fixturePayload(): BundlePayload {
       overall: 35,
       sessions_analyzed: 30,
     },
-    l1: {
+    core: {
       total_repos: 2,
       total_commits: 1200,
       earliest_commit: "2023-01-01T00:00:00+00:00",
@@ -48,7 +48,10 @@ function fixturePayload(): BundlePayload {
         { hash: "b".repeat(40), first_seen_at: "2026-04-15T00:00:00+00:00" },
       ],
     },
-    l2: {
+    enrichment: {
+      harness_sources: [
+        { harness: "claude_code", capture_fidelity: "native_hook", sessions: 30 },
+      ],
       platforms: { docker: 10, github: 5 },
       ecosystems: { rails: 8, react: 4 },
       workflow_distribution: { tdd: 0.2, "test-after": 0.6 },
@@ -130,20 +133,15 @@ function fixturePayload(): BundlePayload {
   };
 }
 
-// Bundle schema v4 — see comment in models.py / types.ts. Regenerate via the
-// engine's payload_to_canonical + payload_hash if the fixture changes.
+// Bundle schema v6 (R1.1) — see comment in models.py / types.ts. Regenerate via
+// the engine's payload_to_canonical + payload_hash if the fixture changes:
+//   cd packages/engine && PYTHONPATH=src python3 -c "from tests.test_bundle \
+//     import _fixture_payload; from bundle import payload_to_canonical, \
+//     payload_hash; p=_fixture_payload(); print(payload_to_canonical(p)); \
+//     print(payload_hash(p))"
 const EXPECTED_CANONICAL =
-  '{"beheld_version":"0.2.0","created_at":"2026-05-14T00:00:00+00:00",' +
-  '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,' +
-  '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},' +
-  '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",' +
-  '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",' +
-  '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",' +
-  '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},' +
-  '"insights":{"generated_at":"2026-05-14T00:00:00+00:00",' +
-  '"insights":["Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",' +
-  '"Baixa cobertura de testes — oportunidade de crescimento com TDD"]},' +
-  '"l1":{"avg_test_ratio":0.42,' +
+  '{"beheld_version":"0.2.0",' +
+  '"core":{"avg_test_ratio":0.42,' +
   '"earliest_commit":"2023-01-01T00:00:00+00:00",' +
   '"ecosystems":{"python":true,"rails":true},' +
   '"latest_commit":"2026-05-13T00:00:00+00:00",' +
@@ -153,7 +151,13 @@ const EXPECTED_CANONICAL =
   '{"first_seen_at":"2026-04-15T00:00:00+00:00","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' +
   '],' +
   '"total_commits":1200,"total_repos":2},' +
-  '"l2":{"ecosystems":{"rails":8,"react":4},"period_days":30,' +
+  '"created_at":"2026-05-14T00:00:00+00:00",' +
+  '"emergent":{"baseline_window_days":180,"delta_pp":20,"older_share":0.2,' +
+  '"pattern":"tdd","recent_share":0.4,"recent_window_days":30},' +
+  '"engine_version_hash":"0000000000000000000000000000000000000000000000000000000000000000",' +
+  '"enrichment":{"ecosystems":{"rails":8,"react":4},' +
+  '"harness_sources":[{"capture_fidelity":"native_hook","harness":"claude_code","sessions":30}],' +
+  '"period_days":30,' +
   '"platforms":{"docker":10,"github":5},"project_categories":{"saas_b2b":1},' +
   '"sessions_analyzed":30,' +
   '"workflow_distribution":{"tdd":0.2,"test-after":0.6},' +
@@ -162,6 +166,12 @@ const EXPECTED_CANONICAL =
   '"prompt_avg_chars":0,"prompt_median_chars":0,' +
   '"session_avg_duration_min":0,"test_after_ratio":0.6,' +
   '"test_first_ratio":0,"tool_variety_avg":0}},' +
+  '"identity":{"confidence":"medium","generated_at":"2026-05-14T00:00:00+00:00",' +
+  '"generation_path":"llm","identity_long":"Dev Ruby/Python com hábito test-after.",' +
+  '"identity_short":"Dev Ruby/Python.","model_used":"claude-haiku"},' +
+  '"insights":{"generated_at":"2026-05-14T00:00:00+00:00",' +
+  '"insights":["Prompts curtos detectados — adicionar contexto de arquivo melhora as respostas",' +
+  '"Baixa cobertura de testes — oportunidade de crescimento com TDD"]},' +
   '"previous_hash":null,' +
   '"scores":{"date":"2026-05-13","growth_rate":30,"overall":35,' +
   '"prompt_quality":50,"sessions_analyzed":30,"tech_breadth":40,' +
@@ -180,13 +190,13 @@ const EXPECTED_CANONICAL =
   '"repos_analyzed":2,"total_commits_analyzed":150}}';
 
 const EXPECTED_HASH =
-  "sha256:175aa083f06b458a55c3cfe4dd9692e0f0f3b43fecd7b032ec1dfe687fa391fd";
+  "sha256:3cd9ef34f20a9e1abf6dc3de2bc43bfe909d7ac29d21975cd69c931c177a5985";
 
 // ── canonical_json basics ────────────────────────────────────────────────────
 
 describe("canonicalJson — primitives", () => {
   test("BUNDLE_VERSION is '5'", () => {
-    expect(BUNDLE_VERSION).toBe("5");
+    expect(BUNDLE_VERSION).toBe("6");
   });
 
   test("sorts keys alphabetically", () => {
@@ -232,7 +242,7 @@ describe("bundle contract", () => {
   test("fixture serializes to the same canonical bytes as Python", () => {
     const actual = payloadToCanonical(fixturePayload());
     expect(actual).toBe(EXPECTED_CANONICAL);
-    expect(actual.length).toBe(2464);
+    expect(actual.length).toBe(2567);
   });
 
   test("fixture hash matches Python's hash byte-for-byte", async () => {
@@ -257,16 +267,16 @@ describe("bundle contract", () => {
 
   test("fixture key order in source does NOT affect hash", async () => {
     // Build the same fixture with deliberately shuffled key order — must
-    // include ALL v4 fields (stack, signals, identity, emergent) or the
-    // payloads diverge and the assertion becomes meaningless.
+    // include ALL v6 fields (stack, signals, identity, emergent, insights)
+    // or the payloads diverge and the assertion becomes meaningless.
     const base = fixturePayload();
     const shuffled: BundlePayload = {
       emergent: base.emergent,
-      l2: base.l2,
+      enrichment: base.enrichment,
       insights: base.insights,
       identity: base.identity,
       engine_version_hash: base.engine_version_hash,
-      l1: base.l1,
+      core: base.core,
       stack: base.stack,
       scores: base.scores,
       signals: base.signals,

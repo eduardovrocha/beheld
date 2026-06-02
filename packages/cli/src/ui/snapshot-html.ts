@@ -364,6 +364,58 @@ function renderPerfilTecnicoSection(enrichment: EnrichmentRendererView | undefin
     </section>`;
 }
 
+// R2/R3 — Capture Sources (harness_sources) — surfaces which harnesses
+// contributed enrichment to the bundle + each one's capture_fidelity tier.
+// Renders one chip per HarnessSource entry with the trust tier encoded as
+// a CSS class so the portal can color-code high/med/low fidelity.
+
+interface HarnessSourceView {
+  harness?: string;
+  capture_fidelity?: string;
+  sessions?: number;
+}
+
+function fidelityTier(fidelity: string): "high" | "med" | "low" {
+  switch (fidelity) {
+    case "native_hook":
+    case "editor_extension":
+      return "high";
+    case "local_log_tail":
+    case "statusline":
+      return "med";
+    case "inferred":
+    default:
+      return "low";
+  }
+}
+
+function renderCaptureSourcesSection(
+  sources: HarnessSourceView[] | undefined,
+): string {
+  if (!Array.isArray(sources) || sources.length === 0) return "";
+  const chips = sources
+    .filter((s) => typeof s?.harness === "string" && s.harness.length > 0)
+    .map((s) => {
+      const harness = s.harness as string;
+      const fidelity = (s.capture_fidelity ?? "inferred").trim();
+      const sessions = Math.max(0, Math.floor(s.sessions ?? 0));
+      const tier = fidelityTier(fidelity);
+      return `
+        <span class="capture-chip capture-chip-${tier}" title="${escapeHtml(fidelity)} · ${sessions} sess${sessions === 1 ? "ão" : "ões"}">
+          <strong>${escapeHtml(harness)}</strong>
+          <span class="capture-chip-sep">·</span>${escapeHtml(fidelity)}
+          <span class="capture-chip-sep">·</span>${sessions}
+        </span>`;
+    })
+    .join("");
+  if (chips.length === 0) return "";
+  return `
+    <section class="capture-sources" aria-label="Fontes de captura">
+      <div class="label">Fontes de captura</div>
+      <div class="capture-chip-row">${chips}</div>
+    </section>`;
+}
+
 function renderInsightsSection(insights: { insights?: string[] } | null | undefined): string {
   const bullets = (insights?.insights ?? []).filter((s) => typeof s === "string" && s.trim().length > 0);
   if (bullets.length === 0) return "";
@@ -592,6 +644,11 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
   };
   const perfilTecnicoBlock = renderPerfilTecnicoSection(
     enrichmentPayload.enrichment ?? enrichmentPayload.l2,
+  );
+  // R2/R3 — harness_sources lives only in v6+ payload.enrichment, never in
+  // legacy v5 payload.l2. Pass undefined for legacy bundles → section omitted.
+  const captureSourcesBlock = renderCaptureSourcesSection(
+    (enrichmentPayload.enrichment as { harness_sources?: HarnessSourceView[] } | undefined)?.harness_sources,
   );
   const stackPayload = (data.bundle.payload as { stack?: BundleStackSection | null }).stack ?? null;
   const stackBlock = renderStackSection(stackPayload);
@@ -861,6 +918,48 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
     .perfil-row .key { color: var(--ink-soft); }
     .perfil-row .val { color: var(--ink); }
 
+    /* R2/R3 — Capture Sources: one chip per harness_sources[] entry, with
+       trust tier encoded via CSS class. Visual language matches the tier
+       badges in the verification block. */
+    .capture-sources { margin-top: 32px; }
+    .capture-sources .label {
+      font-size: 13px; font-weight: 500; color: var(--ink-soft);
+      margin-bottom: 12px;
+    }
+    .capture-chip-row {
+      display: flex; flex-wrap: wrap; gap: 8px;
+    }
+    .capture-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--rule);
+      font-size: 12px;
+      font-feature-settings: "tnum";
+      line-height: 1.4;
+    }
+    .capture-chip strong {
+      font-weight: 600; color: var(--ink);
+    }
+    .capture-chip-sep {
+      color: var(--ink-soft);
+      opacity: 0.6;
+    }
+    .capture-chip-high {
+      background: rgba(34, 197, 94, 0.08);
+      border-color: rgba(34, 197, 94, 0.35);
+      color: var(--ink);
+    }
+    .capture-chip-med {
+      background: var(--rule-soft);
+      color: var(--ink-soft);
+    }
+    .capture-chip-low {
+      background: rgba(234, 179, 8, 0.10);
+      border-color: rgba(234, 179, 8, 0.40);
+      color: var(--ink);
+    }
+
     /* F6.12 / v5 — Insights: bullets from bundle.payload.insights.insights. */
     .insights { margin-top: 48px; }
     .insights .label {
@@ -992,6 +1091,7 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
     </section>${emergentBlock}
 ${scoresBlock}
 ${perfilTecnicoBlock}
+${captureSourcesBlock}
 ${stackBlock}
 ${insightsBlock}
 

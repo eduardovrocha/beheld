@@ -1,12 +1,20 @@
 # Beheld
 
-Privacy-first developer profiling built on real Claude Code and Continue.dev usage. Captures technical metadata silently — never conversation content, file contents, or secrets — and generates four developer scores.
+Privacy-first developer profiling that reads what you already wrote — your **git history** — and enriches it with real usage signals from your coding harness (Claude Code, Continue.dev, and more coming). Captures technical metadata silently — never conversation content, file contents, or secrets — and generates four developer scores.
 
 No Node.js, Python, or npm required on the host machine. Ships as a single standalone binary.
+
+> **R1 refundação:** git history is the backbone (the **core** layer); harness sessions are additive enrichment with a known capture fidelity. A new dev profile starts forming from day one — even before any harness is wired — by importing the repos you already have.
 
 ---
 
 ## What it collects
+
+Two layers, with explicit boundaries:
+
+**Core (L1 — from your git history, via `beheld import`):** repo counts, commit counts per ecosystem (presence boolean only — never per-file content), file extension distribution, test-to-source ratio, activity window.
+
+**Enrichment (L2 — from coding harnesses, via the daemon):**
 
 | Collected | Never collected |
 |-----------|----------------|
@@ -15,6 +23,8 @@ No Node.js, Python, or npm required on the host machine. Ships as a single stand
 | MCP tool names (Read, Edit, Bash…) | Secrets, tokens, API keys |
 | Timestamps and session durations | Absolute paths (SHA-256 hash only) |
 | Prompt character counts | Business data or PII |
+
+Each enrichment source declares a `capture_fidelity`: `native_hook` (Claude Code, Gemini CLI), `editor_extension` (Continue.dev), `local_log_tail` (Cursor), `statusline` (Copilot CLI), or `inferred`. Bundles serialize one entry per source — so a recruiter inspecting your `.dpbundle` can see exactly which signals came from which tool and at what fidelity.
 
 All data stays in `~/.beheld/` — it never leaves your machine.
 
@@ -44,7 +54,18 @@ dist/beheld init
 
 ## Quick start
 
-After installation, `beheld init` runs the onboarding wizard:
+The recommended first-time sequence (R1.4):
+
+```sh
+beheld bootstrap            # L1-first: migrates legacy ~/.devprofile/, preps ~/.beheld/
+beheld import               # import git history (one repo at a time, or --github / --gitlab)
+beheld init                 # wire Claude Code + Continue.dev hooks
+beheld view                 # see your profile
+```
+
+Or run `beheld bootstrap --import` to chain straight into the L1 import wizard after the bridge.
+
+`beheld init` runs the onboarding wizard:
 
 1. **Screen 1** — What is collected (read-only)
 2. **Screen 2** — Choose which score dimensions to enable
@@ -85,6 +106,8 @@ After `beheld init`, the `/beheld` slash command is available directly in Claude
 
 ```bash
 # onboarding e daemons
+beheld bootstrap [--import]                # R1.4 — L1-first onboarding + legacy ~/.devprofile/ bridge
+beheld import [url] [--github|--gitlab|--bitbucket]   # importa git history (L1 — uma vez por repo)
 beheld init [--force]                      # wizard de 4 telas (--force re-roda)
 beheld start                               # sobe MCP server (7337) + engine (7338)
 beheld stop                                # para ambos os daemons
@@ -258,8 +281,16 @@ Notifications are controlled via `~/.beheld/config.json`:
 ## Architecture
 
 ```
-Claude Code hooks (PreToolUse / PostToolUse / Stop)
-Continue.dev MCP events
+Git history (core, L1)                     ← `beheld import` — one-shot per repo
+  → bare clone --filter=blob:none → extract → discard
+  → per-repo: ecosystems (presence), file extensions, test ratio, activity window
+  → persisted to ~/.beheld/profile.db
+                              \
+                               \
+Coding harnesses (enrichment, L2)          ← daemon (continuous)
+  Claude Code hooks (PreToolUse / PostToolUse / Stop)
+  Continue.dev MCP events
+  [R2 wave coming: Gemini CLI, Cursor, Codex CLI, Copilot CLI, Copilot VS Code]
         ↓
 [Sanitizer — strips secrets, env values, raw paths before any write]
         ↓
@@ -270,6 +301,9 @@ Scoring Engine (Python FastAPI · localhost:7338)
   → extractors: commands, file extensions, tools, timing
   → classifiers: project type, platform, workflow pattern
   → scorers: prompt_quality, test_maturity, tech_breadth, growth_rate
+       └─ each scorer declares fallback_when_enrichment_missing —
+          dimensions absent from enrichment surface as `null` in the bundle
+          rather than fake zeros (PromptQuality is enrichment-exclusive)
   → coach pipeline: compute_workflow_metrics + detect_patterns (deterministic, no LLM)
   → persists to ~/.beheld/profile.db (SQLite, versioned schema)
         ↓
@@ -278,7 +312,32 @@ CLI (beheld view) and Continue.dev sidebar (via MCP server · localhost:7337)
 Host LLM (Claude Code, Cursor, …) calls beheld_coach → applies coaching guidance
 ```
 
-The MCP server captures events from Claude Code hooks and Continue.dev, sanitises them, and writes JSONL. The scoring engine processes JSONL incrementally every 60 seconds. The CLI reads from both over HTTP.
+The MCP server captures events from Claude Code hooks and Continue.dev, sanitises them, and writes JSONL. The scoring engine processes JSONL incrementally every 60 seconds, joining the core (L1) and enrichment (L2) layers. The CLI reads from both over HTTP.
+
+### Bundle schema (`.dpbundle` / `.beheld`)
+
+The signed bundle (current wire version `7`) serializes the two layers under canonical keys, both inside the `payload` block:
+
+```json
+{
+  "version": "7",
+  "payload": {
+    "core":        { "ecosystems": {...}, "avg_test_ratio": 0.42, ... },
+    "enrichment":  {
+      "harness_sources": [
+        { "harness": "claude_code", "capture_fidelity": "native_hook", "sessions": 100 },
+        { "harness": "continue_vscode", "capture_fidelity": "editor_extension", "sessions": 12 }
+      ],
+      "workflow_distribution": {...},
+      ...
+    },
+    "scores": { "prompt_quality": 84, "growth_rate": null, ... }
+  },
+  "hash": "sha256:...", "signature": "ed25519:...", "public_key": "ed25519:..."
+}
+```
+
+Older bundles (`l1`/`l2` for wire v5, flat `signals` for wire ≤4) verify offline with the same `beheld verify`.
 
 ---
 

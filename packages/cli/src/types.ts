@@ -81,6 +81,12 @@ export interface BeheldConfig {
   /** Bitbucket username (public identifier, NOT a credential). Cached so the
    *  user doesn't retype it on every `beheld import --bitbucket`. */
   bitbucket_username?: string;
+  /** Slug returned by the portal on the most recent successful publish.
+   *  Used to detect first-publish state and to print the public URL. */
+  last_published_slug?: string;
+  /** Recovery email registered with the portal on first publish. Local
+   *  cache only — the source of truth lives in Account.email_recovery. */
+  email_recovery?: string;
 }
 
 export interface L1ImportResponse {

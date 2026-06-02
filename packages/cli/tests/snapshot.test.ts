@@ -130,7 +130,7 @@ beforeAll(async () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      if (req.method === "POST" && url.pathname === "/bundles") {
+      if (req.method === "POST" && url.pathname === "/api/v1/bundles") {
         lastUploadBody = await req.text();
         return bundleUploadResponder();
       }
@@ -180,12 +180,11 @@ beforeEach(() => {
   bundleUploadResponder = () =>
     new Response(
       JSON.stringify({
-        id: "abc123",
-        url: "http://127.0.0.1/v/abc123",
-        ttl_days: 30,
-        created_at: "2026-05-14T00:00:00Z",
+        url:             "http://127.0.0.1/v/abc123",
+        account_created: true,
+        bundle_id:       "42",
       }),
-      { status: 201, headers: { "Content-Type": "application/json", "X-TTL": "30" } },
+      { status: 201, headers: { "Content-Type": "application/json" } },
     );
   // Default: pretend Rekor is unreachable so snapshots emit rekor: null. Tests
   // that need a success path override this within the test body.
@@ -365,7 +364,7 @@ describe("snapshotCommand — desktop convenience copy", () => {
 });
 
 describe("snapshotCommand — --share", () => {
-  test("uploads the bundle and prints the short URL", async () => {
+  test("uploads the bundle to /api/v1/bundles and prints the public URL", async () => {
     const { snapshotCommand } = await import("../src/commands/snapshot?v=share1");
     const logs: string[] = [];
     const realLog = console.log;
@@ -377,47 +376,52 @@ describe("snapshotCommand — --share", () => {
     }
     const out = logs.join("\n");
     expect(out).toContain("http://127.0.0.1/v/abc123");
-    expect(out).toContain("id:");
-    expect(out).toContain("abc123");
-    expect(out).toContain("30 dias");
-    // QR rendering produces block characters
-    expect(out).toMatch(/[█▀▄]/);
-    // The actual bundle was uploaded
+    expect(out).toMatch(/[█▀▄]/); // QR rendering
+    // The actual bundle was uploaded as { fingerprint, bundle } payload.
     expect(lastUploadBody).not.toBeNull();
     const uploaded = JSON.parse(lastUploadBody!);
-    expect(uploaded.hash).toMatch(/^sha256:/);
-    expect(uploaded.signature).toMatch(/^ed25519:/);
+    expect(uploaded.fingerprint).toMatch(/^[0-9a-f]+$/);
+    expect(uploaded.bundle).toBeDefined();
   });
 
-  test("does not abort the snapshot when upload fails", async () => {
+  test("does not abort the snapshot when upload fails (local bundle intact, exit 0)", async () => {
     bundleUploadResponder = () =>
       new Response(JSON.stringify({ error: "ouch" }), { status: 500 });
     const { snapshotCommand } = await import("../src/commands/snapshot?v=share2");
     const logs: string[] = [];
     const realLog = console.log;
     console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+
+    // snapshot --share treats the publish step as best-effort: if it fails we
+    // log the error but the command itself succeeds (the local .beheld was
+    // already written). Standalone `beheld share` is the one that exits 1.
+    let exitCalled = false;
+    const realExit = process.exit;
+    process.exit = ((_code?: number) => { exitCalled = true; }) as typeof process.exit;
+
     try {
       await snapshotCommand({ share: true });
     } finally {
       console.log = realLog;
+      process.exit = realExit;
     }
+
     const out = logs.join("\n");
-    expect(out).toContain("Snapshot gerado");      // local bundle still produced
-    expect(out).toContain("Upload falhou");
+    expect(out).toContain("Snapshot gerado");   // local bundle still produced
+    expect(out).toContain("Falha no upload");
     expect(out).toContain("HTTP 500");
+    expect(exitCalled).toBe(false);
   });
 
-  test("highlights deduplicated when server returns it", async () => {
+  test("flags account_created when the portal created a fresh account", async () => {
     bundleUploadResponder = () =>
       new Response(
         JSON.stringify({
-          id: "alreadyHere",
-          url: "http://127.0.0.1/v/alreadyHere",
-          ttl_days: 25,
-          created_at: "2026-05-10T00:00:00Z",
-          deduplicated: true,
+          url:             "http://127.0.0.1/v/freshSlug",
+          account_created: true,
+          bundle_id:       "1",
         }),
-        { status: 200 },
+        { status: 201 },
       );
     const { snapshotCommand } = await import("../src/commands/snapshot?v=share3");
     const logs: string[] = [];
@@ -428,7 +432,7 @@ describe("snapshotCommand — --share", () => {
     } finally {
       console.log = realLog;
     }
-    expect(logs.join("\n")).toContain("deduplicado");
+    expect(logs.join("\n")).toContain("conta criada");
   });
 
   test("does NOT upload when --share is omitted", async () => {

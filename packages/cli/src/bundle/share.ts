@@ -1,44 +1,77 @@
 /**
- * Bundle upload + QR rendering (Phase 5 / F5.4).
+ * Bundle publish — uploads a signed .beheld to the portal's
+ * `POST /api/v1/bundles` endpoint and returns the public URL.
  *
- * Pure functions: filesystem and CLI concerns live in commands/snapshot.ts.
- * The portal base URL is read from BEHELD_PORTAL_URL (defaults to the
- * production portal). Failures are typed so the caller can degrade gracefully —
- * the local .beheld was already written before the share attempt.
+ * The portal verifies the Ed25519 signature against the fingerprint we send
+ * alongside the bundle. If verification fails, the bundle is rejected and
+ * never stored. The dev's private key never leaves the machine.
+ *
+ * Pure functions: filesystem and prompt concerns live in commands/share.ts
+ * and commands/snapshot.ts. The portal base URL is read from
+ * BEHELD_PORTAL_URL (defaults to the production portal).
  */
 import type { Bundle } from "./types";
 
 export const DEFAULT_PORTAL_URL = "https://beheld.dev";
 
-export interface ShareResponse {
-  id: string;
+export interface PublishResponse {
   url: string;
-  ttl_days: number | null;
-  created_at: string;
-  deduplicated?: boolean;
+  account_created: boolean;
+  bundle_id: string;
 }
 
-export type ShareError =
+export type PublishError =
   | { kind: "network"; message: string }
   | { kind: "http"; status: number; body: string };
 
-export type ShareResult =
-  | { ok: true; data: ShareResponse }
-  | { ok: false; error: ShareError };
+export type PublishResult =
+  | { ok: true; data: PublishResponse }
+  | { ok: false; error: PublishError };
+
+export interface PublishOptions {
+  /** Optional fetch override — used by tests to stub the network. */
+  fetcher?: typeof fetch;
+  /** Optional recovery email — sent only on first publish. */
+  emailRecovery?: string | null;
+  /** Optional abort timeout in ms (defaults to 10s). */
+  timeoutMs?: number;
+}
 
 function portalUrl(): string {
   return (process.env.BEHELD_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
 }
 
-export async function uploadBundle(bundle: Bundle): Promise<ShareResult> {
-  const body = JSON.stringify(bundle);
+/** Strip the `ed25519:` / `sha256:` / etc. prefix when present. */
+function stripPrefix(value: string, prefix: string): string {
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+/** JWK `x` (base64url, unpadded) → raw bytes hex. The portal expects the
+ *  fingerprint as a hex public key — same form the auth flow already uses. */
+export function publicKeyHex(bundle: Bundle): string {
+  const raw = stripPrefix(bundle.public_key, "ed25519:");
+  return Buffer.from(raw, "base64url").toString("hex");
+}
+
+export async function publishBundle(
+  bundle: Bundle,
+  options: PublishOptions = {},
+): Promise<PublishResult> {
+  const fetcher = options.fetcher ?? fetch;
+  const bundleB64 = Buffer.from(JSON.stringify(bundle), "utf8").toString("base64");
+  const body: Record<string, string> = {
+    fingerprint: publicKeyHex(bundle),
+    bundle:      bundleB64,
+  };
+  if (options.emailRecovery) body.email_recovery = options.emailRecovery;
+
   let r: Response;
   try {
-    r = await fetch(`${portalUrl()}/bundles`, {
-      method: "POST",
+    r = await fetcher(`${portalUrl()}/api/v1/bundles`, {
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body,
-      signal: AbortSignal.timeout(10_000),
+      body:    JSON.stringify(body),
+      signal:  AbortSignal.timeout(options.timeoutMs ?? 10_000),
     });
   } catch (e) {
     return { ok: false, error: { kind: "network", message: (e as Error).message } };
@@ -49,14 +82,18 @@ export async function uploadBundle(bundle: Bundle): Promise<ShareResult> {
     return { ok: false, error: { kind: "http", status: r.status, body: text } };
   }
 
-  const data = (await r.json()) as ShareResponse;
+  const data = (await r.json()) as PublishResponse;
   return { ok: true, data };
+}
+
+/** Extract the slug from a URL like https://beheld.dev/v/abc123def. */
+export function slugFromUrl(url: string): string | null {
+  const m = url.match(/\/v\/([A-Za-z0-9]+)\/?$/);
+  return m ? m[1] : null;
 }
 
 // ── QR rendering (terminal-unicode) ──────────────────────────────────────────
 
-/** Render a QR code to a string using qrcode-terminal. Wrapped as a Promise
- *  because the lib's generate() takes a callback. */
 export async function renderQr(text: string, opts: { small?: boolean } = {}): Promise<string> {
   const qrcode = (await import("qrcode-terminal")).default;
   return new Promise((resolve) => {

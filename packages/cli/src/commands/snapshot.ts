@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { BUNDLE_VERSION, type Bundle, type BundlePayload, type RekorEntry } from "../bundle/types";
 import { payloadHash, payloadToCanonical } from "../bundle/canonical";
 import { composition } from "../bundle/verify";
-import { renderQr, uploadBundle } from "../bundle/share";
+// renderQr is consumed lazily from ./share.ts when a publish succeeds —
+// no top-level import here keeps snapshot.ts free of the publish path.
 import {
   ensureKeys,
   loadPrivateKey,
@@ -294,8 +295,37 @@ export async function snapshotCommand(opts: SnapshotOptions = {}): Promise<void>
 
   console.log("");
 
-  if (opts.share === true) {
-    await shareBundle(bundle);
+  // --share: skip the prompt and publish straight away.
+  // Otherwise: ask once, default N.
+  let shouldShare = opts.share === true;
+  if (!shouldShare) {
+    shouldShare = await askPublishPrompt();
+  }
+  if (shouldShare) {
+    const { runShare, renderShareSuccess } = await import("./share");
+    const outcome = await runShare();
+    if (outcome.ok && outcome.result?.ok) {
+      await renderShareSuccess(outcome.result.data.url);
+    }
+  }
+}
+
+/** Post-generation prompt — one-liner, default N. Returns true only on an
+ *  explicit affirmative ("s" / "y"). Empty input or anything else: no share. */
+async function askPublishPrompt(): Promise<boolean> {
+  // Skip the prompt in non-TTY contexts (CI, piped stdin) — there's no
+  // human to answer, so the safe default is "do not publish".
+  if (!process.stdin.isTTY) return false;
+  const { createInterface } = await import("node:readline");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer: string = await new Promise((resolve) => {
+      rl.question("→ Publicar perfil verificado? [s/N] ", (a) => resolve(a));
+    });
+    const a = answer.trim().toLowerCase();
+    return a === "s" || a === "y" || a === "sim" || a === "yes";
+  } finally {
+    rl.close();
   }
 }
 
@@ -414,33 +444,6 @@ async function rekorSubmitExisting(bundlePath: string): Promise<void> {
   console.log(`     ${DIM}uuid:${RESET}            ${result.entry.uuid}`);
   console.log(`     ${DIM}integratedTime:${RESET}  ${result.entry.integratedTime}`);
   console.log(`     ${DIM}Tier:${RESET}            ${bold(computeTier(updated))}`);
-}
-
-async function shareBundle(bundle: Bundle): Promise<void> {
-  const result = await uploadBundle(bundle);
-  if (!result.ok) {
-    console.log(warn("Upload falhou — o bundle local continua válido"));
-    if (result.error.kind === "network") {
-      console.log(`     ${DIM}Rede: ${result.error.message}${RESET}`);
-    } else {
-      console.log(`     ${DIM}HTTP ${result.error.status}:${RESET} ${result.error.body.slice(0, 200)}`);
-    }
-    console.log("");
-    return;
-  }
-
-  const { id, url, ttl_days, deduplicated } = result.data;
-  const qr = await renderQr(url, { small: true });
-
-  console.log(qr);
-  console.log(`  ${bold(url)}`);
-  if (ttl_days !== null) {
-    console.log(`  ${DIM}TTL:${RESET} ${ttl_days} dias${deduplicated ? meta("  (deduplicado — já existia)") : ""}`);
-  } else if (deduplicated) {
-    console.log(`  ${meta("(deduplicado — já existia)")}`);
-  }
-  console.log(`  ${DIM}id:${RESET}  ${id}`);
-  console.log("");
 }
 
 export async function snapshotListCommand(): Promise<void> {

@@ -7,7 +7,8 @@ export type BeheldSource =
   | "gemini-cli"         // R2.1 — native_hook
   | "cursor"             // R2.2 — local_log_tail
   | "codex-cli"          // R2.3 — native_hook
-  | "copilot-cli";       // R2.4 — statusline (+ local_log_tail blend)
+  | "copilot-cli"        // R2.4 — statusline (+ local_log_tail blend)
+  | "copilot-vscode";    // R2.5 — local_log_tail (tokens estimados)
 
 export interface BeheldEvent {
   event_id: string;

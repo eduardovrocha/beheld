@@ -98,6 +98,18 @@ HARNESS_REGISTRY: dict[str, HarnessDescriptor] = {
     # ingest, but the recorded fidelity stays the harness-level default
     # — the per-event channel is annotated in `metadata.channel`.
     "copilot-cli": HarnessDescriptor("copilot_cli", "statusline"),
+
+    # R2.5 — GitHub Copilot inside VS Code exposes no telemetry API. The
+    # adapter tails the extension log under
+    # ~/Library/Application Support/Code/logs/.../exthost/GitHub.copilot/
+    # (macOS) or ~/.config/Code/logs/.../exthost/GitHub.copilot/ (Linux).
+    # Each completion / inline-suggestion / chat-turn line becomes one
+    # event. prompt_length and tokens are ESTIMATED from the line's
+    # character count (Copilot never echoes counts), so the per-event
+    # metadata.estimated=true flag is set and downstream readers may
+    # apply lower weight. Fidelity tier: `local_log_tail` — same as
+    # Cursor; the token-estimation caveat is metadata-only.
+    "copilot-vscode": HarnessDescriptor("copilot_vscode", "local_log_tail"),
 }
 
 

@@ -82,6 +82,14 @@ def test_known_descriptors_copilot_cli():
     assert d.capture_fidelity == "statusline"
 
 
+def test_known_descriptors_copilot_vscode():
+    """R2.5 — Copilot VS Code registers as local_log_tail. Token-estimation
+    caveat lives in per-event metadata, not the closed enum."""
+    d = lookup("copilot-vscode")
+    assert d.harness == "copilot_vscode"
+    assert d.capture_fidelity == "local_log_tail"
+
+
 # ── lookup() — fallback ───────────────────────────────────────────────
 
 def test_lookup_unknown_source_returns_inferred_fallback():
@@ -114,6 +122,7 @@ def test_every_known_source_is_explicitly_tested():
         "cursor",
         "codex-cli",
         "copilot-cli",
+        "copilot-vscode",
     }
     missing = known_sources() - tested_sources
     assert not missing, (

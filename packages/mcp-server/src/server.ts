@@ -14,6 +14,7 @@ import {
   handleCodexSessionEnd,
 } from "./hooks/codex";
 import { handleCopilotCliEvent } from "./hooks/copilot-cli";
+import { handleCopilotVscodeEvent } from "./hooks/copilot-vscode";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -314,6 +315,29 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[codex session-end]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R2.5 — Copilot VS Code local_log_tail (tokens estimados) ──────
+      // Single ingest route; the CLI-side tail forwards parsed log lines.
+      // Tokens estimated via chars/4 heuristic — flagged in metadata.
+      if (method === "POST" && url.pathname === "/hook/copilot-vscode/event") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCopilotVscodeEvent(body);
+          if (!event) return json({ ok: false, reason: "unknown_event_type" });
+          await writer.write(event);
+          trackEvent(event);
+          if (event.event_type === "stop") {
+            sessions.delete(event.session_id);
+            triggerEngineProcessing(event.session_id).catch(() => {});
+            notificationService.checkDailyScore().catch(() => {});
+          }
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[copilot-vscode event]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

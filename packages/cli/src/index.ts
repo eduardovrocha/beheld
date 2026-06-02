@@ -294,6 +294,60 @@ program
     }
   });
 
+/**
+ * D-02 fix — default behavior when invoked with no subcommand.
+ *
+ * Exported as a plain function so tests can drive it directly without
+ * spawning the binary. Behaviour:
+ *   - if the canonical signing keys (~/.beheld/keys/{public,private}.jwk)
+ *     are missing, dispatch `beheld bootstrap` automatically so the
+ *     L1-first onboarding kicks in without forcing the user to type
+ *     a subcommand the first time.
+ *   - if keys already exist, fall through to commander's default help
+ *     output (preserves the existing behaviour for installed users).
+ *
+ * Commander's `.action()` on the root program fires when no subcommand
+ * matches AND no global flag (e.g. -v) handled the call. We use it as
+ * the dispatch point.
+ *
+ * Skipped on every other code path (subcommand provided, -v, -h) so
+ * `beheld init`, `beheld view`, etc. stay unchanged.
+ */
+export interface DefaultDispatchDeps {
+  /** Override the identity check (used by tests). Defaults to keystore.keysExist(). */
+  hasIdentity?: () => boolean;
+  /** Override the bootstrap entry (used by tests). */
+  runBootstrap?: () => Promise<void>;
+  /** Override the help printer (used by tests). */
+  showHelp?: () => void;
+}
+
+export async function defaultDispatch(deps: DefaultDispatchDeps = {}): Promise<"bootstrap" | "help"> {
+  const hasIdentity =
+    deps.hasIdentity ??
+    (() => {
+      // Lazy require avoids pulling keystore + crypto when the user gave
+      // an explicit subcommand and this function is never called.
+      const { keysExist } = require("./keys/keystore");
+      return keysExist();
+    });
+
+  if (hasIdentity()) {
+    if (deps.showHelp) deps.showHelp();
+    else program.outputHelp();
+    return "help";
+  }
+
+  if (deps.runBootstrap) await deps.runBootstrap();
+  else {
+    const { bootstrapCommand } = await import("./commands/bootstrap");
+    await bootstrapCommand({});
+  }
+  return "bootstrap";
+}
+
+program.action(async () => { await defaultDispatch(); });
+
 if (import.meta.main) {
   program.parse(process.argv);
 }

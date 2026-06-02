@@ -36,6 +36,31 @@ program
     await initCommand(opts);
   });
 
+// ── Unified harness installer (R2/R3 wrap-up) ──────────────────────────
+// Inspects every harness Beheld supports, installs the ones detected on
+// this host, and prints what was wired. Complements `beheld init` which
+// historically only knew about Claude Code + Continue.dev.
+const harnessCmd = program
+  .command("harness")
+  .description("Manage which coding harnesses Beheld observes (R2/R3 wrap-up)");
+
+harnessCmd
+  .command("list")
+  .description("Show every harness Beheld knows about, with detection + install state")
+  .action(async () => {
+    const { harnessListCommand } = await import("./commands/harness");
+    await harnessListCommand();
+  });
+
+harnessCmd
+  .command("install [names...]")
+  .description("Install hooks / enable tails for detected harnesses (or only the named ones)")
+  .option("--force", "install even if the harness is not detected on this host")
+  .action(async (names: string[], opts: { force?: boolean }) => {
+    const { harnessInstallCommand } = await import("./commands/harness");
+    await harnessInstallCommand({ names, force: opts.force });
+  });
+
 program
   .command("start")
   .description("Start the Beheld daemon")
@@ -346,7 +371,19 @@ export async function defaultDispatch(deps: DefaultDispatchDeps = {}): Promise<"
   return "bootstrap";
 }
 
-program.action(async () => { await defaultDispatch(); });
+program.action(async (_opts, cmd) => {
+  // Commander's default action fires for ANY no-subcommand-matched invocation,
+  // including unknown commands like `beheld bogus-cmd`. Distinguish the two:
+  //   - true no-args invocation (`beheld`) → defaultDispatch
+  //   - unknown command → reproduce commander's standard error+exit so the
+  //     CLI behaves like every other Unix tool when given a bogus subcommand.
+  const positional = cmd.args ?? [];
+  if (positional.length > 0) {
+    console.error(`error: unknown command '${positional[0]}'`);
+    process.exit(1);
+  }
+  await defaultDispatch();
+});
 
 if (import.meta.main) {
   program.parse(process.argv);

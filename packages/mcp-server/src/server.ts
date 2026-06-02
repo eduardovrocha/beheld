@@ -456,6 +456,37 @@ export function startServer(): ReturnType<typeof Bun.serve> {
  * does I/O when the file is missing or outdated. Failures stay silent — a heal
  * crash must never destabilise the daemon.
  */
+/**
+ * Tail heartbeat — every minute, drains pending log lines from every
+ * enabled tail adapter (Cursor, Copilot CLI, Copilot VS Code).
+ *
+ * Tails are enabled per-adapter in ~/.beheld/config.json under the `tails`
+ * array (managed by `beheld harness install`). Each tail is independent:
+ * one slow tail doesn't block the others, and a tail crash never kills
+ * the daemon — all errors are swallowed silently per heartbeat tick.
+ *
+ * Wall-clock: pollOnce is a no-op when there's nothing new (just an fs
+ * stat + readFileSync slice). Real work only happens when the harness
+ * actually produced log lines since the last tick.
+ */
+async function startTailHeartbeat(): Promise<void> {
+  const { enabledTails } = await import("../../cli/src/lib/harness-installer");
+  const tailRunners: Record<string, () => Promise<number>> = {
+    "cursor":          (await import("../../cli/src/lib/cursor-tail")).pollOnce,
+    "copilot-cli":     (await import("../../cli/src/lib/copilot-cli-tail")).pollOnce,
+    "copilot-vscode":  (await import("../../cli/src/lib/copilot-vscode-tail")).pollOnce,
+  };
+  const tick = (): void => {
+    const active = enabledTails();
+    for (const name of active) {
+      const runner = tailRunners[name];
+      if (!runner) continue;
+      runner().catch(() => { /* best-effort — never crash the daemon */ });
+    }
+  };
+  setInterval(tick, 60_000);
+}
+
 async function startHealHeartbeat(): Promise<void> {
   const { selfHealClaudeIntegration } = await import("../../cli/src/config/hooks");
   const tick = (): void => {
@@ -491,4 +522,8 @@ if (import.meta.main) {
 
   // Periodic self-heal so the slash command can't stay gone for more than ~1min.
   startHealHeartbeat().catch(() => { /* never block startup */ });
+
+  // Periodic tail drain for log_tail / statusline harnesses enabled via
+  // `beheld harness install`. Idempotent: no enabled tails = no-op tick.
+  startTailHeartbeat().catch(() => { /* never block startup */ });
 }

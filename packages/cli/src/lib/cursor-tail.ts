@@ -7,38 +7,23 @@
  * it to the local mcp-server's `/hook/cursor/event` route — which in turn
  * ingests it as a BeheldEvent with `source: "cursor"`.
  *
- * Design choices:
- *
- *   1. **Position cursor on disk**. The tail loop persists its read offset
- *      to `~/.beheld/.cursor-tail.cursor` so a daemon restart doesn't
- *      replay events. Cursor log files are append-only; the offset is a
- *      single byte position into the most recent log file.
- *
- *   2. **One file at a time**. Cursor rotates logs daily-ish; the tail
- *      always reads from the newest file. When a new log file appears,
- *      the cursor is reset (we don't backfill — the daemon was offline,
- *      so the events would have already been late by hours).
- *
- *   3. **Forgiving line parser**. Cursor's log lines aren't a public
- *      contract. The parser drops malformed lines silently (no JSON, no
- *      `type` field, no recognised `type` value) and only emits a wire
- *      payload when the shape passes a structural check.
- *
- *   4. **Sanitisation lives server-side**. We POST the raw parsed object
- *      (no secret stripping) and let the mcp-server's `sanitize` chain
- *      handle redaction. This keeps the privacy boundary in one place
- *      (the writer pipeline), so the tail is a pure pass-through.
- *
- *   5. **No daemon process here**. This module exports `pollOnce` and
- *      `tailLoop` as plain async functions. The supervisor wires it into
- *      the existing 60-second poll cycle. No new long-lived process, no
- *      new socket.
+ * The mechanical heavy lifting (offset persistence, log rotation,
+ * retry-on-failure, file discovery) lives in `lib/log-tail.ts` so the
+ * R2.4/R2.5 adapters can share the same battle-tested loop. This module
+ * carries the Cursor-specific knowledge: where the logs live, how to
+ * decode one line into a wire payload, and which mcp-server route to POST.
  *
  * Capture fidelity: `local_log_tail` — see harness_registry.py.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+
+import {
+  makeLocalPost,
+  pollOnce as genericPollOnce,
+  type TailConfig,
+} from "./log-tail";
 
 export interface CursorEventPayload {
   session_id?: string;
@@ -54,23 +39,20 @@ export interface CursorEventPayload {
   metadata?: Record<string, unknown>;
 }
 
-export interface CursorTailState {
-  /** Absolute path of the log file we're currently following. */
-  log_file: string;
-  /** Byte offset of the next byte to read from `log_file`. */
-  offset: number;
-}
+/** Re-export the generic state shape for any caller that still imports it. */
+export type { TailState as CursorTailState } from "./log-tail";
 
 export interface CursorTailDeps {
   /** Override path discovery (used by tests). */
   logsDir?: string;
   /** Override state-file path (used by tests). */
   stateFile?: string;
-  /** Override the POST sink (used by tests; default posts to localhost:7337). */
+  /** Override the POST sink (used by tests). */
   post?: (payload: CursorEventPayload) => Promise<void>;
 }
 
-const DEFAULT_STATE_FILE = join(homedir(), ".beheld", ".cursor-tail.cursor");
+/** Re-exports so the existing test surface keeps working unchanged. */
+export { loadState, saveState } from "./log-tail";
 
 /**
  * Resolve the Cursor logs directory by platform. Returns null when Cursor
@@ -94,47 +76,6 @@ export function defaultCursorLogsDir(): string | null {
   }
 }
 
-/** Newest entry in the logs dir (recursive, picks the largest mtime). */
-function findNewestLogFile(logsDir: string): string | null {
-  const candidates: { path: string; mtimeMs: number }[] = [];
-  const walk = (dir: string): void => {
-    let entries: string[];
-    try { entries = readdirSync(dir); } catch { return; }
-    for (const name of entries) {
-      const p = join(dir, name);
-      try {
-        const st = statSync(p);
-        if (st.isDirectory()) walk(p);
-        else if (name.endsWith(".log") || name.endsWith(".jsonl")) {
-          candidates.push({ path: p, mtimeMs: st.mtimeMs });
-        }
-      } catch { /* permission denied / vanished — skip */ }
-    }
-  };
-  walk(logsDir);
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return candidates[0].path;
-}
-
-export function loadState(stateFile = DEFAULT_STATE_FILE): CursorTailState | null {
-  if (!existsSync(stateFile)) return null;
-  try {
-    const raw = readFileSync(stateFile, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.log_file === "string" && typeof parsed?.offset === "number") {
-      return { log_file: parsed.log_file, offset: parsed.offset };
-    }
-  } catch { /* corrupt state — fall through */ }
-  return null;
-}
-
-export function saveState(state: CursorTailState, stateFile = DEFAULT_STATE_FILE): void {
-  const dir = stateFile.substring(0, stateFile.lastIndexOf("/"));
-  if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
-}
-
 /**
  * Parse a single raw log line into a wire-shaped CursorEventPayload, or
  * return null if the line is unusable. Forgiving on purpose — Cursor's
@@ -147,17 +88,12 @@ export function parseLogLine(line: string): CursorEventPayload | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
 
-  // The line MUST surface either an explicit event_type or a recognisable
-  // `type` field — otherwise it's noise (heartbeat, debug, telemetry ping).
   const rawType =
     typeof o.event_type === "string" ? o.event_type :
     typeof o.type       === "string" ? o.type       :
     null;
   if (!rawType) return null;
 
-  // Map Cursor's type strings to our event_type vocabulary. Unknown types
-  // collapse to a single `tool_use` event so the timeline isn't fully lost
-  // when Cursor adds new categories between releases.
   const mapped =
     rawType === "tool_use"     || rawType === "tool"     ? "tool_use" :
     rawType === "chat_request" || rawType === "prompt"   ? "chat_request" :
@@ -183,57 +119,21 @@ export function parseLogLine(line: string): CursorEventPayload | null {
   };
 }
 
+const DEFAULT_POST = makeLocalPost<CursorEventPayload>("/hook/cursor/event");
+
 /**
- * One tail-loop tick: locate the newest log, resume from the persisted
- * offset, parse and POST every new line, persist the new offset, return.
- * Idempotent across daemon restarts — re-running with an unchanged log
- * file emits zero events.
+ * One tail-loop tick — delegates to the generic loop with a Cursor-shaped
+ * config. Idempotent across daemon restarts: re-running with an unchanged
+ * log file emits zero events.
  */
 export async function pollOnce(deps: CursorTailDeps = {}): Promise<number> {
-  const logsDir = deps.logsDir ?? defaultCursorLogsDir();
-  if (!logsDir) return 0;
-  const newest = findNewestLogFile(logsDir);
-  if (!newest) return 0;
-
-  const stateFile = deps.stateFile ?? DEFAULT_STATE_FILE;
-  let state = loadState(stateFile);
-  // Log rotation — start over at offset 0 if we're now reading a new file.
-  if (!state || state.log_file !== newest) state = { log_file: newest, offset: 0 };
-
-  let contents: string;
-  try { contents = readFileSync(newest, "utf-8"); } catch { return 0; }
-  if (contents.length <= state.offset) return 0; // nothing new
-  const slice = contents.slice(state.offset);
-  const lines = slice.split("\n").filter(Boolean);
-
-  const post = deps.post ?? defaultPost;
-  let emitted = 0;
-  for (const line of lines) {
-    const payload = parseLogLine(line);
-    if (!payload) continue;
-    try {
-      await post(payload);
-      emitted++;
-    } catch {
-      // Server transient failure — break out so we re-read the same lines
-      // next tick. NOT advancing the offset is the only correctness gate.
-      return emitted;
-    }
-  }
-
-  state.offset = contents.length;
-  saveState(state, stateFile);
-  return emitted;
-}
-
-const SERVER_URL =
-  process.env.BEHELD_MCP_URL ?? "http://127.0.0.1:7337";
-
-async function defaultPost(payload: CursorEventPayload): Promise<void> {
-  const res = await fetch(`${SERVER_URL}/hook/cursor/event`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`POST /hook/cursor/event → ${res.status}`);
+  const config: TailConfig<CursorEventPayload> = {
+    name: "cursor",
+    logsDir: deps.logsDir ?? defaultCursorLogsDir(),
+    fileSuffixes: [".log", ".jsonl"],
+    parseLine: parseLogLine,
+    post: deps.post ?? DEFAULT_POST,
+    stateFile: deps.stateFile,
+  };
+  return genericPollOnce(config);
 }

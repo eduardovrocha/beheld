@@ -155,16 +155,34 @@ def build_bundle_payload(
     previous_hash = latest_snapshot["hash"] if latest_snapshot else None
 
     # R1.1 — harness_sources is the first-class capture-fidelity manifest of
-    # enrichment. Today the only adapter is Claude Code via native hooks, so
-    # we emit a single entry. The R2 adapter wave will populate multi-source
-    # lists (e.g. claude_code:native_hook + cursor:local_log_tail).
-    harness_sources = [
-        HarnessSource(
-            harness="claude_code",
-            capture_fidelity="native_hook",
-            sessions=len(sessions),
+    # enrichment. R2 introduces multi-harness aggregation: sessions are
+    # grouped by `source` (the writer-side string stamped on every
+    # BeheldEvent), and each group becomes one HarnessSource via the closed
+    # harness_registry mapping. Unknown sources fall back to
+    # (harness="unknown", capture_fidelity="inferred") rather than aborting
+    # the bundle — forward-compat for adapters that ship between releases.
+    from harness_registry import lookup as _harness_lookup
+    _source_counts: Counter = Counter(s.source for s in sessions)
+    # Sorted by (harness, fidelity) to keep canonical bytes stable across
+    # runs regardless of session insertion order.
+    harness_sources = sorted(
+        (
+            HarnessSource(
+                harness=_harness_lookup(src).harness,
+                capture_fidelity=_harness_lookup(src).capture_fidelity,
+                sessions=count,
+            )
+            for src, count in _source_counts.items()
         ),
-    ]
+        key=lambda h: (h.harness, h.capture_fidelity),
+    )
+    # R1.1 back-compat: when there are zero sessions at all, emit a single
+    # claude_code/native_hook entry with sessions=0 so legacy fixtures and
+    # downstream readers that expect at least one entry don't break.
+    if not harness_sources:
+        harness_sources = [
+            HarnessSource(harness="claude_code", capture_fidelity="native_hook", sessions=0),
+        ]
 
     enrichment = BundleEnrichmentSection(
         harness_sources=harness_sources,

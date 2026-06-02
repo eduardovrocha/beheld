@@ -2,6 +2,11 @@ import * as os from "os";
 import * as path from "path";
 import { handlePreToolUse, handlePostToolUse, handleStop } from "./hooks/claude-code";
 import { handleMcpRequest } from "./hooks/continue";
+import {
+  handleGeminiPreToolUse,
+  handleGeminiPostToolUse,
+  handleGeminiStop,
+} from "./hooks/gemini";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -205,6 +210,55 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[stop]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R2.1 — Gemini CLI native_hook routes ──────────────────────────
+      // Same envelope as Claude Code's `/hook/*`, namespaced under
+      // `/hook/gemini/*` so the harness adapter can wire `pre`, `post`,
+      // and `stop` independently without colliding with the Claude Code
+      // routes. Source stamp lands inside the handler.
+      if (method === "POST" && url.pathname === "/hook/gemini/pre-tool") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleGeminiPreToolUse(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[gemini pre-tool]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      if (method === "POST" && url.pathname === "/hook/gemini/post-tool") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleGeminiPostToolUse(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[gemini post-tool]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      if (method === "POST" && url.pathname === "/hook/gemini/stop") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleGeminiStop(body);
+          await writer.write(event);
+          sessions.delete(event.session_id);
+          triggerEngineProcessing(event.session_id).catch(() => {});
+          notificationService.checkDailyScore().catch(() => {});
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[gemini stop]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

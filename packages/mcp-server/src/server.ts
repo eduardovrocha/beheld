@@ -7,6 +7,7 @@ import {
   handleGeminiPostToolUse,
   handleGeminiStop,
 } from "./hooks/gemini";
+import { handleCursorEvent } from "./hooks/cursor";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -259,6 +260,32 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[gemini stop]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R2.2 — Cursor local_log_tail ingest route ─────────────────────
+      // Single endpoint per sanitised log line (Cursor logs don't always
+      // pair pre/post boundaries cleanly). The CLI-side tail loop POSTs
+      // one CursorEventPayload at a time; this handler returns 200 with
+      // ok:false when the line maps to a dropped event_type so the tail
+      // can advance its cursor without re-emitting.
+      if (method === "POST" && url.pathname === "/hook/cursor/event") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCursorEvent(body);
+          if (!event) return json({ ok: false, reason: "unknown_event_type" });
+          await writer.write(event);
+          trackEvent(event);
+          if (event.event_type === "stop") {
+            sessions.delete(event.session_id);
+            triggerEngineProcessing(event.session_id).catch(() => {});
+            notificationService.checkDailyScore().catch(() => {});
+          }
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[cursor event]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

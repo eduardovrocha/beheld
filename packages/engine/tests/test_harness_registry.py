@@ -60,6 +60,13 @@ def test_known_descriptors_gemini_cli():
     assert d.capture_fidelity == "native_hook"
 
 
+def test_known_descriptors_cursor():
+    """R2.2 — Cursor registers as local_log_tail."""
+    d = lookup("cursor")
+    assert d.harness == "cursor"
+    assert d.capture_fidelity == "local_log_tail"
+
+
 # ── lookup() — fallback ───────────────────────────────────────────────
 
 def test_lookup_unknown_source_returns_inferred_fallback():
@@ -89,6 +96,7 @@ def test_every_known_source_is_explicitly_tested():
         "claude-code",
         "continue-vscode",
         "gemini-cli",
+        "cursor",
     }
     missing = known_sources() - tested_sources
     assert not missing, (

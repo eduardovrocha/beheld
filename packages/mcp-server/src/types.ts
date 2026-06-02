@@ -4,7 +4,8 @@
 export type BeheldSource =
   | "claude-code"        // Phase 5 — native_hook
   | "continue-vscode"    // Phase 5 — editor_extension
-  | "gemini-cli";        // R2.1 — native_hook
+  | "gemini-cli"         // R2.1 — native_hook
+  | "cursor";            // R2.2 — local_log_tail
 
 export interface BeheldEvent {
   event_id: string;

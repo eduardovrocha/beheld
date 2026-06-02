@@ -71,6 +71,15 @@ HARNESS_REGISTRY: dict[str, HarnessDescriptor] = {
     # in shape to Claude Code's, so the fidelity is `native_hook` (the
     # tool name comes from the harness itself, not inferred from logs).
     "gemini-cli": HarnessDescriptor("gemini_cli", "native_hook"),
+
+    # R2.2 — Cursor has no public hook API. The adapter tails the local
+    # Cursor log files under ~/Library/Application Support/Cursor/logs/
+    # (macOS) or ~/.config/Cursor/logs/ (Linux), parses one JSON line per
+    # tool/edit/chat event, and ingests via POST /hook/cursor/event. The
+    # signal quality is lower than `native_hook` — log lines lag the
+    # in-editor action, can be rotated/truncated, and the schema is not
+    # guaranteed stable by Cursor — hence `local_log_tail`.
+    "cursor": HarnessDescriptor("cursor", "local_log_tail"),
 }
 
 

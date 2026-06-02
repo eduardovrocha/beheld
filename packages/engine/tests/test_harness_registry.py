@@ -67,6 +67,13 @@ def test_known_descriptors_cursor():
     assert d.capture_fidelity == "local_log_tail"
 
 
+def test_known_descriptors_codex_cli():
+    """R2.3 — Codex CLI registers as native_hook."""
+    d = lookup("codex-cli")
+    assert d.harness == "codex_cli"
+    assert d.capture_fidelity == "native_hook"
+
+
 # ── lookup() — fallback ───────────────────────────────────────────────
 
 def test_lookup_unknown_source_returns_inferred_fallback():
@@ -97,6 +104,7 @@ def test_every_known_source_is_explicitly_tested():
         "continue-vscode",
         "gemini-cli",
         "cursor",
+        "codex-cli",
     }
     missing = known_sources() - tested_sources
     assert not missing, (

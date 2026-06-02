@@ -8,6 +8,11 @@ import {
   handleGeminiStop,
 } from "./hooks/gemini";
 import { handleCursorEvent } from "./hooks/cursor";
+import {
+  handleCodexBeforeCommand,
+  handleCodexAfterCommand,
+  handleCodexSessionEnd,
+} from "./hooks/codex";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -260,6 +265,54 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[gemini stop]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R2.3 — Codex CLI native_hook routes ───────────────────────────
+      // Hook trio mirroring Claude Code / Gemini. Codex emits
+      // before_command / after_command / session_end; we expose them
+      // under `/hook/codex/*` so adapters wire each independently.
+      if (method === "POST" && url.pathname === "/hook/codex/before-command") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCodexBeforeCommand(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[codex before-command]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      if (method === "POST" && url.pathname === "/hook/codex/after-command") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCodexAfterCommand(body);
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[codex after-command]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      if (method === "POST" && url.pathname === "/hook/codex/session-end") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCodexSessionEnd(body);
+          await writer.write(event);
+          sessions.delete(event.session_id);
+          triggerEngineProcessing(event.session_id).catch(() => {});
+          notificationService.checkDailyScore().catch(() => {});
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[codex session-end]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

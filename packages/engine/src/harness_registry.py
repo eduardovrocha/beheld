@@ -80,6 +80,11 @@ HARNESS_REGISTRY: dict[str, HarnessDescriptor] = {
     # in-editor action, can be rotated/truncated, and the schema is not
     # guaranteed stable by Cursor — hence `local_log_tail`.
     "cursor": HarnessDescriptor("cursor", "local_log_tail"),
+
+    # R2.3 — Codex CLI (OpenAI's `codex` binary) ships a Claude-Code-style
+    # before_command/after_command/session_end hook surface. Same fidelity
+    # tier as Claude Code and Gemini CLI.
+    "codex-cli": HarnessDescriptor("codex_cli", "native_hook"),
 }
 
 

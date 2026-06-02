@@ -5,7 +5,8 @@ export type BeheldSource =
   | "claude-code"        // Phase 5 — native_hook
   | "continue-vscode"    // Phase 5 — editor_extension
   | "gemini-cli"         // R2.1 — native_hook
-  | "cursor";            // R2.2 — local_log_tail
+  | "cursor"             // R2.2 — local_log_tail
+  | "codex-cli";         // R2.3 — native_hook
 
 export interface BeheldEvent {
   event_id: string;
@@ -33,6 +34,35 @@ export interface ClaudeCodeHookPayload {
   timestamp?: string;
   total_turns?: number;
   cwd?: string;
+  hook_event_name?: string;
+}
+
+/**
+ * R2.3 — Codex CLI hook payload.
+ *
+ * Codex CLI (OpenAI's `codex` binary) exposes a Claude-Code-style hook
+ * surface: a `before_command` / `after_command` / `session_end` triplet
+ * that fires on tool boundaries. Shape kept independent of Gemini and
+ * Claude Code so the three native_hook adapters can evolve at their own
+ * pace.
+ *
+ * Source string: `"codex-cli"`.
+ */
+export interface CodexCliHookPayload {
+  session_id: string;
+  /** Tool name (Codex calls it `command_name` on the wire — accept either). */
+  tool_name?: string;
+  command_name?: string;
+  /** Codex's structured input object — tool-specific shape. */
+  tool_input?: Record<string, unknown>;
+  /** ISO-8601 from the hook. */
+  timestamp?: string;
+  /** Number of conversational turns reported at session_end. */
+  total_turns?: number;
+  /** Codex's working directory. */
+  cwd?: string;
+  /** Round-trip duration in ms. */
+  duration_ms?: number;
   hook_event_name?: string;
 }
 

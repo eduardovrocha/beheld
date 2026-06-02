@@ -18,6 +18,15 @@ program
 program.hook("preAction", () => { try { maybeShowBundleNudge(); } catch { /* never fail a command for a nudge */ } });
 
 program
+  .command("bootstrap")
+  .description("R1.4 — L1-first onboarding: migrate legacy ~/.devprofile/, prep ~/.beheld/, point to next steps")
+  .option("--import", "After bridging, enter the L1 git-history import wizard immediately")
+  .action(async (opts: { import?: boolean }) => {
+    const { bootstrapCommand } = await import("./commands/bootstrap");
+    await bootstrapCommand({ import: opts.import });
+  });
+
+program
   .command("init")
   .description("Configure Beheld for Claude Code and Continue.dev")
   .option("--force", "skip reinit prompt and run all setup steps")

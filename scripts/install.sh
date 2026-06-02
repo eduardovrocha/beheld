@@ -93,7 +93,16 @@ fi
 
 echo ""
 echo "Beheld ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
+echo ""
+# R1.5 — L1-first onboarding: bootstrap migrates legacy ~/.devprofile/ (if
+# present) and prepares ~/.beheld/ with mode 0700 BEFORE the harness wizard
+# runs. The wizard (`init`) then wires Claude Code + Continue.dev hooks.
+# The two steps stay separate so a dev can rerun either independently.
+echo "Running L1-first bootstrap..."
+echo ""
+"${INSTALL_DIR}/${BINARY}" bootstrap
+
+echo ""
 echo "Running setup wizard..."
 echo ""
-
 "${INSTALL_DIR}/${BINARY}" init

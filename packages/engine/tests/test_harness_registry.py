@@ -74,6 +74,14 @@ def test_known_descriptors_codex_cli():
     assert d.capture_fidelity == "native_hook"
 
 
+def test_known_descriptors_copilot_cli():
+    """R2.4 — Copilot CLI registers as statusline (blend with log_tail
+    annotated at the per-event metadata level, not the harness level)."""
+    d = lookup("copilot-cli")
+    assert d.harness == "copilot_cli"
+    assert d.capture_fidelity == "statusline"
+
+
 # ── lookup() — fallback ───────────────────────────────────────────────
 
 def test_lookup_unknown_source_returns_inferred_fallback():
@@ -105,6 +113,7 @@ def test_every_known_source_is_explicitly_tested():
         "gemini-cli",
         "cursor",
         "codex-cli",
+        "copilot-cli",
     }
     missing = known_sources() - tested_sources
     assert not missing, (

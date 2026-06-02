@@ -85,6 +85,19 @@ HARNESS_REGISTRY: dict[str, HarnessDescriptor] = {
     # before_command/after_command/session_end hook surface. Same fidelity
     # tier as Claude Code and Gemini CLI.
     "codex-cli": HarnessDescriptor("codex_cli", "native_hook"),
+
+    # R2.4 — GitHub Copilot CLI emits a short STATUSLINE on stderr while it
+    # runs (the "Suggestion / Explain / Execute" prompt) and writes a
+    # local log file at ~/.config/github-copilot/cli.log (Linux) or
+    # ~/Library/Application Support/GitHub Copilot/cli.log (macOS). The
+    # adapter blends both: statusline polls produce coarse "in-session"
+    # heartbeats; log-tail lines produce per-action events. The dominant
+    # signal is the statusline (it's deterministic and harness-emitted),
+    # so the registry pins the harness as `statusline`. Sessions that
+    # only had log-tail events (no statusline poll captured) will still
+    # ingest, but the recorded fidelity stays the harness-level default
+    # — the per-event channel is annotated in `metadata.channel`.
+    "copilot-cli": HarnessDescriptor("copilot_cli", "statusline"),
 }
 
 

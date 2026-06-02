@@ -13,6 +13,7 @@ import {
   handleCodexAfterCommand,
   handleCodexSessionEnd,
 } from "./hooks/codex";
+import { handleCopilotCliEvent } from "./hooks/copilot-cli";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -313,6 +314,31 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[codex session-end]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R2.4 — Copilot CLI statusline + log_tail blend ────────────────
+      // Single ingestion route for both channels. `channel` inside the
+      // payload discriminates statusline_poll vs log_line vs session_end.
+      // The handler annotates metadata.channel so downstream classifiers
+      // can weight them differently if they ever care.
+      if (method === "POST" && url.pathname === "/hook/copilot-cli/event") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        try {
+          const event = handleCopilotCliEvent(body);
+          if (!event) return json({ ok: false, reason: "unknown_channel" });
+          await writer.write(event);
+          trackEvent(event);
+          if (event.event_type === "stop") {
+            sessions.delete(event.session_id);
+            triggerEngineProcessing(event.session_id).catch(() => {});
+            notificationService.checkDailyScore().catch(() => {});
+          }
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[copilot-cli event]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

@@ -6,7 +6,8 @@ export type BeheldSource =
   | "continue-vscode"    // Phase 5 — editor_extension
   | "gemini-cli"         // R2.1 — native_hook
   | "cursor"             // R2.2 — local_log_tail
-  | "codex-cli";         // R2.3 — native_hook
+  | "codex-cli"          // R2.3 — native_hook
+  | "copilot-cli";       // R2.4 — statusline (+ local_log_tail blend)
 
 export interface BeheldEvent {
   event_id: string;

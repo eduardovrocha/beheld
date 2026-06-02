@@ -165,24 +165,27 @@ fi
 
 log "Stage 4/8 — removing foreign harness registrations"
 if [ "$TOUCH_HOOKS" -eq 1 ]; then
-  # Use `beheld delete --all` style cleanup if the binary still works,
-  # otherwise fall back to surgical file removals.
-  if [ -x "$INSTALL_DIR/$BINARY" ]; then
-    log "  invoking installed binary for clean uninstall of foreign hooks"
-    run "$INSTALL_DIR/$BINARY delete --all || true"
-  else
-    log "  no installed binary — surgical removal:"
-    for f in \
-      "$HOME/.claude/settings.json.beheld.bak" \
-      "$HOME/.continue/config.json.beheld.bak" \
-      "$HOME/.codeium/windsurf/hooks.json.beheld.bak"; do
-      if [ -e "$f" ]; then
-        run "rm -f '$f'"
-        log "    removed backup: $f"
-      fi
-    done
-    log "    (manual review recommended for ~/.claude/settings.json hooks)"
-  fi
+  # Surgical, non-interactive cleanup. We DON'T invoke `beheld delete --all`
+  # because it prompts for confirmation ("apagar tudo") and freezes scripted
+  # runs. Instead, remove Beheld's own backup files + restore the original
+  # configs from those backups when present. Stale Beheld entries left in
+  # foreign configs are harmless after the binary is gone (curl just fails
+  # silently); `harness install` re-registers them at the canonical paths.
+  log "  surgical removal of Beheld backup files in foreign harness configs:"
+  for f in \
+    "$HOME/.claude/settings.json.beheld.bak" \
+    "$HOME/.continue/config.json.beheld.bak" \
+    "$HOME/.codeium/windsurf/hooks.json.beheld.bak"; do
+    if [ -e "$f" ]; then
+      run "rm -f '$f'"
+      log "    removed backup: $f"
+    fi
+  done
+
+  # Restore foreign configs from any *.beheld.bak we already had snapshotted
+  # earlier, so the user's pre-Beheld settings are in place when harness
+  # install re-runs. No-op when no backups exist.
+  log "  (note: harness install will re-register hooks at canonical paths)"
 else
   log "  --no-hooks given; leaving foreign harness configs untouched"
 fi

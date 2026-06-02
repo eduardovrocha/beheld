@@ -1,5 +1,5 @@
 /**
- * R1.4 — legacy bridge: move ~/.devprofile/ → ~/.beheld/ for upgrading users.
+ * R1.4 — legacy bridge: COPY ~/.devprofile/ → ~/.beheld/ for upgrading users.
  *
  * The pre-R1 product shipped under the `devprofile` name. Some early adopters
  * still carry a `~/.devprofile/` directory with their attestation, profile.db,
@@ -7,18 +7,31 @@
  * so the new `beheld bootstrap` command (and every subsequent subcommand) sees
  * a single canonical location.
  *
- * Migration rules (all checked in order — first violation aborts the run):
+ * Migration semantics (D-01 fix — non-destructive copy):
  *   1. If the legacy dir doesn't exist, return `{ migrated: false, reason }`
  *      (idempotent — calling on a clean machine is a no-op).
  *   2. If the target `~/.beheld/` already exists AND is non-empty, refuse to
- *      overwrite (caller MUST opt in to merge or rename).
- *   3. Otherwise, mkdir the target with mode 0700 and move every immediate
- *      child of the legacy dir into the target via `rename`. Falls back to a
- *      recursive copy + unlink chain on EXDEV (cross-filesystem) — Bun's fs
- *      surfaces this as an error string we match.
- *   4. After all children moved, remove the (now empty) legacy dir. If any
- *      child copy failed, the legacy dir is left intact so the user can
- *      retry without data loss.
+ *      overwrite. Caller MUST decide whether to merge or rename.
+ *   3. Otherwise, mkdir the target with mode 0700 and **copy** every immediate
+ *      child of the legacy dir into the target (recursive cpSync). The legacy
+ *      dir is **never deleted** and **never mutated** — the user can roll
+ *      back manually or keep both layouts in parallel.
+ *   4. After every child copies successfully, write a single marker file at
+ *      `~/.devprofile/MIGRATED_TO_BEHELD.md` carrying:
+ *        - the canonical target path (so future support can locate the data),
+ *        - the ISO-8601 timestamp of the migration,
+ *        - a one-paragraph human note explaining the rename.
+ *      If the marker already exists, it is preserved as-is (idempotent).
+ *      The presence of this file is the only signal a re-run uses to short-
+ *      circuit a redundant copy on machines that already migrated.
+ *   5. On partial failure (any child copy errored) the legacy dir stays
+ *      intact, no marker is written, and the caller is told which children
+ *      failed so a retry is safe.
+ *
+ * The earlier R1.4 implementation MOVED files (renameSync) and removed the
+ * legacy dir, which violated the spec contract ("legacy bridge NÃO deleta
+ * `~/.devprofile/` original" + "cria `~/.devprofile/MIGRATED_TO_BEHELD.md`").
+ * This rewrite restores the documented non-destructive copy.
  *
  * Returns a structured report so the orchestrator (bootstrap command) can
  * print a single line summarizing what happened — never throws.
@@ -27,8 +40,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  renameSync,
-  rmSync,
+  writeFileSync,
   statSync,
   chmodSync,
   cpSync,
@@ -44,24 +56,29 @@ export interface BridgePaths {
 }
 
 export interface BridgeResult {
-  /** True only if at least one child was moved (or copied). */
+  /** True only if at least one child was copied this run. False when a
+   *  previous migration already covered everything (`already_migrated`). */
   migrated: boolean;
   /** Short, lowercase tag for the outcome — stable, suitable for tests. */
   reason:
     | "no_legacy_dir"
     | "target_non_empty"
     | "empty_legacy"
-    | "moved"
-    | "copied_cross_fs"
+    | "copied"
+    | "already_migrated"
     | "partial_failure";
-  /** Names of children moved (file or directory). Empty when nothing moved. */
+  /** Names of children copied (file or directory). Empty when nothing copied. */
   moved: string[];
-  /** Names of children that failed to move (e.g. permission denied). */
+  /** Names of children that failed to copy (e.g. permission denied). */
   failed: string[];
 }
 
 const DEFAULT_LEGACY = join(homedir(), ".devprofile");
 const DEFAULT_TARGET = join(homedir(), ".beheld");
+
+/** Marker filename — placed inside the legacy dir so a re-run knows the
+ *  previous copy completed. The legacy dir itself is never deleted. */
+export const MIGRATED_MARKER = "MIGRATED_TO_BEHELD.md";
 
 export function defaultBridgePaths(): BridgePaths {
   return { legacy: DEFAULT_LEGACY, target: DEFAULT_TARGET };
@@ -71,16 +88,17 @@ export function defaultBridgePaths(): BridgePaths {
  * Idempotent — safe to call on every `beheld bootstrap` invocation.
  *
  * Visible-to-the-user contract:
- *   - `reason: "no_legacy_dir"` — nothing to do.
- *   - `reason: "target_non_empty"` — bail; user already has a populated
+ *   - `reason: "no_legacy_dir"`     — nothing to do (clean machine).
+ *   - `reason: "target_non_empty"`  — bail; the user already has a populated
  *     `~/.beheld/`. Caller decides whether to surface a warning.
- *   - `reason: "empty_legacy"` — legacy dir exists but is empty; we remove
- *     it so the next `bootstrap` run is a clean no-op.
- *   - `reason: "moved"` — at least one child moved via `rename` (same FS).
- *   - `reason: "copied_cross_fs"` — at least one child needed a copy + unlink
- *     because legacy and target are on different filesystems.
- *   - `reason: "partial_failure"` — at least one child failed; legacy dir is
- *     preserved so the user can retry.
+ *   - `reason: "empty_legacy"`      — legacy dir exists but holds no data;
+ *     the marker file is still written so future runs short-circuit.
+ *   - `reason: "copied"`            — at least one child copied this run.
+ *     Legacy dir preserved; marker file written.
+ *   - `reason: "already_migrated"`  — marker file present and target
+ *     populated; nothing new copied.
+ *   - `reason: "partial_failure"`   — at least one child copy errored;
+ *     legacy dir preserved, no marker written, caller can retry.
  */
 export function bridgeLegacyDevprofile(paths: BridgePaths = defaultBridgePaths()): BridgeResult {
   const { legacy, target } = paths;
@@ -89,15 +107,24 @@ export function bridgeLegacyDevprofile(paths: BridgePaths = defaultBridgePaths()
     return { migrated: false, reason: "no_legacy_dir", moved: [], failed: [] };
   }
 
-  // The legacy path exists. Refuse to overwrite a populated target.
-  if (existsSync(target) && readdirSync(target).length > 0) {
+  // The legacy path exists. Refuse to overwrite a populated target UNLESS
+  // we already left a marker on a previous successful run — in that case
+  // the populated target IS our previous output, not a foreign install.
+  const markerPath = join(legacy, MIGRATED_MARKER);
+  const targetExistsNonEmpty = existsSync(target) && readdirSync(target).length > 0;
+  if (targetExistsNonEmpty) {
+    if (existsSync(markerPath)) {
+      return { migrated: false, reason: "already_migrated", moved: [], failed: [] };
+    }
     return { migrated: false, reason: "target_non_empty", moved: [], failed: [] };
   }
 
-  const children = readdirSync(legacy);
+  const children = readdirSync(legacy).filter((name) => name !== MIGRATED_MARKER);
   if (children.length === 0) {
-    // Empty shell — clean it up so future runs are no-ops.
-    try { rmSync(legacy, { recursive: true, force: true }); } catch { /* ignore */ }
+    // Empty shell — leave the dir, but still drop the marker so the next
+    // bootstrap run reports `already_migrated` instead of repeatedly
+    // probing an empty legacy dir.
+    writeMarker(markerPath, target);
     return { migrated: false, reason: "empty_legacy", moved: [], failed: [] };
   }
 
@@ -108,47 +135,68 @@ export function bridgeLegacyDevprofile(paths: BridgePaths = defaultBridgePaths()
 
   const moved: string[] = [];
   const failed: string[] = [];
-  let usedCopyFallback = false;
 
   for (const name of children) {
     const src = join(legacy, name);
     const dest = join(target, name);
     try {
-      renameSync(src, dest);
+      // Recursive copy. errorOnExist=true would crash if a partial prior
+      // run already wrote some children; force=false respects existing
+      // target content in case the user staged something there.
+      cpSync(src, dest, { recursive: true, errorOnExist: false, force: false });
       moved.push(name);
-    } catch (e) {
-      // Cross-filesystem moves fail with EXDEV on POSIX. Fall back to
-      // recursive copy + unlink so the migration still completes.
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/EXDEV|cross-device|EPERM|EACCES/i.test(msg)) {
-        try {
-          cpSync(src, dest, { recursive: true, errorOnExist: true, force: false });
-          rmSync(src, { recursive: true, force: true });
-          moved.push(name);
-          usedCopyFallback = true;
-        } catch {
-          failed.push(name);
-        }
-      } else {
-        failed.push(name);
-      }
+    } catch {
+      failed.push(name);
     }
   }
 
   if (failed.length > 0) {
-    // Don't remove the legacy dir — the user still has data there.
+    // Don't write the marker — the user still has data left to migrate.
     return { migrated: moved.length > 0, reason: "partial_failure", moved, failed };
   }
 
-  // All children moved successfully. Drop the empty shell.
-  try { rmSync(legacy, { recursive: true, force: true }); } catch { /* ignore */ }
+  // All children copied. Drop the marker so future runs short-circuit.
+  writeMarker(markerPath, target);
 
-  return {
-    migrated: true,
-    reason: usedCopyFallback ? "copied_cross_fs" : "moved",
-    moved,
-    failed,
-  };
+  return { migrated: true, reason: "copied", moved, failed };
+}
+
+/** Write the migration marker note. Idempotent: re-running overwrites the
+ *  timestamp but never errors. Mode 0600 keeps it private. */
+function writeMarker(markerPath: string, target: string): void {
+  // Date.now() is unavailable inside workflow scripts, but this module
+  // runs in the regular Bun runtime — `new Date()` is safe here.
+  const ts = new Date().toISOString();
+  const body =
+    `# Migrated to Beheld
+
+This directory has been migrated to the new canonical location:
+
+  ${target}
+
+A copy of every file from \`~/.devprofile/\` was placed there on:
+
+  ${ts}
+
+The original \`~/.devprofile/\` was **NOT deleted** — Beheld's migration is
+non-destructive. You can safely remove this directory manually once you've
+confirmed the new \`~/.beheld/\` is working as expected:
+
+\`\`\`sh
+rm -rf ~/.devprofile
+\`\`\`
+
+If you need to roll back, your data is still here. The Beheld CLI no longer
+reads from this directory — every subcommand uses \`~/.beheld/\` only.
+
+Generated by \`beheld bootstrap\` (legacy bridge, R1.4).
+`;
+  try {
+    writeFileSync(markerPath, body, { mode: 0o600 });
+  } catch {
+    // Best-effort — the migration succeeded even if we couldn't drop the
+    // note. Re-running will retry and produce the marker.
+  }
 }
 
 /**

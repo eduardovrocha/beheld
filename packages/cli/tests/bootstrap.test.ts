@@ -63,20 +63,40 @@ describe("bootstrapCommand — R1.4", () => {
     expect(out).toContain("beheld view");
   });
 
-  test("legacy data present: migrates and announces moved count", async () => {
+  test("legacy data present: COPIES (D-01 fix), preserves original, announces count", async () => {
     mkdirSync(legacy, { recursive: true });
     writeFileSync(join(legacy, "profile.db"), "sqlite-bytes");
     writeFileSync(join(legacy, "config.json"), "{}");
 
     const r = await bootstrapCommand({ paths: { legacy, target }, logger: collect });
 
-    expect(r.bridge.reason).toBe("moved");
+    expect(r.bridge.reason).toBe("copied");
     expect(r.bridge.moved.length).toBe(2);
     expect(existsSync(join(target, "profile.db"))).toBe(true);
     expect(existsSync(join(target, "config.json"))).toBe(true);
-    expect(existsSync(legacy)).toBe(false);
 
-    expect(lines.some(l => l.includes("migrated 2 item(s)"))).toBe(true);
+    // D-01 fix — legacy dir + every original file preserved.
+    expect(existsSync(legacy)).toBe(true);
+    expect(existsSync(join(legacy, "profile.db"))).toBe(true);
+    expect(existsSync(join(legacy, "config.json"))).toBe(true);
+    // Marker written so a second bootstrap reports `already_migrated`.
+    expect(existsSync(join(legacy, "MIGRATED_TO_BEHELD.md"))).toBe(true);
+
+    expect(lines.some(l => l.includes("copied 2 item(s)"))).toBe(true);
+    expect(lines.some(l => l.includes("Original ~/.devprofile preserved"))).toBe(true);
+  });
+
+  test("second bootstrap on migrated machine reports already_migrated", async () => {
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, "profile.db"), "x");
+
+    await bootstrapCommand({ paths: { legacy, target }, logger: collect });
+    lines.length = 0;
+    const r = await bootstrapCommand({ paths: { legacy, target }, logger: collect });
+
+    expect(r.bridge.reason).toBe("already_migrated");
+    expect(r.bridge.migrated).toBe(false);
+    expect(lines.some(l => l.includes("already migrated"))).toBe(true);
   });
 
   test("populated target with legacy still around: warns, leaves both intact", async () => {
@@ -95,14 +115,16 @@ describe("bootstrapCommand — R1.4", () => {
     expect(lines.some(l => l.includes("Skipping migration"))).toBe(true);
   });
 
-  test("empty legacy shell: silently cleans up, target prepared", async () => {
+  test("empty legacy shell: preserved + marker written + target prepared", async () => {
     mkdirSync(legacy, { recursive: true });
     const r = await bootstrapCommand({ paths: { legacy, target }, logger: collect });
 
     expect(r.bridge.reason).toBe("empty_legacy");
-    expect(existsSync(legacy)).toBe(false);
+    // D-01 fix — legacy dir preserved, never removed.
+    expect(existsSync(legacy)).toBe(true);
+    expect(existsSync(join(legacy, "MIGRATED_TO_BEHELD.md"))).toBe(true);
     expect(existsSync(target)).toBe(true);
-    expect(lines.some(l => l.includes("empty ~/.devprofile removed"))).toBe(true);
+    expect(lines.some(l => l.includes("preserved"))).toBe(true);
   });
 
   test("returns the bridge result verbatim — tests downstream wiring", async () => {

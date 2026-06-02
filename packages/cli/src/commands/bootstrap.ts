@@ -73,6 +73,8 @@ export async function bootstrapCommand(opts: BootstrapOptions = {}): Promise<Boo
   log("");
 
   // ── 1. Legacy bridge ────────────────────────────────────────────────────
+  // D-01 fix — bridge now COPIES, never moves; ~/.devprofile is preserved
+  // and a MIGRATED_TO_BEHELD.md marker is dropped inside the legacy dir.
   const bridge = bridgeLegacyDevprofile(paths);
   switch (bridge.reason) {
     case "no_legacy_dir":
@@ -80,20 +82,21 @@ export async function bootstrapCommand(opts: BootstrapOptions = {}): Promise<Boo
       // for the 99% of users who never had ~/.devprofile.
       break;
     case "empty_legacy":
-      log(meta("  → empty ~/.devprofile removed (no data to migrate)"));
+      log(meta("  → ~/.devprofile is empty (preserved; marker file written)"));
       break;
-    case "moved":
-      log(ok(`  ✓ migrated ${bridge.moved.length} item(s) from ~/.devprofile → ~/.beheld`));
+    case "copied":
+      log(ok(`  ✓ copied ${bridge.moved.length} item(s) from ~/.devprofile → ~/.beheld`));
+      log(meta("    Original ~/.devprofile preserved + MIGRATED_TO_BEHELD.md marker written."));
       break;
-    case "copied_cross_fs":
-      log(ok(`  ✓ migrated ${bridge.moved.length} item(s) (cross-filesystem copy) → ~/.beheld`));
+    case "already_migrated":
+      log(meta("  → ~/.devprofile already migrated (marker present); skipping copy"));
       break;
     case "target_non_empty":
       log(warn("  ! ~/.devprofile detected but ~/.beheld already populated"));
       log(meta("    Skipping migration — inspect both directories before deciding."));
       break;
     case "partial_failure":
-      log(warn(`  ! partial migration: ${bridge.moved.length} moved, ${bridge.failed.length} failed`));
+      log(warn(`  ! partial copy: ${bridge.moved.length} copied, ${bridge.failed.length} failed`));
       log(meta(`    Failed: ${bridge.failed.join(", ")}`));
       log(meta("    ~/.devprofile preserved — rerun bootstrap after fixing permissions."));
       break;

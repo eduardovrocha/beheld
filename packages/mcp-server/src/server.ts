@@ -28,7 +28,7 @@ import { Counters } from "./counters";
 import type { BeheldEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 const TOOLS: McpTool[] = [beheldTool, beheldCoachTool, statusTool];
 const startedAt = Date.now();
 

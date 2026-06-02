@@ -15,6 +15,7 @@ import {
 } from "./hooks/codex";
 import { handleCopilotCliEvent } from "./hooks/copilot-cli";
 import { handleCopilotVscodeEvent } from "./hooks/copilot-vscode";
+import { handleWindsurfEvent } from "./hooks/windsurf";
 import { sanitize } from "./sanitizer";
 import { JsonlWriter } from "./writers/jsonl";
 import { writePid, clearPid, rotateLogs, getBeheldDir } from "./daemon";
@@ -315,6 +316,29 @@ export function startServer(): ReturnType<typeof Bun.serve> {
           return json({ ok: true });
         } catch (err) {
           console.error("[codex session-end]", err);
+          return json({ error: "Processing failed" }, 500);
+        }
+      }
+
+      // ── R3.1 — Windsurf Cascade Hooks (12 events, single endpoint) ────
+      // Cascade invokes the hook command synchronously and sends one
+      // well-formed JSON object on stdin per fire. The user-side
+      // hooks.json wires curl to push that stdin to us, naming the
+      // event via `?event=...` so a single route handles all 12.
+      // `event_type=stop` mapping is handled by setup_worktree finals;
+      // post_cascade_response_with_transcript is dropped at the handler.
+      if (method === "POST" && url.pathname === "/hook/windsurf/event") {
+        let body: unknown;
+        try { body = await req.json(); } catch { return badRequest("Invalid JSON"); }
+        const eventName = url.searchParams.get("event") ?? "";
+        try {
+          const event = handleWindsurfEvent(eventName, body);
+          if (!event) return json({ ok: false, reason: "unknown_or_dropped_event" });
+          await writer.write(event);
+          trackEvent(event);
+          return json({ ok: true });
+        } catch (err) {
+          console.error("[windsurf event]", err);
           return json({ error: "Processing failed" }, 500);
         }
       }

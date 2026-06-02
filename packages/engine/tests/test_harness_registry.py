@@ -90,6 +90,14 @@ def test_known_descriptors_copilot_vscode():
     assert d.capture_fidelity == "local_log_tail"
 
 
+def test_known_descriptors_windsurf():
+    """R3.1 — Windsurf registers as native_hook (Cascade Hooks: 12
+    documented events delivered via stdin JSON, synchronous)."""
+    d = lookup("windsurf")
+    assert d.harness == "windsurf"
+    assert d.capture_fidelity == "native_hook"
+
+
 # ── lookup() — fallback ───────────────────────────────────────────────
 
 def test_lookup_unknown_source_returns_inferred_fallback():
@@ -123,6 +131,7 @@ def test_every_known_source_is_explicitly_tested():
         "codex-cli",
         "copilot-cli",
         "copilot-vscode",
+        "windsurf",
     }
     missing = known_sources() - tested_sources
     assert not missing, (

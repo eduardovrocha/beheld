@@ -8,7 +8,8 @@ export type BeheldSource =
   | "cursor"             // R2.2 — local_log_tail
   | "codex-cli"          // R2.3 — native_hook
   | "copilot-cli"        // R2.4 — statusline (+ local_log_tail blend)
-  | "copilot-vscode";    // R2.5 — local_log_tail (tokens estimados)
+  | "copilot-vscode"     // R2.5 — local_log_tail (tokens estimados)
+  | "windsurf";          // R3.1 — native_hook (Cascade Hooks, 12 events)
 
 export interface BeheldEvent {
   event_id: string;

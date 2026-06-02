@@ -110,6 +110,13 @@ HARNESS_REGISTRY: dict[str, HarnessDescriptor] = {
     # apply lower weight. Fidelity tier: `local_log_tail` — same as
     # Cursor; the token-estimation caveat is metadata-only.
     "copilot-vscode": HarnessDescriptor("copilot_vscode", "local_log_tail"),
+
+    # R3.1 — Windsurf (Codeium's VS Code fork) ships Cascade Hooks:
+    # 12 documented events delivered via stdin as well-formed JSON,
+    # synchronous, configured under ~/.codeium/windsurf/hooks.json. See
+    # docs/r3-windsurf-spike.md for the full capture-surface analysis.
+    # Fidelity peer with Claude Code / Gemini CLI / Codex CLI.
+    "windsurf": HarnessDescriptor("windsurf", "native_hook"),
 }
 
 

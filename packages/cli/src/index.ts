@@ -211,6 +211,14 @@ program
   });
 
 program
+  .command("auth")
+  .description("Authenticate with the portal and open your dashboard")
+  .action(async () => {
+    const { authCommand } = await import("./commands/auth");
+    await authCommand();
+  });
+
+program
   .command("verify <file>")
   .description("Verify a .beheld offline (schema + hash + signature)")
   .option("--chain", "Also walk previous_hash links resolving from ~/.beheld/snapshots/")

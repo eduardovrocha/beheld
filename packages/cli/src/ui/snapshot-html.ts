@@ -731,7 +731,7 @@ export function renderSnapshotHtml(data: SnapshotHtmlData): string {
       font-feature-settings: "ss01", "cv11"; line-height: 1.5;
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     }
-    .page { /* max-width: 640px; */ margin: 0 auto; padding: 96px 32px 64px; }
+    .page { max-width: 640px; margin: 0 auto; padding: 96px 32px 64px; }
     .header {
       display: flex; justify-content: space-between; align-items: baseline;
       color: var(--ink-soft); font-size: 14px; margin-bottom: 80px;

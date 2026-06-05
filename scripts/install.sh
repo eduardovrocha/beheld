@@ -102,7 +102,23 @@ echo "Running L1-first bootstrap..."
 echo ""
 "${INSTALL_DIR}/${BINARY}" bootstrap
 
+# When this script is invoked via `curl | sh`, stdin of sh is the curl
+# output (already consumed by the parser), so any child process
+# inherits a closed/exhausted stdin and prompt reads return instant
+# EOF — that's why `beheld init` was flying past every question
+# (language picker, reinit confirm) without waiting for input.
+#
+# Re-attach the user's terminal via /dev/tty for `beheld init` so its
+# prompts actually block on user input. Falls back to a clear hint if
+# /dev/tty is unavailable (CI, container without TTY, etc.) — the
+# binary is already installed, the user just runs `beheld init`
+# later from a real shell.
 echo ""
 echo "Running setup wizard..."
 echo ""
-"${INSTALL_DIR}/${BINARY}" init
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  "${INSTALL_DIR}/${BINARY}" init < /dev/tty
+else
+  echo "No interactive terminal detected — skipping setup wizard."
+  echo "Run \`beheld init\` from a real shell to finish setup."
+fi

@@ -105,19 +105,34 @@ echo ""
 # When this script is invoked via `curl | sh`, stdin of sh is the curl
 # output (already consumed by the parser), so any child process
 # inherits a closed/exhausted stdin and prompt reads return instant
-# EOF — that's why `beheld init` was flying past every question
-# (language picker, reinit confirm) without waiting for input.
+# EOF — that's why `beheld init` flies past every question (language
+# picker, reinit confirm) without waiting for input.
 #
-# Re-attach the user's terminal via /dev/tty for `beheld init` so its
-# prompts actually block on user input. Falls back to a clear hint if
-# /dev/tty is unavailable (CI, container without TTY, etc.) — the
-# binary is already installed, the user just runs `beheld init`
-# later from a real shell.
+# Two-step fix:
+#
+#   1. `exec < /dev/tty` replaces THIS shell's own stdin (FD 0) with
+#      the controlling terminal. The replacement is in-place — no
+#      subshell, no per-command redirect.
+#   2. Spawn `beheld init` normally; it inherits the now-real TTY
+#      stdin, which Node/Bun's readline correctly detects as a TTY
+#      (process.stdin.isTTY === true) and can put into raw mode for
+#      interactive prompts.
+#
+# Per-command `< /dev/tty` (without exec) also opens /dev/tty, but
+# the child sees a freshly-opened file descriptor that Bun's runtime
+# does not always recognise as a TTY for readline `terminal: true` —
+# prompts print but typed input is buffered out of reach. The
+# exec-level redirect avoids that.
+#
+# Falls back to a clear hint if /dev/tty is unavailable (CI,
+# container without TTY, etc.) — the binary is already installed,
+# the user just runs `beheld init` later from a real shell.
 echo ""
 echo "Running setup wizard..."
 echo ""
 if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  "${INSTALL_DIR}/${BINARY}" init < /dev/tty
+  exec < /dev/tty
+  "${INSTALL_DIR}/${BINARY}" init
 else
   echo "No interactive terminal detected — skipping setup wizard."
   echo "Run \`beheld init\` from a real shell to finish setup."

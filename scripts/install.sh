@@ -102,38 +102,26 @@ echo "Running L1-first bootstrap..."
 echo ""
 "${INSTALL_DIR}/${BINARY}" bootstrap
 
-# When this script is invoked via `curl | sh`, stdin of sh is the curl
-# output (already consumed by the parser), so any child process
-# inherits a closed/exhausted stdin and prompt reads return instant
-# EOF — that's why `beheld init` flies past every question (language
-# picker, reinit confirm) without waiting for input.
+# `beheld init` is an interactive wizard (language picker, reinit
+# confirm, dimensions menu) and `curl | sh` is fundamentally a
+# non-interactive context — the sh that runs this script has stdin
+# bound to the curl pipe, not to the user's terminal. We tried two
+# rounds of /dev/tty redirection (per-command and `exec <`) and both
+# left Bun's readline unable to register keystrokes on the prompts,
+# so the wizard would print "Pressione Enter para continuar…" and
+# hang indefinitely.
 #
-# Two-step fix:
-#
-#   1. `exec < /dev/tty` replaces THIS shell's own stdin (FD 0) with
-#      the controlling terminal. The replacement is in-place — no
-#      subshell, no per-command redirect.
-#   2. Spawn `beheld init` normally; it inherits the now-real TTY
-#      stdin, which Node/Bun's readline correctly detects as a TTY
-#      (process.stdin.isTTY === true) and can put into raw mode for
-#      interactive prompts.
-#
-# Per-command `< /dev/tty` (without exec) also opens /dev/tty, but
-# the child sees a freshly-opened file descriptor that Bun's runtime
-# does not always recognise as a TTY for readline `terminal: true` —
-# prompts print but typed input is buffered out of reach. The
-# exec-level redirect avoids that.
-#
-# Falls back to a clear hint if /dev/tty is unavailable (CI,
-# container without TTY, etc.) — the binary is already installed,
-# the user just runs `beheld init` later from a real shell.
+# Decision: don't try. Bootstrap (non-interactive) runs here so the
+# user gets ~/.beheld/ ready and the migration of any legacy
+# ~/.devprofile/. Then we print clear next-step instructions, and
+# the user runs `beheld init` themselves from a real shell where
+# the TTY is naturally connected. Same pattern used by nvm, rustup
+# (without -y), uv, etc.
 echo ""
-echo "Running setup wizard..."
+echo "──────────────────────────────────────────────────────────────"
+echo "Almost there. Finish setup from your own shell:"
 echo ""
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  exec < /dev/tty
-  "${INSTALL_DIR}/${BINARY}" init
-else
-  echo "No interactive terminal detected — skipping setup wizard."
-  echo "Run \`beheld init\` from a real shell to finish setup."
-fi
+echo "    beheld init"
+echo ""
+echo "The wizard is interactive and won't work piped through curl."
+echo "──────────────────────────────────────────────────────────────"

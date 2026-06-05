@@ -2,7 +2,7 @@ import { Command } from "commander";
 
 import { maybeShowBundleNudge } from "./lib/nudge";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.4.1";
 
 const program = new Command();
 

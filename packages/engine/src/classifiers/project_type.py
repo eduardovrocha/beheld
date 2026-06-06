@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from config import get_ollama_url
 from models import ProjectClassification, TechnicalSignals
 
 PROJECT_CATEGORIES = [
@@ -130,7 +131,7 @@ def _classify_with_ollama(signals: TechnicalSignals) -> str:
         {"model": "qwen2.5-coder:14b", "prompt": prompt, "stream": False}
     ).encode()
     req = urllib.request.Request(
-        "http://localhost:11434/api/generate",
+        f"{get_ollama_url()}/api/generate",
         data=data,
         headers={"Content-Type": "application/json"},
     )

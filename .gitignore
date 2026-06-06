@@ -26,3 +26,10 @@ web/
 
 # Local working docs / mockups — not part of the published repo
 /documents/
+
+# Local tool artifacts — Claude Code config, graphify output, session notes
+.claude/
+graphify-*/
+*-historico.md
+next-session.md
+commits-raw.txt

@@ -35,8 +35,13 @@ import * as cryptoNode from "node:crypto";
 import { DSSEBundleBuilder, RekorWitness } from "@sigstore/sign";
 import type { Signer, Signature } from "@sigstore/sign/dist/signer/signer";
 
+import { getRekorUrl } from "../config/env";
 import type { RekorEntry } from "../bundle/types";
 
+/** Production Rekor URL. Exported as a stable constant for tests and
+ *  `rekorEntryUrl`'s explicit fallback parameter. At runtime, callers
+ *  use `defaultBaseUrl()` so `BEHELD_ENV=development` and
+ *  `BEHELD_REKOR_URL` override apply. */
 export const REKOR_PUBLIC_BASE_URL = "https://rekor.sigstore.dev";
 const SUBMIT_PATH = "/api/v1/log/entries";
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -45,7 +50,7 @@ const DEFAULT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 /** Resolve the Rekor base URL at call time so test env overrides take effect
  *  even after the module has been imported. */
 function defaultBaseUrl(): string {
-  return process.env.BEHELD_REKOR_URL ?? REKOR_PUBLIC_BASE_URL;
+  return getRekorUrl();
 }
 
 /** Wraps an Ed25519 raw 32-byte public key (hex) in the PEM envelope

@@ -19,6 +19,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 
+import { getApiBaseUrl } from "../config/env";
 import { loadPublicJwk } from "../keys/keystore";
 import {
   type CachedAttestation,
@@ -26,7 +27,13 @@ import {
 } from "../keys/attestation-cache";
 import { arrow, bold, brand, fail, meta, ok } from "../ui/styles";
 
-const DEFAULT_API_URL = process.env.BEHELD_API_URL ?? "http://localhost:3000";
+/** Resolved at call time so `BEHELD_ENV` / `BEHELD_API_URL` overrides
+ *  set after module load (e.g. in tests) take effect. Pre-config-module
+ *  this read at module top-level and defaulted to `localhost:3000`,
+ *  which broke `beheld attest` in production. */
+function defaultApiUrl(): string {
+  return getApiBaseUrl();
+}
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface AttestOptions {
@@ -36,7 +43,7 @@ export interface AttestOptions {
 }
 
 export async function attestCommand(opts: AttestOptions = {}): Promise<void> {
-  const baseUrl = opts.url ?? DEFAULT_API_URL;
+  const baseUrl = opts.url ?? defaultApiUrl();
 
   console.log(brand("verificando identidade GitHub"));
 

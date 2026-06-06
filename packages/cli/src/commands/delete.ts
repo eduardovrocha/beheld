@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { spawnSync } from "node:child_process";
 
 import { canonicalJson } from "../bundle/canonical";
+import { getApiBaseUrl } from "../config/env";
 import { removeAllHooks, claudeSettingsPath, continueConfigPath } from "../config/hooks";
 import * as daemonManager from "../daemon-manager";
 import {
@@ -23,7 +24,7 @@ function beheldDir(): string {
 }
 
 function apiUrl(): string {
-  return (process.env.BEHELD_API_URL ?? "https://beheld.dev").replace(/\/+$/, "");
+  return getApiBaseUrl();
 }
 
 async function askConfirmPhrase(phrase: string): Promise<boolean> {

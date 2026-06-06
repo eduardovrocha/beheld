@@ -1,11 +1,11 @@
 import { createWriteStream, existsSync } from "node:fs";
 import { chmod, rename, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { getApiUrl } from "../config/env";
 import * as daemonManager from "../daemon-manager";
 import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
 
 const VERSION = "0.3.2";
-const API_BASE = "https://beheld.dev/api";
 const RELEASES_BASE = "https://github.com/eduardovrocha/beheld/releases/download";
 
 function platform(): string {
@@ -27,7 +27,7 @@ async function askConfirm(question: string): Promise<boolean> {
 
 async function fetchLatestVersion(): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/version`, {
+    const res = await fetch(`${getApiUrl()}/version`, {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;

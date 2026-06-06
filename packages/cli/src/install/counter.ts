@@ -25,19 +25,19 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { getApiBaseUrl } from "../config/env";
+
 /**
- * Base do endpoint público do beheld. Override via BEHELD_API_URL pra testes
- * locais contra o container Rails (ex: http://localhost:3000) ou ambiente
- * de staging. Em produção, sem override, vai pra beheld.dev.
+ * Base do endpoint público do beheld. Resolvido pelo módulo central:
+ * `BEHELD_ENV=production` (default) → `https://beheld.dev`;
+ * `BEHELD_ENV=development` → `http://localhost:3000`.
+ * Override individual via `BEHELD_API_URL` tem precedência.
  */
 export const DEFAULT_API_BASE = "https://beheld.dev";
 export const REQUEST_TIMEOUT_MS = 3_000;
 
 export function getApiBase(): string {
-  const override = process.env.BEHELD_API_URL;
-  if (!override) return DEFAULT_API_BASE;
-  // Strip trailing slash pra concatenação ficar limpa.
-  return override.replace(/\/+$/, "");
+  return getApiBaseUrl();
 }
 
 export function registerUrl(): string {

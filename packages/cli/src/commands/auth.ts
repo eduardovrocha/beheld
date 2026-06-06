@@ -9,8 +9,8 @@
  *   5. POST /api/v1/auth/verify { fingerprint, nonce, signature } → { session_token, redirect_url }
  *   6. Open the dashboard URL in the browser
  */
+import { getPortalUrl } from "../config/env";
 import { loadPublicJwk, loadPrivateKey, keysExist, publicKeyFingerprint } from "../keys/keystore";
-import { DEFAULT_PORTAL_URL } from "../bundle/share";
 
 const bold  = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const DIM   = "\x1b[2m";
@@ -19,7 +19,7 @@ const ok    = (s: string) => `\x1b[32m✓\x1b[39m ${s}`;
 const fail  = (s: string) => `\x1b[31m✗\x1b[39m ${s}`;
 
 function portalUrl(): string {
-  return (process.env.BEHELD_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
+  return getPortalUrl();
 }
 
 function fingerprint(jwk: { x: string }): string {

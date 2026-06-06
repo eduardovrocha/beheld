@@ -7,6 +7,7 @@
 // All identity strings come from the engine (IdentityGenerator with the
 // minimal signals adapter); this file is pure templating.
 
+import { getPortalUrl, getRekorUrl } from "../config/env";
 import { computeTier, type TrustTier } from "../lib/tier";
 
 interface BundlePayload {
@@ -536,7 +537,7 @@ function renderRekorSection(rekor: BundleRekorView | null | undefined): string {
   // recruiters can click and see the inclusion without API knowledge.
   // The raw API URL stays available as a secondary "auditor" link.
   const searchUrl = `https://search.sigstore.dev/?logIndex=${rekor!.logIndex}`;
-  const apiUrl = `https://rekor.sigstore.dev/api/v1/log/entries/${encodeURIComponent(uuid)}`;
+  const apiUrl = `${getRekorUrl()}/api/v1/log/entries/${encodeURIComponent(uuid)}`;
   const shortUuid = uuid.length > 16 ? `${uuid.slice(0, 12)}…${uuid.slice(-4)}` : uuid;
   const integratedLabel = formatIsoToPtBr(rekor!.integratedTime);
   return `
@@ -1109,7 +1110,7 @@ ${insightsBlock}
       <p class="meta">${escapeHtml(captureLine)}</p>
 
       <div class="brand">
-        <a href="https://beheld.dev">beheld.dev</a>
+        <a href="${getPortalUrl()}">${getPortalUrl().replace(/^https?:\/\//, "")}</a>
         <span class="expiry">Expira em ${ttlDays} dias</span>
       </div>
     </footer>

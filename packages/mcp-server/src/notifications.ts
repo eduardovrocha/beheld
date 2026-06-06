@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { getApiUrl } from "./config/env";
 import { getBeheldDir } from "./daemon";
 
 const ENGINE_URL = process.env.BEHELD_ENGINE_URL ?? "http://127.0.0.1:7338";
@@ -140,7 +141,7 @@ export class NotificationService {
     if (!(await this.shouldNotifyToday("update_check"))) return;
 
     try {
-      const res = await fetch("https://beheld.dev/api/version", {
+      const res = await fetch(`${getApiUrl()}/version`, {
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {

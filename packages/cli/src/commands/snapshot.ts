@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { BUNDLE_VERSION, type Bundle, type BundlePayload, type RekorEntry } from "../bundle/types";
 import { payloadHash, payloadToCanonical } from "../bundle/canonical";
 import { composition } from "../bundle/verify";
+import { getRekorUrl } from "../config/env";
 // renderQr is consumed lazily from ./share.ts when a publish succeeds —
 // no top-level import here keeps snapshot.ts free of the publish path.
 import {
@@ -426,7 +427,7 @@ async function rekorSubmitExisting(bundlePath: string): Promise<void> {
   const canonical = payloadToCanonical(bundle.payload);
   const privKey = await loadPrivateKey();
 
-  console.log(arrow("submetendo ao rekor.sigstore.dev"));
+  console.log(arrow(`submetendo ao ${getRekorUrl().replace(/^https?:\/\//, "")}`));
   const result = await submitToRekor({
     payloadBytes: new TextEncoder().encode(canonical),
     privateKey: privKey,

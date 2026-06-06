@@ -7,11 +7,16 @@
  * never stored. The dev's private key never leaves the machine.
  *
  * Pure functions: filesystem and prompt concerns live in commands/share.ts
- * and commands/snapshot.ts. The portal base URL is read from
- * BEHELD_PORTAL_URL (defaults to the production portal).
+ * and commands/snapshot.ts. The portal base URL is read from the central
+ * env config module (`BEHELD_ENV` + `BEHELD_PORTAL_URL` override).
  */
+import { getPortalUrl } from "../config/env";
 import type { Bundle } from "./types";
 
+/** Production portal URL — kept as an exported constant for tests and
+ *  legacy importers (e.g. `commands/auth.ts`). The actual resolution at
+ *  runtime uses the central env config so `BEHELD_ENV=development` and
+ *  `BEHELD_PORTAL_URL` overrides apply. */
 export const DEFAULT_PORTAL_URL = "https://beheld.dev";
 
 export interface PublishResponse {
@@ -38,7 +43,7 @@ export interface PublishOptions {
 }
 
 function portalUrl(): string {
-  return (process.env.BEHELD_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
+  return getPortalUrl();
 }
 
 /** Strip the `ed25519:` / `sha256:` / etc. prefix when present. */

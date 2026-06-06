@@ -15,11 +15,11 @@ técnico de um desenvolvedor a partir do uso do Claude Code e do Continue.dev.
 Stack:
 - TypeScript compilado com Bun (MCP server + CLI) — sem Node.js no host
 - Python compilado com PyInstaller (scoring engine) — sem Python no host
-- SQLite local em ~/.devprofile/profile.db
+- SQLite local em ~/.beheld/profile.db
 - Monorepo com Bun workspaces
 
 Estrutura do repositório:
-  devprofile/
+  beheld/
   ├── packages/
   │   ├── mcp-server/src/     # TypeScript — captura eventos, hooks Claude Code
   │   ├── engine/src/         # Python — lê JSONL, calcula scores, SQLite
@@ -548,7 +548,7 @@ POST /claims/verify-all com 20 claims completa em < 500ms
 
 ---
 
-## F7.4 — CLI: comando devprofile claims
+## F7.4 — CLI: comando beheld claims
 
 ```
 Implemente os comandos CLI para gestão de claims em
@@ -560,11 +560,11 @@ CLI expõe 3 subcomandos: add (wizard interativo), list (tabela), remove
 (confirmação + delete). O wizard pré-visualiza a verificação antes de salvar
 — se o status for ⚠, exibe aviso claro mas permite confirmar mesmo assim.
 
-Componente de UX: usar @inquirer/prompts (já em uso no devprofile init wizard).
+Componente de UX: usar @inquirer/prompts (já em uso no beheld init wizard).
 
 ### O que implementar
 
-**1. devprofile claims add — wizard interativo**
+**1. beheld claims add — wizard interativo**
 
 Fluxo:
   1. select claim_type (lista dos 9 tipos com descrições curtas)
@@ -617,7 +617,7 @@ Self-declared (employment_history, education, certifications, role_at_company):
                     Aparecerá no perfil em bloco separado, marcado como
                     'self-declared, não verificado'."
 
-**2. devprofile claims list — tabela**
+**2. beheld claims list — tabela**
 
 GET /claims → renderizar tabela ASCII:
 
@@ -629,7 +629,7 @@ GET /claims → renderizar tabela ASCII:
 
 Opção --verbose: exibe a observation completa de cada claim.
 
-**3. devprofile claims remove <id>**
+**3. beheld claims remove <id>**
 
   1. GET /claims → buscar o id
   2. Se não encontrado, "Claim {id} não encontrada." e exit 1
@@ -655,7 +655,7 @@ Exemplo ruim: "🎉 Parabéns! Sua declaração foi adicionada ao perfil!"
 - Edição inline de claim existente — usuário remove + adiciona de novo
 - Importação de LinkedIn ou texto livre — fase futura (F7.X)
 - Múltiplas claims do mesmo tipo — uma claim por tipo (na fase atual)
-  (Se já existe claim ativa do mesmo tipo, devprofile claims add pergunta
+  (Se já existe claim ativa do mesmo tipo, beheld claims add pergunta
    se quer substituir.)
 
 ### Testes em packages/cli/tests/claims/
@@ -673,8 +673,8 @@ Mockar HTTP client do engine.
 ### Critério de conclusão
 
 bun test packages/cli/tests/claims → todos passando
-devprofile claims add executa todos os 9 tipos sem erro
-Tabela do devprofile claims list renderiza corretamente em terminais 80 cols
+beheld claims add executa todos os 9 tipos sem erro
+Tabela do beheld claims list renderiza corretamente em terminais 80 cols
 Nenhuma frase do wizard soa como LinkedIn (revisar manualmente)
 ```
 
@@ -704,7 +704,7 @@ Atualize o payload retornado para incluir as duas novas seções:
   {
     "version": "2",
     "created_at": "...",
-    "devprofile_version": "...",
+    "beheld_version": "...",
     "previous_hash": "...",
     "scores": { ... },
     "l1": { ... },
@@ -745,7 +745,7 @@ Regras:
   - Antes de montar o payload, executar verify-all internamente para
     garantir status fresh
 
-**2. Comando devprofile snapshot (atualização em snapshot.ts)**
+**2. Comando beheld snapshot (atualização em snapshot.ts)**
 
 Antes de gerar o bundle:
   1. Chamar POST /claims/verify-all
@@ -764,13 +764,13 @@ Antes de gerar o bundle:
      ficarão visíveis publicamente. [y/N]"
      - Default: N
      - Se N, abortar geração ("Bundle não gerado. Edite ou remova as
-       declarações com ⚠ via devprofile claims remove <id>.")
+       declarações com ⚠ via beheld claims remove <id>.")
   4. Se sem ⚠ ou user confirmou, prosseguir com POST /snapshot/payload,
      assinar, salvar bundle
 
 Output após bundle gerado:
 
-  Bundle gerado: ~/.devprofile/snapshots/2026-05-20T14-00-00.dpbundle
+  Bundle gerado: ~/.beheld/snapshots/2026-05-20T14-00-00.dpbundle
 
   Perfil capturado:
     Base histórica:       12 repositórios · 4.832 commits
@@ -805,20 +805,20 @@ Em packages/cli/tests/commands/test_snapshot_claims.ts:
 pytest packages/engine/tests/claims/test_bundle_payload.py → todos passando
 bun test packages/cli/tests/commands/test_snapshot_claims.ts → todos passando
 Bundle gerado contém ambas as seções (claims + self_declared)
-Bundle v1 antigo continua sendo verificado corretamente pelo devprofile verify
+Bundle v1 antigo continua sendo verificado corretamente pelo beheld verify
 ```
 
 ---
 
-## F7.6 — Verifier: exibição do delta no devprofile verify
+## F7.6 — Verifier: exibição do delta no beheld verify
 
 ```
-Atualize o comando devprofile verify para exibir as seções claims e
+Atualize o comando beheld verify para exibir as seções claims e
 self_declared do bundle v2 (packages/cli/src/commands/verify.ts).
 
 ### Contexto
 
-devprofile verify <arquivo.dpbundle> hoje valida assinatura, chain hash e
+beheld verify <arquivo.dpbundle> hoje valida assinatura, chain hash e
 exibe scores. Com bundle v2, precisa exibir também as duas novas seções de
 forma clara e separada.
 
@@ -907,8 +907,8 @@ Se a seção claims tiver status inválido, registrar warning sem invalidar:
 ### Critério de conclusão
 
 bun test packages/cli/tests/commands/test_verify_claims.ts → todos passando
-devprofile verify de bundle v2 real renderiza as duas seções corretamente
-devprofile verify de bundle v1 antigo continua funcionando sem mudanças
+beheld verify de bundle v2 real renderiza as duas seções corretamente
+beheld verify de bundle v1 antigo continua funcionando sem mudanças
 ```
 
 ---
@@ -933,30 +933,30 @@ via beforeAll que dispara o daemon).
 **E2E-1: ciclo feliz — 5 claims confirmadas**
 
   1. Setup: SQLite limpo + L1/L2 com dados que conferem com claims
-  2. devprofile claims add primary_stack {languages: [python, typescript]}
-  3. devprofile claims add years_experience {years: 8}
-  4. devprofile claims add specialization {area: backend}
-  5. devprofile claims add test_discipline {discipline: tdd_first}
-  6. devprofile claims add work_pattern {pattern: night_owl}
-  7. devprofile snapshot
-  8. devprofile verify <bundle>
+  2. beheld claims add primary_stack {languages: [python, typescript]}
+  3. beheld claims add years_experience {years: 8}
+  4. beheld claims add specialization {area: backend}
+  5. beheld claims add test_discipline {discipline: tdd_first}
+  6. beheld claims add work_pattern {pattern: night_owl}
+  7. beheld snapshot
+  8. beheld verify <bundle>
   9. Assert: todas as 5 claims aparecem com ✓
   10. Assert: bloco self_declared está ausente (não há claims do tipo)
 
 **E2E-2: claim discrepante — dev publica com ⚠**
 
   1. Setup: L1/L2 com Python dominante
-  2. devprofile claims add specialization {area: frontend}  (discrepant)
-  3. devprofile snapshot (confirma publicar mesmo com ⚠)
-  4. devprofile verify <bundle>
+  2. beheld claims add specialization {area: frontend}  (discrepant)
+  3. beheld snapshot (confirma publicar mesmo com ⚠)
+  4. beheld verify <bundle>
   5. Assert: claim aparece com ⚠ e observation correta
 
 **E2E-3: misto verifiable + self_declared**
 
-  1. devprofile claims add primary_stack ...
-  2. devprofile claims add employment_history {employers: [...]}
-  3. devprofile snapshot
-  4. devprofile verify <bundle>
+  1. beheld claims add primary_stack ...
+  2. beheld claims add employment_history {employers: [...]}
+  3. beheld snapshot
+  4. beheld verify <bundle>
   5. Assert: bloco "Declarações e verificação" tem 1 entrada
   6. Assert: bloco "Auto-declarado" tem 1 entrada
   7. Assert: nota "DevProfile não verifica..." aparece no bloco
@@ -965,26 +965,26 @@ via beforeAll que dispara o daemon).
 **E2E-4: envelhecimento de claim entre snapshots**
 
   1. Setup inicial: L2 com TDD-first dominante
-  2. devprofile claims add test_discipline {discipline: tdd_first}
-  3. devprofile snapshot → bundle_1 (claim confirmed)
+  2. beheld claims add test_discipline {discipline: tdd_first}
+  3. beheld snapshot → bundle_1 (claim confirmed)
   4. Simular passagem de tempo + injetar L2 onde tdd cai pra 5%
-  5. devprofile snapshot → bundle_2 (claim discrepant)
-  6. devprofile verify bundle_1 → claim ainda confirmed (congelado)
-  7. devprofile verify bundle_2 → claim discrepant (recalculado)
+  5. beheld snapshot → bundle_2 (claim discrepant)
+  6. beheld verify bundle_1 → claim ainda confirmed (congelado)
+  7. beheld verify bundle_2 → claim discrepant (recalculado)
 
 **E2E-5: remover claim e regenerar**
 
-  1. devprofile claims add primary_stack ...
-  2. devprofile snapshot → bundle_1 contém a claim
-  3. devprofile claims remove <id>
-  4. devprofile snapshot → bundle_2 NÃO contém a claim
-  5. devprofile verify bundle_1 → claim aparece
-  6. devprofile verify bundle_2 → seção claims vazia
+  1. beheld claims add primary_stack ...
+  2. beheld snapshot → bundle_1 contém a claim
+  3. beheld claims remove <id>
+  4. beheld snapshot → bundle_2 NÃO contém a claim
+  5. beheld verify bundle_1 → claim aparece
+  6. beheld verify bundle_2 → seção claims vazia
 
 **E2E-6: abort por ⚠ quando user nega confirmação**
 
   1. Setup com claim discrepant
-  2. devprofile snapshot → prompt aparece, simular "N"
+  2. beheld snapshot → prompt aparece, simular "N"
   3. Assert: bundle NÃO foi gerado
   4. Assert: mensagem "Bundle não gerado..." aparece
 
@@ -1005,15 +1005,15 @@ Antes de marcar v0.4.0 como release-ready:
 [ ] F7.1 — Tabela claims criada com schema correto, CRUD testado
 [ ] F7.2 — 5 verifiers + SelfDeclaredVerifier implementados, registry funciona
 [ ] F7.3 — 4 endpoints (POST/GET/DELETE/verify-all) com testes verdes
-[ ] F7.4 — devprofile claims add/list/remove funcional, copy passou no filtro R2D2
+[ ] F7.4 — beheld claims add/list/remove funcional, copy passou no filtro R2D2
 [ ] F7.5 — Bundle v2 com seções claims + self_declared, snapshot aborta com ⚠ + nega
-[ ] F7.6 — devprofile verify renderiza ambas seções, bundle v1 continua funcionando
+[ ] F7.6 — beheld verify renderiza ambas seções, bundle v1 continua funcionando
 [ ] F7.7 — 6 cenários e2e passando
 [ ] pytest packages/engine/tests/claims/ → zero falhas
 [ ] bun test packages/cli/tests/commands/ (claims + snapshot + verify) → zero falhas
 [ ] Smoke test manual end-to-end em ambiente limpo
 [ ] Nenhuma copy do wizard ou do verifier soa como LinkedIn
-[ ] Versão bumped: package.json para 0.4.0, devprofile-engine version constant
+[ ] Versão bumped: package.json para 0.4.0, beheld-engine version constant
 ```
 
 Pronto pra tag v0.4.0 quando todos os 11 itens marcados.

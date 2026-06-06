@@ -15,11 +15,11 @@ técnico de um desenvolvedor a partir do uso do Claude Code e do Continue.dev.
 Stack:
 - TypeScript compilado com Bun (MCP server + CLI) — sem Node.js no host
 - Python compilado com PyInstaller (scoring engine) — sem Python no host
-- SQLite local em ~/.devprofile/profile.db
+- SQLite local em ~/.beheld/profile.db
 - Monorepo com Bun workspaces
 
 Estrutura do repositório:
-  devprofile/
+  beheld/
   ├── packages/
   │   ├── mcp-server/src/     # TypeScript — captura eventos, hooks Claude Code
   │   ├── engine/src/         # Python — lê JSONL, calcula scores, SQLite
@@ -120,8 +120,8 @@ attested_at} mais a attestation assinada.
 **1. Chave da plataforma em packages/backend/src/keys.py**
 
   - Ed25519 keypair carregado de variável de ambiente:
-    DEVPROFILE_PLATFORM_PRIVATE_KEY (base64-encoded raw bytes)
-    DEVPROFILE_PLATFORM_KEY_ID (string ex: "devprofile-platform-2026-q2")
+    BEHELD_PLATFORM_PRIVATE_KEY (base64-encoded raw bytes)
+    BEHELD_PLATFORM_KEY_ID (string ex: "beheld-platform-2026-q2")
   - Public key derivada na inicialização
   - Função sign_canonical(message: dict) -> bytes
   - Função verify_canonical(message: dict, signature: bytes) -> bool
@@ -155,7 +155,7 @@ attested_at} mais a attestation assinada.
         "github_username": "octocat",
         "attested_at": "2026-05-20T14:00:00Z",
         "public_key_fingerprint": "ed25519:sha256:fp_...",
-        "platform_key_id": "devprofile-platform-2026-q2",
+        "platform_key_id": "beheld-platform-2026-q2",
         "platform_signature": "ed25519:base64_signature..."
       }
     }
@@ -207,7 +207,7 @@ attested_at} mais a attestation assinada.
     {
       "keys": [
         {
-          "key_id": "devprofile-platform-2026-q2",
+          "key_id": "beheld-platform-2026-q2",
           "public_key": "ed25519-pub:base64...",
           "active": true,
           "rotated_at": null
@@ -251,15 +251,15 @@ Canonical message bate byte-a-byte entre issue e verify (teste de roundtrip)
 
 ---
 
-## F5.6.2 — CLI: comando devprofile identity link + armazenamento
+## F5.6.2 — CLI: comando beheld identity link + armazenamento
 
 ```
 Implemente o comando CLI que executa o OAuth flow com GitHub e armazena
-a attestation localmente em ~/.devprofile/profile.db.
+a attestation localmente em ~/.beheld/profile.db.
 
 ### Contexto
 
-`devprofile identity link --provider github` abre o navegador do dev pra
+`beheld identity link --provider github` abre o navegador do dev pra
 autorizar a app DevProfile no GitHub, recebe o callback via servidor HTTP
 local efêmero, envia o code pro backend `/attestation/issue`, e armazena a
 attestation resultante junto da chave do dev em profile.db.
@@ -286,7 +286,7 @@ Index: CREATE UNIQUE INDEX idx_identity_active_provider
        ON identity_attestations(oauth_provider) WHERE is_active = 1
   (apenas uma attestation ativa por provider)
 
-**2. Comando devprofile identity link em packages/cli/src/commands/identity.ts**
+**2. Comando beheld identity link em packages/cli/src/commands/identity.ts**
 
 Subcomandos:
   - link --provider github  → executa OAuth flow + persiste
@@ -323,7 +323,7 @@ Flow do link:
 
 Show:
   - Sem attestation ativa: "Nenhuma identidade vinculada. Use
-    `devprofile identity link --provider github` pra vincular."
+    `beheld identity link --provider github` pra vincular."
   - Com: exibe os campos da attestation ativa em layout compacto
 
 Unlink:
@@ -360,10 +360,10 @@ Mockar:
 ### Critério de conclusão
 
 bun test packages/cli/tests/commands/test_identity.ts → todos passando
-Manual: rodar devprofile identity link --provider github real, ver
+Manual: rodar beheld identity link --provider github real, ver
   fluxo abrir browser, autorizar, retornar com attestation persistida
-devprofile identity show exibe attestation ativa corretamente
-devprofile identity unlink desativa sem deletar (verificar no DB)
+beheld identity show exibe attestation ativa corretamente
+beheld identity unlink desativa sem deletar (verificar no DB)
 ```
 
 ---
@@ -371,7 +371,7 @@ devprofile identity unlink desativa sem deletar (verificar no DB)
 ## F5.6.3 — Bundle: seção identity + verifier attestation check
 
 ```
-Atualize o payload do snapshot e o devprofile verify pra incluir a seção
+Atualize o payload do snapshot e o beheld verify pra incluir a seção
 identity com attestation, e checar essa attestation no verifier.
 
 ### Contexto
@@ -395,7 +395,7 @@ Adicionar ao payload:
     "attestation": {
       "attested_at": "2026-05-20T14:00:00Z",
       "public_key_fingerprint": "ed25519:sha256:fp_...",
-      "platform_key_id": "devprofile-platform-2026-q2",
+      "platform_key_id": "beheld-platform-2026-q2",
       "platform_signature": "ed25519:base64_signature..."
     }
   }
@@ -411,7 +411,7 @@ Lógica:
 - Se há attestation, embute campos
 - Se não, "verified": false
 
-**2. devprofile verify — checagem de attestation**
+**2. beheld verify — checagem de attestation**
 
 Após validar assinatura Ed25519 + chain hash, executar:
 
@@ -425,7 +425,7 @@ Após validar assinatura Ed25519 + chain hash, executar:
        - Mismatch → "✗ Attestation referencia chave diferente da que
                        assinou o bundle"
                   → marcar bundle como tampered_identity, continuar
-    3. POST devprofile.app/api/attestation/verify com a attestation
+    3. POST beheld.dev/api/attestation/verify com a attestation
        - Online: rede disponível
          - 200 valid=true && revoked=false → "✓ Identidade: @octocat (GitHub, verificada)"
          - 200 valid=true && revoked=true  → "⚠ Identidade: @octocat (GitHub, revogada em DATA)"
@@ -485,7 +485,7 @@ Em packages/cli/tests/commands/test_verify_identity.ts:
 
 Bundle gerado com identity link inclui seção identity completa
 Bundle gerado sem identity link inclui identity.verified=false
-devprofile verify identifica corretamente cada caso
+beheld verify identifica corretamente cada caso
 Tier exibido bate com as camadas presentes
 ```
 
@@ -654,7 +654,7 @@ Mudar `l1.root_commit_hashes` de lista plana pra lista de objetos:
 
 **3. Verifier --check-github em packages/cli/src/commands/verify.ts**
 
-  Flag opt-in: devprofile verify <bundle> --check-github
+  Flag opt-in: beheld verify <bundle> --check-github
 
   Para cada repo em payload.l1.repos:
     1. GET https://api.github.com/search/commits?q=hash:{root_hash}
@@ -712,7 +712,7 @@ Mockar GitHub API.
 
 Migration aplica sem erro, repos existentes ganham first_seen_at backfilled
 Payload novo inclui l1.repos[] com estrutura completa
-devprofile verify --check-github funciona em bundle real, identifica
+beheld verify --check-github funciona em bundle real, identifica
   repos públicos corretamente
 Comportamento sob rate limit é gracioso (não falha verify)
 ```
@@ -735,7 +735,7 @@ mantém um Merkle tree append-only, e dá inclusion proofs verificáveis.
 URL: https://rekor.sigstore.dev (produção)
 URL dev/teste: https://rekor.sigstage.dev (staging com mesmas APIs)
 
-Cada `devprofile snapshot` POSTa o bundle no Rekor depois de assinar.
+Cada `beheld snapshot` POSTa o bundle no Rekor depois de assinar.
 A resposta inclui inclusion proof que é embutido no payload do próximo
 bundle (não no atual — chain hash protege isso).
 
@@ -835,7 +835,7 @@ Verifier checa que `log_inclusion.body.kind=hashedrekord` contém o mesmo
   Background task (rodar via FastAPI BackgroundTasks ou um scheduler
   simples):
   - A cada 5 min, busca bundles com log_inclusion.status == "pending"
-    (lista mantida em ~/.devprofile/rekor-pending.jsonl)
+    (lista mantida em ~/.beheld/rekor-pending.jsonl)
   - Tenta submit novamente
   - Sucesso → reescreve o bundle (mesmo path) com log_inclusion completo
     e remove da pending list
@@ -881,7 +881,7 @@ Retry após outage reescreve bundle com log_inclusion completo,
 ## F5.8.2 — Verifier: Rekor inclusion check + integrated_time + transparency page
 
 ```
-Atualize devprofile verify pra checar inclusion proof do Rekor, validar
+Atualize beheld verify pra checar inclusion proof do Rekor, validar
 integrated_time, e exibir o tier de confiança final. Adicione página
 pública de transparência no backend.
 
@@ -1065,7 +1065,7 @@ Antes de marcar o pacote como release-ready:
 ```
 [ ] F5.6.1 — Backend OAuth GitHub funcional, chave da plataforma carregada,
               endpoints /attestation/issue e /verify operacionais
-[ ] F5.6.2 — devprofile identity link com GitHub funciona ponta-a-ponta,
+[ ] F5.6.2 — beheld identity link com GitHub funciona ponta-a-ponta,
               attestation persistida em profile.db
 [ ] F5.6.3 — Bundle inclui seção identity, verifier valida attestation
               online e mostra tier identity_verified

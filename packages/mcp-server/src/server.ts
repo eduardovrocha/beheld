@@ -25,10 +25,10 @@ import { statusTool } from "./tools/status-tool";
 import { notificationService } from "./notifications";
 import { triggerEngineProcessing } from "./engine-trigger";
 import { Counters } from "./counters";
+import { VERSION } from "./version";
 import type { BeheldEvent } from "./types";
 import type { McpTool } from "./tools/types";
 
-const VERSION = "0.4.0";
 const TOOLS: McpTool[] = [beheldTool, beheldCoachTool, statusTool];
 const startedAt = Date.now();
 

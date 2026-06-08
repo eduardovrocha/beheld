@@ -1,8 +1,8 @@
 # Beheld — Referência do CLI
 
-> Fonte: `packages/cli/src/` (commit `d7badd8` · 2026-06-06)
+> Fonte: `packages/cli/src/` (commit `d41f476` · 2026-06-08)
 > Documento gerado por varredura do código-fonte. O código é autoritativo — specs ficam atrás dele quando divergem.
-> Versão do binário declarada no entrypoint: `0.4.1` (`packages/cli/src/index.ts:5`). O comando `init` e o `update` ainda referenciam internamente `0.3.2` como string de versão (ver "Perguntas em aberto").
+> Versão do binário declarada em [packages/cli/src/version.ts](../../packages/cli/src/version.ts) (`VERSION = "0.4.1"`), re-exportada por [packages/cli/src/index.ts](../../packages/cli/src/index.ts:6) e importada por todos os comandos que precisam (`init`, `update`, wizard).
 
 ## Sumário
 
@@ -11,7 +11,7 @@
 | `beheld` (sem argumento) | Mostra ajuda ou dispara `bootstrap` na primeira vez | escreve em `~/.beheld/` se for primeira vez | nenhuma |
 | `beheld bootstrap` | Migra `~/.devprofile/` → `~/.beheld/` e aponta os próximos passos | escreve em `~/.beheld/` | nenhuma |
 | `beheld init` | Roda o wizard de instalação: hooks, MCP, daemons, autostart, L1 | escreve em `~/.beheld/`, `~/.claude/`, `~/.continue/`, registra LaunchAgent/systemd | nenhuma |
-| `beheld harness list` | Lista todo harness conhecido com fidelidade e estado de detecção | read-only | nenhuma |
+| `beheld harness list` | Lista todo harness conhecido com fidelidade, estado de detecção e linha explicativa | read-only | nenhuma |
 | `beheld harness install` | Instala hooks/tails para harnesses detectados | escreve em arquivos de hook do harness | harness detectado (ou `--force`) |
 | `beheld start` | Sobe MCP server (7337) e Scoring engine (7338) | inicia processos, escreve PID e log | nenhuma |
 | `beheld stop` | Encerra os daemons | SIGTERM → SIGKILL fallback | nenhuma |
@@ -43,10 +43,10 @@
 
 | Flag | Efeito |
 |---|---|
-| `-v, --version` | Imprime `0.4.1` e sai com código 0. Definido em `packages/cli/src/index.ts:12`. |
+| `-v, --version` | Imprime `0.4.1` (vindo de `src/version.ts`) e sai com código 0. Definido em [packages/cli/src/index.ts:13](../../packages/cli/src/index.ts:13). |
 | `-h, --help` | Imprime a lista de comandos e sai com código 0. Funciona em qualquer nível de subcomando. |
 
-Hook silencioso de **nudge de bundle** (`maybeShowBundleNudge`) roda em `preAction` antes de qualquer comando: se o bundle local mais recente tem 5+ dias e o TTY suporta, imprime uma linha sugerindo `beheld snapshot`. Falha do nudge nunca quebra o comando (`try/catch` em `packages/cli/src/index.ts:18`).
+Hook silencioso de **nudge de bundle** (`maybeShowBundleNudge`) roda em `preAction` antes de qualquer comando: se o bundle local mais recente tem 5+ dias e o TTY suporta, imprime uma linha sugerindo `beheld snapshot`. Falha do nudge nunca quebra o comando (`try/catch` em [packages/cli/src/index.ts:19](../../packages/cli/src/index.ts:19)).
 
 ## Comandos
 
@@ -56,13 +56,13 @@ Hook silencioso de **nudge de bundle** (`maybeShowBundleNudge`) roda em `preActi
 **Efeito:** read-only OU escreve em `~/.beheld/` (na primeira vez).
 **Pré-condições:** nenhuma.
 
-**Descrição.** Quando invocado sem subcomando, decide entre rodar `bootstrap` (primeiro contato — não há chaves em `~/.beheld/keys/`) ou imprimir o help padrão do commander (instalação já existente). A função `defaultDispatch` em `packages/cli/src/index.ts:358` faz o gate via `keysExist()`.
+**Descrição.** Quando invocado sem subcomando, decide entre rodar `bootstrap` (primeiro contato — não há chaves em `~/.beheld/keys/`) ou imprimir o help padrão do commander (instalação já existente). A função `defaultDispatch` em [packages/cli/src/index.ts:358](../../packages/cli/src/index.ts:358) faz o gate via `keysExist()`.
 
 **Execução.**
 1. Verifica se há par Ed25519 em `~/.beheld/keys/`.
 2. Se houver → `program.outputHelp()`.
 3. Se não → chama `bootstrapCommand({})`.
-4. Subcomando desconhecido (ex.: `beheld bogus`) é tratado em `packages/cli/src/index.ts:382` com `error: unknown command 'bogus'` em stderr e exit 1.
+4. Subcomando desconhecido (ex.: `beheld bogus`) é tratado em [packages/cli/src/index.ts:382](../../packages/cli/src/index.ts:382) com `error: unknown command 'bogus'` em stderr e exit 1.
 
 **Resultado esperado (caminho help).** Idêntico a `beheld --help`.
 
@@ -123,7 +123,7 @@ Next steps
 
 **Exit codes.** `0` em sucesso. A função retorna o `BootstrapResult` para testes; o binário não propaga código diferente daquele do `runImport` quando `--import`.
 
-**Notas.** A bridge é cópia, não move — o `~/.devprofile/` é preservado com um marker `MIGRATED_TO_BEHELD.md` dentro. Ver `packages/cli/src/commands/bootstrap.ts:76-103`.
+**Notas.** A bridge é cópia, não move — o `~/.devprofile/` é preservado com um marker `MIGRATED_TO_BEHELD.md` dentro. Ver [packages/cli/src/commands/bootstrap.ts:76-103](../../packages/cli/src/commands/bootstrap.ts:76).
 
 ---
 
@@ -133,7 +133,7 @@ Next steps
 **Efeito:** escreve em `~/.beheld/config.json`, `~/.beheld/keys/`, registra hooks em `~/.claude/`, MCP em `~/.continue/`, instala LaunchAgent (macOS) ou systemd unit (Linux), pode subir os daemons.
 **Pré-condições:** nenhuma. Se já há `config.json` e não tem `--force`, pergunta antes.
 
-**Descrição.** Wizard interativo que conecta o Beheld aos harnesses suportados e prepara o estado local. Gera chaves Ed25519 na primeira execução (silencioso se já existirem).
+**Descrição.** Wizard interativo que conecta o Beheld aos harnesses suportados e prepara o estado local. Gera chaves Ed25519 na primeira execução (silencioso se já existirem). A `config.version` gravada vem da constante canônica em `src/version.ts`.
 
 **Flags**
 
@@ -147,7 +147,7 @@ Next steps
 2. `ensureKeysSilent()` gera par Ed25519 se não houver.
 3. Lê `~/.beheld/config.json`. Se existir e sem `--force`, pergunta `Beheld já está configurado. Reinicializar? [s/N]`. Resposta diferente de `s` → imprime `Abortado.` e retorna.
 4. Chama `runWizard()` com callbacks para: migrar registros MCP project-scoped, instalar hooks do Claude Code + MCP + slash command, instalar MCP do Continue.dev, extrair o engine PyInstaller, subir daemons (`daemonManager.start`), instalar autostart, e disparar `runImport` opcional.
-5. Persiste o resultado em `~/.beheld/config.json` com `version`, `initialized_at`, `dimensions`, `environments` e — se coletado — `author_email`.
+5. Persiste o resultado em `~/.beheld/config.json` com `version` (importada de `src/version.ts`), `initialized_at`, `dimensions`, `environments` e — se coletado — `author_email`.
 
 **Resultado esperado.** A UI exata é renderizada pelo `runWizard` em `packages/cli/src/ui/wizard.ts` (escopo R6.x), variável por idioma. As mensagens dos callbacks internos incluem:
 
@@ -169,12 +169,12 @@ Falha parcial — MCP:<bool> Engine:<bool>
 **Efeito:** read-only.
 **Pré-condições:** nenhuma.
 
-**Descrição.** Mostra cada adapter de harness registrado, sua `capture_fidelity` (`native_hook`, `editor_extension`, `inferred`, `local_log_tail`, `statusline`), o trust tier derivado (`high` / `med` / `low`), se está **detectado** neste host e o estado do tail (`ON`/`off`) quando aplicável.
+**Descrição.** Mostra cada adapter de harness registrado, sua `capture_fidelity` (`native_hook`, `editor_extension`, `inferred`, `local_log_tail`, `statusline`), o trust tier derivado (`high` / `med` / `low`), se está **detectado** neste host e o estado do tail (`ON`/`off`) quando aplicável. Cada row vem com uma linha explicativa dim logo abaixo, combinando o blurb genérico da fidelity com a particularidade do adapter (path detectado, mecanismo de hook).
 
 **Execução.**
 1. `buildHarnessRegistry()` enumera todos os adapters.
 2. `enabledTails()` retorna os tails atualmente ligados.
-3. Imprime cabeçalho + uma linha por adapter.
+3. Imprime cabeçalho + uma linha por adapter + a linha de explicação dim.
 
 **Resultado esperado.**
 
@@ -183,15 +183,29 @@ Falha parcial — MCP:<bool> Engine:<bool>
 
   name              fidelity (trust tier)        detection        tail state
   ──────────────────────────────────────────────────────────────────────────
-  <adapter-name>    <fidelity> (<tier>)          ✓ detected       tail: ON
-  <adapter-name>    <fidelity> (<tier>)          · not detected   —
+  claude-code        native_hook (high)           ✓ detected         —
+      harness chama o Beheld via hook (push, fidelidade alta) · PreToolUse/PostToolUse/Stop em ~/.claude/settings.json + slash /beheld + MCP global
+  continue-vscode    editor_extension (high)      ✓ detected         —
+      extensão do editor empurra eventos via MCP (push, fidelidade alta) · MCP server em http://localhost:7337/mcp registrado em ~/.continue/config.json
+  windsurf           native_hook (high)           ✓ detected         —
+      harness chama o Beheld via hook (push, fidelidade alta) · Cascade Hooks em ~/.codeium/windsurf/hooks.json (backup automático antes de gravar)
+  gemini-cli         native_hook (high)           ✓ detected         —
+      harness chama o Beheld via hook (push, fidelidade alta) · manual — hook spec da Gemini ainda não publicada; handler já pronto em /hook/gemini/*
+  codex-cli          native_hook (high)           ✓ detected         —
+      harness chama o Beheld via hook (push, fidelidade alta) · manual — hook spec da Codex ainda não publicada; handler já pronto em /hook/codex/*
+  cursor             local_log_tail (med)         ✓ detected         tail: off
+      daemon polleia o log local do harness (pull, fidelidade média) · tail em ~/Library/Application Support/Cursor (macOS) ou ~/.config/Cursor (Linux)
+  copilot-cli        statusline (med)             · not detected     tail: off
+      daemon lê o statusline do harness por polling (pull, fidelidade média) · polling do statusline em ~/.local/share/gh-copilot, ~/.cache/gh-copilot ou Library/Application Support/gh-copilot
+  copilot-vscode     local_log_tail (med)         ✓ detected         tail: off
+      daemon polleia o log local do harness (pull, fidelidade média) · tail em ~/Library/Application Support/Code/logs (macOS) ou ~/.config/Code/logs (Linux)
 
-  <N>/<M> detected · <K> tails enabled
+  7/8 detected · 0 tails enabled
 ```
 
 **Exit codes.** `0`.
 
-**Notas.** O comando não spawna binários nem lê conteúdo de sessão — só inspeciona paths.
+**Notas.** O comando não spawna binários nem lê conteúdo de sessão — só inspeciona paths. Quando o `description` do adapter está vazio, a linha mostra apenas o blurb genérico (sem `·` pendurado). Coberto por `tests/harness-render.test.ts`.
 
 ---
 
@@ -446,7 +460,7 @@ Resultado: ✗ Produto degradado — <N> problema(s) crítico(s), <M> aviso(s)
 
 **Exit codes.** `0` tudo verde · `1` há warnings · `2` há críticos (independente do sucesso do auto-heal).
 
-**Notas.** O auto-heal só dispara quando **todas** estas condições coincidem: listener na porta + `/health` crítico + STAT contém `R` + CPU > 50% + cursor parado mais que o threshold. Lógica pura em `isInequivocalBusyLoop` (`packages/cli/src/commands/doctor.ts:844`).
+**Notas.** O auto-heal só dispara quando **todas** estas condições coincidem: listener na porta + `/health` crítico + STAT contém `R` + CPU > 50% + cursor parado mais que o threshold. Lógica pura em `isInequivocalBusyLoop` ([packages/cli/src/commands/doctor.ts:844](../../packages/cli/src/commands/doctor.ts:844)).
 
 ---
 
@@ -1046,7 +1060,7 @@ beheld auth
 
 **Exit codes.** `0` em sucesso · `1` sem chaves, conta não encontrada, falha de rede ou de verificação.
 
-**Notas.** Não testado contra o portal nesta varredura.
+**Notas.** Cabeçalho usa `beheld auth` em dim — quebra o padrão visual `▎` de `brand()` do resto do CLI; ver "Perguntas em aberto".
 
 ---
 
@@ -1061,7 +1075,7 @@ beheld auth
 **Execução.**
 1. Header `buscando uma versão mais nova`.
 2. `GET <getApiUrl()>/version` (timeout 5s). Sem resposta → "Não foi possível verificar a versão disponível." e retorna.
-3. Se `latest === VERSION` (literal `0.3.2` no arquivo) → "já é a versão mais recente." e retorna.
+3. Se `latest === VERSION` (constante única importada de `src/version.ts`) → "já é a versão mais recente." e retorna.
 4. Pergunta `Atualizar agora? [S/n]`. Aceita só `s`.
 5. Resolve plataforma (`darwin-arm64` / `darwin-x64` / `linux-x64`).
 6. Baixa de `https://github.com/eduardovrocha/beheld/releases/download/v<latest>/beheld-<plat>` para `<binary>.new` (timeout 60s).
@@ -1074,7 +1088,7 @@ beheld auth
 ```
   ▎ beheld  buscando uma versão mais nova
 
-  Beheld <latest> disponível  (atual: 0.3.2)
+  Beheld <latest> disponível  (atual: 0.4.1)
   Atualizar agora? [S/n] s
   ✓  Baixando beheld-<plat>
   ✓  Verificando checksum
@@ -1089,12 +1103,20 @@ beheld auth
 ```
   ▎ beheld  buscando uma versão mais nova
 
-  ✓  Beheld 0.3.2 já é a versão mais recente.
+  ✓  Beheld 0.4.1 já é a versão mais recente.
+```
+
+**Resultado esperado (versão remota indisponível).**
+
+```
+  ▎ beheld  buscando uma versão mais nova
+
+  Não foi possível verificar a versão disponível.
 ```
 
 **Exit codes.** `0` em sucesso, sem atualização, ou cancelamento · `1` falha de download, checksum, ou substituição.
 
-**Notas.** Comando não executado nesta varredura (efeito colateral irreversível). A constante `VERSION` aqui (`0.3.2`) **diverge** do `VERSION` do entrypoint (`0.4.1`) — ver "Perguntas em aberto".
+**Notas.** Comando não executado em modo destrutivo nesta varredura (efeito colateral irreversível no binário). O endpoint `/api/version` no backend Rails foi adicionado em paralelo a este PR; coberto por `web/source/backend/spec/requests/version_spec.rb`. Comportamento da comparação coberto por `tests/version.test.ts`.
 
 ---
 
@@ -1278,8 +1300,8 @@ No project-scoped registrations found.
 | `BEHELD_DATA_DIR` | Reescreve a raiz dos dados (default `~/`). O diretório real é `<BEHELD_DATA_DIR>/.beheld/`. Usado por `status`, `doctor`, `snapshot`, `verify`, `share`, `delete`. |
 | `BEHELD_MCP_URL` | Reescreve a URL do MCP (default `http://127.0.0.1:7337`). Porta extraída para `doctor` / `status`. |
 | `BEHELD_ENGINE_URL` | Reescreve a URL do engine (default `http://127.0.0.1:7338`). |
-| `BEHELD_API_URL` | Override do API platform usado por `attest` e `delete --remote`. |
-| `BEHELD_ENV` | Ambiente (`dev` / `prod` / etc.) usado por `getApiBaseUrl`, `getApiUrl`, `getPortalUrl`, `getRekorUrl`. |
+| `BEHELD_API_URL` | Override do API platform usado por `attest`, `update` e `delete --remote`. |
+| `BEHELD_ENV` | Ambiente (`production` default · aliases `dev`/`local`/`development` → development). Resolve por `getApiBaseUrl`, `getApiUrl`, `getPortalUrl`, `getRekorUrl`. |
 | `BEHELD_DESKTOP_DIR` | Override para a cópia conveniente do snapshot (default `~/Desktop`). |
 | `BEHELD_NO_DESKTOP_COPY` | `=1` desliga a cópia para o Desktop em `snapshot`. |
 
@@ -1287,14 +1309,25 @@ No project-scoped registrations found.
 
 | # | Pergunta | Onde |
 |---|---|---|
-| 1 | Divergência de versão: `index.ts:5` declara `VERSION = "0.4.1"` enquanto `commands/init.ts:11` e `commands/update.ts:8` declaram `VERSION = "0.3.2"`. O `--version` exibe `0.4.1`, o `update` compara contra `0.3.2`. Intencional ou bug? | `packages/cli/src/index.ts`, `commands/init.ts`, `commands/update.ts` |
-| 2 | `beheld auth` imprime cabeçalho como `beheld auth` em dim (sem o `▎` do `brand()`), divergindo do padrão visual dos demais comandos. Intencional? | `packages/cli/src/commands/auth.ts:30` |
-| 3 | `beheld delete --local` não há *nenhum* flag inverso para pular o prompt manual (`apagar tudo`); só o caminho `--all` passa `skipConfirm` internamente. Sem CLI para uso scripted/CI. Faltando por design? | `packages/cli/src/commands/delete.ts:278` |
-| 4 | O help do `snapshot` não lista a flag `--share` na descrição de uso impressa pelo commander (lista somente flags próprias do bloco principal). Confirmado: a flag existe, mas não é a única — investigar se o output do `--help` cobre todas. | `packages/cli/src/index.ts:165` |
-| 5 | `beheld harness install` sem nomes posicionais varre todos os adapters detectados; sem comando explícito de "desinstalar" ou "desativar tail". | `packages/cli/src/commands/harness.ts` |
+| 1 | `beheld auth` imprime cabeçalho como `beheld auth` em dim (sem o `▎` do `brand()`), divergindo do padrão visual dos demais comandos. Intencional? | [packages/cli/src/commands/auth.ts:30](../../packages/cli/src/commands/auth.ts:30) |
+| 2 | `beheld delete --local` não tem flag inverso para pular o prompt manual (`apagar tudo`); só o caminho `--all` passa `skipConfirm` internamente. Sem CLI para uso scripted/CI. | [packages/cli/src/commands/delete.ts:278](../../packages/cli/src/commands/delete.ts:278) |
+| 3 | `beheld harness install` sem antônimo: existe `list` e `install`, mas não há comando explícito de "uninstall" ou "disable tail". A função `uninstall()` no adapter existe mas não é exposta no CLI. | [packages/cli/src/commands/harness.ts](../../packages/cli/src/commands/harness.ts) |
+| 4 | Phase 7 (claims) não está roteada — `docs/beheld-fase7-prompts.md` existe mas nenhum `claims.ts` aparece em `packages/cli/src/commands/`. | spec vs `packages/cli/src/index.ts` |
+| 5 | `beheld migrate-legacy` segue exposto como comando público sem prazo / aviso de deprecação documentado. | [packages/cli/src/index.ts:301](../../packages/cli/src/index.ts:301) |
+
+## Mudanças vs versão anterior do documento
+
+| Item | Status no commit `d7badd8` | Status no commit `d41f476` |
+|---|---|---|
+| `VERSION` no CLI | Duplicado em 3 arquivos (`0.3.2` vs `0.4.1`) | Fonte única em `src/version.ts`, importada por `init`/`update`/wizard |
+| `/api/version` no backend | 404 em produção | Implementado em `VersionsController`, coberto por specs |
+| `beheld harness list` | Uma linha por adapter | Duas linhas (row + explicação dim) com blurb por fidelity + description por adapter |
+| Testes do `update` flow | Nenhum | `tests/version.test.ts` cobre 6 cenários (regressão + 4 caminhos de erro + URL) |
+| Testes do `harness list` | Apenas instalador | `tests/harness-render.test.ts` cobre FIDELITY_BLURB, composição, cobertura de description |
 
 ## Changelog
 
 | Data | Mudança |
 |---|---|
+| 2026-06-08 | Re-varredura no commit `d41f476`. Atualizado output do `harness list` (duas linhas), notas de `init`/`update` (VERSION consolidado), seção do `update` (endpoint `/api/version` agora wired), perguntas em aberto reduzidas. |
 | 2026-06-08 | Versão inicial — varredura completa de `packages/cli/src/commands/` no commit `d7badd8`. |

@@ -33,3 +33,6 @@ graphify-*/
 *-historico.md
 next-session.md
 commits-raw.txt
+
+# Playwright test results (local CI artifacts)
+test-results/

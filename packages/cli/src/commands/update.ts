@@ -4,8 +4,8 @@ import { createInterface } from "node:readline";
 import { getApiUrl } from "../config/env";
 import * as daemonManager from "../daemon-manager";
 import { GREEN, RED, DIM, BOLD, RESET, brand } from "../ui/styles";
+import { VERSION } from "../version";
 
-const VERSION = "0.3.2";
 const RELEASES_BASE = "https://github.com/eduardovrocha/beheld/releases/download";
 
 function platform(): string {

@@ -7,8 +7,7 @@ import { installClaudeCodeHooks, installContinueDevMcp, installClaudeSlashComman
 import * as daemonManager from "../daemon-manager";
 import { ensureSecurePermissions } from "../daemon-manager";
 import type { BeheldConfig } from "../types";
-
-const VERSION = "0.3.2";
+import { VERSION } from "../version";
 
 function configPath(): string {
   return join(homedir(), ".beheld", "config.json");

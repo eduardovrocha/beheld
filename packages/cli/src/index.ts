@@ -1,8 +1,9 @@
 import { Command } from "commander";
 
 import { maybeShowBundleNudge } from "./lib/nudge";
+import { VERSION } from "./version";
 
-export const VERSION = "0.4.1";
+export { VERSION };
 
 const program = new Command();
 

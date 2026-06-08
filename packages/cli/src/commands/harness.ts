@@ -121,3 +121,12 @@ export async function harnessInstallCommand(opts: HarnessInstallOptions = {}): P
   console.log("");
   console.log(meta("Tip: rerun `beheld harness list` to see the updated state."));
 }
+
+/** Internal seams exposed for unit tests. Stable enough to assert against —
+ *  these are pure functions; behaviour drift here is intentional. */
+export const __test = {
+  FIDELITY_BLURB,
+  explanationFor,
+  fidelityTag,
+  rowFor,
+};

@@ -72,6 +72,7 @@ describe("installAllHarnesses — orchestration", () => {
       name: "x",
       label: "X",
       fidelity: "native_hook",
+      description: "fake adapter for tests",
       isInstalled: () => false,
       install: () => ({ changed: true, wroteFile: true, requiresManualSetup: false }),
       uninstall: () => ({ changed: false }),

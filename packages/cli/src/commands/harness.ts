@@ -18,9 +18,20 @@ import {
   buildHarnessRegistry,
   enabledTails,
   installAllHarnesses,
+  type CaptureFidelity,
   type HarnessAdapter,
 } from "../lib/harness-installer";
 import { ok, warn, arrow, meta, bold, brand, DIM, RESET } from "../ui/styles";
+
+/** Explicação genérica por fidelity. Complementada pela `description`
+ *  específica de cada adapter na linha de baixo. */
+const FIDELITY_BLURB: Record<CaptureFidelity, string> = {
+  native_hook:      "harness chama o Beheld via hook (push, fidelidade alta)",
+  editor_extension: "extensão do editor empurra eventos via MCP (push, fidelidade alta)",
+  local_log_tail:   "daemon polleia o log local do harness (pull, fidelidade média)",
+  statusline:       "daemon lê o statusline do harness por polling (pull, fidelidade média)",
+  inferred:         "sinais inferidos sem cooperação do harness (fidelidade baixa)",
+};
 
 function fidelityTag(adapter: HarnessAdapter): string {
   const tier =
@@ -39,6 +50,15 @@ function rowFor(adapter: HarnessAdapter, enabledTailSet: Set<string>): string {
   return `  ${adapter.name.padEnd(18)} ${fidelityTag(adapter).padEnd(28)} ${detectStr.padEnd(18)} ${stateStr}`;
 }
 
+/** Dim explanation line printed directly under each row.
+ *  Format: `      <fidelity blurb> · <adapter-specific description>` */
+function explanationFor(adapter: HarnessAdapter): string {
+  const generic = FIDELITY_BLURB[adapter.fidelity];
+  const specific = adapter.description.trim();
+  const body = specific.length > 0 ? `${generic} · ${specific}` : generic;
+  return `      ${DIM}${body}${RESET}`;
+}
+
 export async function harnessListCommand(): Promise<void> {
   const registry = buildHarnessRegistry();
   const tails = new Set(enabledTails());
@@ -49,6 +69,7 @@ export async function harnessListCommand(): Promise<void> {
   console.log(DIM + "  ─".repeat(38) + RESET);
   for (const adapter of registry) {
     console.log(rowFor(adapter, tails));
+    console.log(explanationFor(adapter));
   }
   console.log("");
 

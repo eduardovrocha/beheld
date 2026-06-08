@@ -83,6 +83,11 @@ export interface HarnessAdapter {
   readonly label: string;
   /** Capture fidelity per the closed enum. */
   readonly fidelity: CaptureFidelity;
+  /** One-line note shown beneath the row in `beheld harness list`. Adapter-
+   *  specific particularidade (path detectado, mecanismo de hook, etc.) —
+   *  complementa a explicação genérica derivada de `fidelity`. PT-BR, voz
+   *  testemunha do produto. */
+  readonly description: string;
   /** Filesystem-only detection. Returns true when the harness appears to be
    *  installed on this host. Never spawns binaries. */
   isInstalled(): boolean;
@@ -151,6 +156,7 @@ function makeBuiltinHooksAdapter(opts: {
   name: string;
   label: string;
   fidelity: CaptureFidelity;
+  description: string;
   detectionPath: string;
   install: () => Promise<unknown>;
   uninstall: () => Promise<unknown>;
@@ -159,6 +165,7 @@ function makeBuiltinHooksAdapter(opts: {
     name: opts.name,
     label: opts.label,
     fidelity: opts.fidelity,
+    description: opts.description,
     isInstalled: () => existsSync(opts.detectionPath),
     install: () => {
       // Existing installers are async; we synchronously await via a
@@ -189,12 +196,14 @@ function makeTailAdapter(opts: {
   name: string;
   label: string;
   fidelity: CaptureFidelity;
+  description: string;
   detectionPaths: string[];
 }): HarnessAdapter {
   return {
     name: opts.name,
     label: opts.label,
     fidelity: opts.fidelity,
+    description: opts.description,
     isInstalled: () => opts.detectionPaths.some((p) => existsSync(p)),
     install: () => {
       const changed = setTailEnabled(opts.name, true);
@@ -222,6 +231,7 @@ function makeManualAdapter(opts: {
   name: string;
   label: string;
   fidelity: CaptureFidelity;
+  description: string;
   detectionPaths: string[];
   manualNote: string;
 }): HarnessAdapter {
@@ -229,6 +239,7 @@ function makeManualAdapter(opts: {
     name: opts.name,
     label: opts.label,
     fidelity: opts.fidelity,
+    description: opts.description,
     isInstalled: () => opts.detectionPaths.some((p) => existsSync(p)),
     install: () => ({
       changed: false,
@@ -247,6 +258,7 @@ const claudeAdapter = (): HarnessAdapter =>
     name: "claude-code",
     label: "Claude Code",
     fidelity: "native_hook",
+    description: "PreToolUse/PostToolUse/Stop em ~/.claude/settings.json + slash /beheld + MCP global",
     detectionPath: join(HOME(), ".claude"),
     install: () => installClaudeCodeHooks(),
     uninstall: () => removeClaudeCodeHooks(),
@@ -257,6 +269,7 @@ const continueAdapter = (): HarnessAdapter =>
     name: "continue-vscode",
     label: "Continue.dev",
     fidelity: "editor_extension",
+    description: "MCP server em http://localhost:7337/mcp registrado em ~/.continue/config.json",
     detectionPath: join(HOME(), ".continue"),
     install: () => installContinueDevMcp(),
     uninstall: () => removeContinueDevMcp(),
@@ -266,6 +279,7 @@ const windsurfAdapter = (): HarnessAdapter => ({
   name: "windsurf",
   label: "Windsurf (Cascade Hooks)",
   fidelity: "native_hook",
+  description: "Cascade Hooks em ~/.codeium/windsurf/hooks.json (backup automático antes de gravar)",
   isInstalled: () => existsSync(join(HOME(), ".codeium", "windsurf")),
   install: () => {
     const r = installWindsurfHooks();
@@ -289,6 +303,7 @@ const geminiAdapter = (): HarnessAdapter =>
     name: "gemini-cli",
     label: "Gemini CLI",
     fidelity: "native_hook",
+    description: "manual — hook spec da Gemini ainda não publicada; handler já pronto em /hook/gemini/*",
     detectionPaths: [join(HOME(), ".gemini"), "/usr/local/bin/gemini"],
     manualNote: [
       "Gemini CLI's hook API is not yet publicly documented (2026-06-02).",
@@ -303,6 +318,7 @@ const codexAdapter = (): HarnessAdapter =>
     name: "codex-cli",
     label: "Codex CLI",
     fidelity: "native_hook",
+    description: "manual — hook spec da Codex ainda não publicada; handler já pronto em /hook/codex/*",
     detectionPaths: [join(HOME(), ".codex"), "/usr/local/bin/codex"],
     manualNote: [
       "Codex CLI's hook API is not yet publicly documented (2026-06-02).",
@@ -317,6 +333,7 @@ const cursorAdapter = (): HarnessAdapter =>
     name: "cursor",
     label: "Cursor",
     fidelity: "local_log_tail",
+    description: "tail em ~/Library/Application Support/Cursor (macOS) ou ~/.config/Cursor (Linux)",
     detectionPaths: [
       join(HOME(), "Library", "Application Support", "Cursor"),
       join(HOME(), ".config", "Cursor"),
@@ -328,6 +345,7 @@ const copilotCliAdapter = (): HarnessAdapter =>
     name: "copilot-cli",
     label: "Copilot CLI",
     fidelity: "statusline",
+    description: "polling do statusline em ~/.local/share/gh-copilot, ~/.cache/gh-copilot ou Library/Application Support/gh-copilot",
     detectionPaths: [
       join(HOME(), "Library", "Application Support", "gh-copilot"),
       join(HOME(), ".local", "share", "gh-copilot"),
@@ -340,6 +358,7 @@ const copilotVscodeAdapter = (): HarnessAdapter =>
     name: "copilot-vscode",
     label: "Copilot VS Code",
     fidelity: "local_log_tail",
+    description: "tail em ~/Library/Application Support/Code/logs (macOS) ou ~/.config/Code/logs (Linux)",
     detectionPaths: [
       join(HOME(), "Library", "Application Support", "Code", "logs"),
       join(HOME(), ".config", "Code", "logs"),

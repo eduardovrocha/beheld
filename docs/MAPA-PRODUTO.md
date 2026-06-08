@@ -22,6 +22,7 @@
 | [beheld-resiliencia-engine-futuro.md](beheld-resiliencia-engine-futuro.md) | direções de resiliência |
 | [r3-windsurf-spike.md](r3-windsurf-spike.md) | spike Windsurf |
 | **[analise-ambientes.md](analise-ambientes.md)** | **🆕 inventário de valores ambiente-dependentes (CLI + web) — base da Etapa B de separação de ambientes** |
+| [produto/docs/cli-reference.md](../produto/docs/cli-reference.md) | referência completa do CLI levantada do código-fonte (commit d7badd8) — assinatura, efeitos, output e exit codes por comando |
 
 ## Releases
 
@@ -77,5 +78,6 @@ Política em uma linha: **segredos vivem em `/etc/beheld/*.env` em prod e em `.e
 
 ## Changelog do mapa
 
+- **2026-06-08** — adicionada `produto/docs/cli-reference.md` (referência do CLI varrida do código-fonte no commit `d7badd8`).
 - **2026-06-06** — criação inicial pela Etapa A da análise de ambientes. Adicionado link para `analise-ambientes.md` e seção transversal "Configuração e ambientes".
 - **2026-06-06** — Etapa B aplicada. Seção "Configuração e ambientes" atualizada para refletir o estado final pós-implementação (módulos centrais, `BEHELD_ENV`, Vite envs, Caddyfile parametrizado).

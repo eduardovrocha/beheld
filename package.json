@@ -8,5 +8,8 @@
     "build": "sh scripts/build.sh",
     "build:cli": "bun build packages/cli/src/index.ts --compile --outfile dist/beheld",
     "sync:platform-keys": "bun run scripts/sync-platform-keys.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
   }
 }

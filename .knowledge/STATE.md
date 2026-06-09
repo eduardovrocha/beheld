@@ -27,6 +27,8 @@ Estados: **implementado** | **parcial** | **esqueleto** | **placeholder**.
 
 - **Divergência de versão**: cli 0.4.1 / mcp-server 0.4.0 / engine pyproject 0.4.1 vs `api.py`
   VERSION "0.1.1". Sem fonte única de verdade.
-- **Working tree parcialmente desmontado**: vários arquivos rastreados (`README.md`, `package.json`,
-  `bun.lock`, `docs/`, `produto/`, `.github/`, `.gitignore`) estão **deletados do disco** vs HEAD;
-  novos diretórios `app/` e `data/` aparecem como untracked. Ver `OPEN_QUESTIONS.md` #3.
+- **Refundação em andamento** (intencional): vários arquivos rastreados (`README.md`, `package.json`,
+  `bun.lock`, `docs/`, `produto/`, `.github/`, `.gitignore`) foram **deletados do disco** de propósito
+  vs HEAD; `app/` e `data/` são diretórios novos da estrutura sendo construída. As deleções ainda não
+  foram commitadas (serão pelo dono da refundação). Ver `OPEN_QUESTIONS.md` #3. **Consequência**: a
+  análise abaixo e o `CLAUDE.md` versionado refletem a estrutura **anterior** à refundação.

@@ -45,4 +45,6 @@ O CLI publica o bundle assinado via `POST /api/v1/bundles` no backend Rails (rep
 format do bundle é travado em 3 runtimes** (engine Python e CLI Bun aqui; browser SPA no `web`).
 Mudá-lo exige bump de versão nos três.
 
-⚠️ O working tree deste repo está num estado parcialmente desmontado — ver `OPEN_QUESTIONS.md` #3.
+⚠️ **Refundação em andamento**: o working tree está parcialmente desmontado **de propósito** (vários
+arquivos da estrutura antiga foram removidos do disco). Esta análise descreve a estrutura **anterior**
+à refundação e ficará desatualizada conforme a nova for construída — ver `OPEN_QUESTIONS.md` #3.

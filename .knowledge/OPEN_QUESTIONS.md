@@ -10,20 +10,23 @@ atualização esquecida. Definir como as versões dos 3 runtimes do bundle se re
 copiado por `scripts/build.sh`. **Decisão**: manter versionado (binário grande no git) ou buildar
 sempre no CI? Hoje o build é local e pula silenciosamente se `pyinstaller` não estiver instalado.
 
-## 3. (ALTO) Working tree parcialmente desmontado vs HEAD
-O `git status` mostra ~30 arquivos rastreados **deletados do disco** (`README.md`, `package.json`,
-`bun.lock`, `.gitignore`, `CHANGELOG.md`, `docs/`, `produto/`, `.github/workflows/`,
-`beheld-refundacao-status.md`) e diretórios novos `app/`/`data/` como untracked. Como o `.gitignore`
-sumiu do disco, artefatos (`node_modules/`, `.DS_Store`, `beheld-engine`) aparecem como untracked.
-- `CLAUDE.md` foi **restaurado** de HEAD em 2026-06-09 (ver `CHANGELOG.md`).
-**Decisão**: essa remoção foi intencional (refundação em andamento) ou acidental? Restaurar os
-demais arquivos de HEAD (`git checkout HEAD -- .`) ou commitar a nova estrutura? **Não commitar
-às cegas** — `git add -A` apagaria do repo todo o `docs/` e os meta-arquivos.
+## 3. ~~(ALTO) Working tree parcialmente desmontado vs HEAD~~ — ✅ RESOLVIDO (2026-06-09)
+**Resolvido pelo usuário: é uma REFUNDAÇÃO intencional em andamento, não acidente.** Os ~30
+arquivos rastreados deletados do disco (`README.md`, `package.json`, `bun.lock`, `.gitignore`,
+`CHANGELOG.md`, `docs/`, `produto/`, `.github/workflows/`, `beheld-refundacao-status.md`) foram
+removidos de propósito; `app/` e `data/` são diretórios novos da estrutura sendo construída.
+- **NÃO restaurar** de HEAD — a remoção é desejada.
+- A nova estrutura será commitada pelo dono da refundação quando pronta. **Não commitar às cegas**
+  (`git add -A` registraria as deleções antes da hora).
+- ⚠️ O `CLAUDE.md` versionado (restaurado de HEAD) ainda descreve a estrutura **antiga**
+  (`packages/` + `.github/` + `package.json` workspace Bun) — ficará desatualizado até a refundação
+  concluir e ser re-documentada.
 
-## 4. (MÉDIO) CI do daemon
-Há `.github/workflows/{ci,release}.yml` em HEAD (deletados do disco). **Decisão**: confirmar que o
-CI ainda roda `bun test` + pytest e build/release; restaurar os workflows se a remoção foi acidental.
+## 4. (MÉDIO) CI do daemon — sob a refundação (#3)
+`.github/workflows/{ci,release}.yml` existem em HEAD mas foram removidos do disco como parte da
+refundação. **Decisão**: a nova estrutura vai re-adicionar CI (`bun test` + pytest, build/release)?
+Até lá, o repo público (HEAD) ainda carrega os workflows antigos.
 
-## 5. (BAIXO) `app/` e `data/` na raiz do repo
+## 5. (BAIXO) `app/` e `data/` na raiz do repo (parte da refundação — #3)
 `app/` está vazio (só `.DS_Store`); `data/` tem `state_store.db` + `stream_store/` (artefatos de
-runtime do engine). **Decisão**: `app/` é resíduo a remover? `data/` deveria ser gitignored?
+runtime do engine). **Decisão**: na nova estrutura, `data/` deveria ser gitignored (são dados de runtime)?

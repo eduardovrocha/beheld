@@ -25,10 +25,17 @@ Estados: **implementado** | **parcial** | **esqueleto** | **placeholder**.
 
 ## Dívida estrutural
 
-- **Divergência de versão**: cli 0.4.1 / mcp-server 0.4.0 / engine pyproject 0.4.1 vs `api.py`
-  VERSION "0.1.1". Sem fonte única de verdade.
-- **Refundação em andamento** (intencional): vários arquivos rastreados (`README.md`, `package.json`,
-  `bun.lock`, `docs/`, `produto/`, `.github/`, `.gitignore`) foram **deletados do disco** de propósito
-  vs HEAD; `app/` e `data/` são diretórios novos da estrutura sendo construída. As deleções ainda não
-  foram commitadas (serão pelo dono da refundação). Ver `OPEN_QUESTIONS.md` #3. **Consequência**: a
-  análise abaixo e o `CLAUDE.md` versionado refletem a estrutura **anterior** à refundação.
+- **Divergência de versão (5 valores)**: root `package.json` **0.3.2** / cli **0.4.1** / mcp-server
+  **0.4.0** / engine pyproject **0.4.1** vs `api.py` VERSION **"0.1.1"**; wire do bundle **"7"**.
+  Sem fonte única de verdade — `api.py` VERSION "0.1.1" parece o mais defasado.
+- **Refundação R1 em andamento** (intencional, working tree vivo — muda entre sessões):
+  - **Mantido/reescrito no disco**: `README.md` (manifesto R1), `package.json` (workspace Bun,
+    v0.3.2), `packages/{cli,engine,mcp-server}`, `scripts/`, `.gitignore`, `CLAUDE.md`.
+  - **Removido do disco de propósito** (25 deleções ainda não-commitadas vs HEAD): `docs/` (19 specs
+    internos), `produto/`, `.github/workflows/{ci,release}.yml`, `CHANGELOG.md`,
+    `beheld-refundacao-status.md`. Ver `OPEN_QUESTIONS.md` #3/#4.
+  - **Cruft novo**: `app/views/{contacts,directory,profiles,contact_mailer}` — pastas **vazias,
+    não-versionadas** (nomes batem com views do *web backend* → provável resíduo). `data/` tem
+    artefatos de runtime do engine.
+  - **Consequência**: as subdivisões abaixo (cli/engine/mcp-server) seguem válidas estruturalmente,
+    mas o `CLAUDE.md` versionado ainda tem linguagem de fases antiga; o `README.md` é a fonte R1 atual.

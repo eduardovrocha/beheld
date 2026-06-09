@@ -2,9 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ R1 refoundation in progress (2026-06).** The authoritative, current design doc is the root
+> **`README.md`** (R1 manifesto). Structured analysis is in **`.knowledge/`**. The working tree is
+> intentionally mid-refoundation — do NOT restore deleted files or `git add -A` (see
+> `.knowledge/OPEN_QUESTIONS.md` #3). Some phase-era language below predates R1.
+
 ## What Beheld Is
 
-A privacy-first developer profiling system that silently captures usage metadata from Claude Code and Continue.dev to generate 4 developer scores — without ever storing conversation content, file contents, or secrets. Distributed as a single standalone binary; no Node.js, Python, or npm required on the host.
+A privacy-first developer profiling system. **R1 model: git history is the backbone (core / L1)** —
+a profile forms from day one via `beheld import`, before any harness — **enriched** by usage metadata
+from coding harnesses (Claude Code, Continue.dev, …; core/L2) with a declared `capture_fidelity` per
+source. Generates 4 developer scores without ever storing conversation content, file contents, or
+secrets. Distributed as a single standalone binary; no Node.js, Python, or npm required on the host.
+The signed bundle wire format is **`BUNDLE_VERSION = "7"`** (`core`/`enrichment` keys) — twins in
+`packages/engine/src/models.py` + `packages/cli/src/bundle/types.ts`, plus the browser in the `web` repo.
 
 ## Monorepo Structure
 

@@ -1,6 +1,7 @@
 # daemon — Visão Geral
 
-> Repo `beheld`. Estado real derivado do código em 2026-06-09.
+> Repo `beheld`. Estado real derivado do código em 2026-06-09 (durante a **refundação R1** — ver abaixo).
+> O `README.md` na raiz é o manifesto R1 e a fonte de design mais atual; esta análise verifica contra o código.
 
 ## O que é
 
@@ -10,6 +11,18 @@ empacota tudo num bundle assinado com Ed25519 (`.beheld`/`.dpbundle`). Tudo roda
 **nada sai sem publicação explícita** (`scripts/install.sh`, `packages/cli/src/ui/wizard.ts:68`).
 
 A publicação e os retratos públicos ficam no repo irmão **`web`**.
+
+## Modelo R1 (refundação em andamento) — duas camadas explícitas
+
+- **Core (L1)** — do **git history** (via `beheld import`): a espinha dorsal. Um perfil começa a se
+  formar no dia 1, antes de qualquer harness, importando os repos que o dev já tem. Sinais:
+  ecossistemas (presença booleana, nunca conteúdo), contagem de commits, distribuição de extensões,
+  test-to-source ratio, janela de atividade.
+- **Enrichment (L2)** — dos **harnesses** (via daemon): aditivo, com `capture_fidelity` declarada por
+  fonte (`native_hook` / `editor_extension` / `local_log_tail` / `statusline` / `inferred`). O bundle
+  serializa um entry por harness — transparência de qual sinal veio de onde e em que fidelidade.
+- Dimensões ausentes de enrichment viram `null` no bundle (não zeros falsos). Wire **v7** com chaves
+  `core`/`enrichment` — ver `DOMAIN.md`.
 
 ## Topologia
 

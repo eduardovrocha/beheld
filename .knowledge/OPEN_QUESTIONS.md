@@ -1,9 +1,10 @@
 # Questões Abertas — daemon (decisão humana)
 
-## 1. (ALTO) Versionamento sem fonte única de verdade
-cli 0.4.1 / mcp-server 0.4.0 / engine pyproject 0.4.1 mas `packages/engine/src/api.py` VERSION
-"0.1.1". **Decisão**: qual a versão "real"? A divergência engine 0.4.1 vs 0.1.1 parece bug de
-atualização esquecida. Definir como as versões dos 3 runtimes do bundle se relacionam.
+## 1. (ALTO) Versionamento sem fonte única de verdade — 5 valores
+root `package.json` **0.3.2** / cli **0.4.1** / mcp-server **0.4.0** / engine pyproject **0.4.1** vs
+`packages/engine/src/api.py` VERSION **"0.1.1"**; wire do bundle **"7"** (independente, ok).
+**Decisão**: qual a versão "real" do produto? `api.py` VERSION "0.1.1" parece o mais defasado (bug de
+atualização). Definir uma fonte única e como ela se relaciona com o `BUNDLE_VERSION` do wire.
 
 ## 2. (ALTO) `packages/cli/assets/beheld-engine` — binário versionado no CLI
 É o engine PyInstaller buildado, whitelisted no `.gitignore` (`!packages/cli/assets/beheld-engine`),
@@ -28,5 +29,11 @@ refundação. **Decisão**: a nova estrutura vai re-adicionar CI (`bun test` + p
 Até lá, o repo público (HEAD) ainda carrega os workflows antigos.
 
 ## 5. (BAIXO) `app/` e `data/` na raiz do repo (parte da refundação — #3)
-`app/` está vazio (só `.DS_Store`); `data/` tem `state_store.db` + `stream_store/` (artefatos de
-runtime do engine). **Decisão**: na nova estrutura, `data/` deveria ser gitignored (são dados de runtime)?
+`app/` só tem `.DS_Store` + subpastas **vazias** `views/{contacts,directory,profiles,contact_mailer}`
+(ver #6); `data/` tem `state_store.db` + `stream_store/` (artefatos de runtime do engine).
+**Decisão**: na nova estrutura, `data/` deveria ser gitignored (são dados de runtime)?
+
+## 6. (BAIXO) Cruft `app/views/*` — provável resíduo do repo `web`
+`app/views/{contacts,directory,profiles,contact_mailer}` são pastas **vazias e não-versionadas**. Os
+nomes são idênticos a controllers/views do **web backend** (Rails) — o daemon é Bun/TS/Python e não
+tem camada de views. **Decisão**: é resíduo de uma cópia/operação errada? Se sim, remover (`rmdir`).

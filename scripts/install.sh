@@ -25,6 +25,20 @@ case "$OS" in
     ;;
 esac
 
+if [ "$OS" = "darwin" ] && [ "$ARCH" = "x64" ]; then
+  cat >&2 <<'EOF'
+Beheld for macOS Intel (x86_64) is not yet available.
+
+Beheld currently ships for:
+  - Linux x86_64 and aarch64
+  - macOS Apple Silicon (arm64 — M1/M2/M3/M4)
+
+If you have an Apple Silicon Mac, please run this installer from there.
+Track Intel macOS support: https://github.com/beheldhq/cli/issues
+EOF
+  exit 1
+fi
+
 BINARY_NAME="${BINARY}-${OS}-${ARCH}"
 
 echo "Fetching latest release..."

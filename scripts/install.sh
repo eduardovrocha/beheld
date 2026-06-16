@@ -3,7 +3,7 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="beheld"
-REPO="eduardovrocha/beheld"
+REPO="beheldhq/cli"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -48,7 +48,15 @@ VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
   | cut -d'"' -f4)"
 
 if [ -z "$VERSION" ]; then
-  echo "Failed to fetch latest version. Check your internet connection."
+  cat >&2 <<EOF
+No Beheld CLI release is published at https://github.com/${REPO} yet.
+
+This usually means the migration to ${REPO} is in progress. If you're
+seeing this for more than a day, please open an issue:
+  https://github.com/${REPO}/issues
+
+(If you have no internet access, that could also explain this error.)
+EOF
   exit 1
 fi
 
